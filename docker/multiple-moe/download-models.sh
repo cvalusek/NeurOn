@@ -26,10 +26,12 @@ download unsloth/gemma-4-26B-A4B-it-qat-GGUF \
   --include "*mtp-gemma*"
 
 download unsloth/gemma-4-E2B-it-qat-GGUF \
-  --include "*UD-Q4_K_XL*"
+  --include "*UD-Q4_K_XL*" \
+  --include "*mtp-gemma*"
 
 download unsloth/gemma-4-E4B-it-qat-GGUF \
-  --include "*UD-Q4_K_XL*"
+  --include "*UD-Q4_K_XL*" \
+  --include "*mtp-gemma*"
 
 download unsloth/Qwen3.6-35B-A3B-MTP-GGUF \
   --include "*UD-Q4_K_XL*"

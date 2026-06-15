@@ -81,15 +81,39 @@ model (`mtp-gemma-4-26B-A4B-it.gguf`) loads without an
 
 ## DRY sampling
 
-`dry-multiplier = 0.8`, `dry-base = 1.75`, `dry-allowed-length = 2` are set
-globally (in every preset's `[*]`) as a mitigation for the Gemma 4
-tool-calling loop issue above. Caveats: DRY prevents loops from *forming*,
-it can't break one already in progress (so a max-tokens cap is still the
-real backstop for worst-case cost). Default sequence breakers (`\n`, `:`,
-`"`, `*`) are common in JSON tool-call syntax and may reduce DRY's
-effectiveness for that specific case — if loops persist on gemma tool calls
-despite DRY, consider `dry-sequence-breaker = none` (or dropping `:`/`"`
-from the breaker set) for gemma specifically.
+`dry-multiplier = 0.8`, `dry-base = 1.75`, `dry-allowed-length = 24` are set
+globally (in every preset's `[*]`) as a mitigation for repetition loops,
+particularly Gemma 4's tool-calling loop issue (see above). `allowed_length`
+was deliberately raised from DRY's "chat" default of `2` to `24` — at `2`,
+DRY penalizes *any* 3+ token verbatim repeat, which corrupted agentic output
+(an agent re-typing the same file path or identifier across tool calls would
+get penalized into producing a near-neighbor token instead — e.g. `repos`
+becoming `Repositories`). At `24`, short identifiers/paths repeat freely,
+while a genuinely looping sequence still gets exponentially penalized after
+~24 tokens (`0.8 × 1.75^(n-24)`), which is a tight enough bound in practice.
+Caveats: DRY prevents loops from *forming*, it can't break one already in
+progress (so a max-tokens cap is still the real backstop for worst-case
+cost). Default sequence breakers (`\n`, `:`, `"`, `*`) are common in JSON
+tool-call syntax and may reduce DRY's effectiveness for that specific case —
+if loops persist on gemma tool calls despite DRY, consider
+`dry-sequence-breaker = none` (or dropping `:`/`"` from the breaker set) for
+gemma specifically.
+
+## Qwen sampling: `presence-penalty`
+
+Qwen3.6's official recommendation is `presence_penalty = 1.5` (alongside
+`temp=1.0, top_p=0.95, top_k=20`) to avoid loops in long reasoning — but
+presence penalty applies to *every* token seen so far in the context,
+regardless of whether repeating it is a loop or legitimate verbatim reuse
+(e.g. an agent re-typing the same file path). This is a documented tension
+in the Qwen community itself, not unique to our setup. Since the
+`dry-allowed-length = 24` change above covers the same "long reasoning loop"
+failure mode more precisely (only penalizing actual repeated *sequences*,
+not all repeated tokens), Qwen's `presence-penalty` was set to `0.0` across
+all presets, relying on DRY instead. If long-reasoning loops reappear on
+Qwen without presence_penalty, that'd be the first thing to revisit —
+either raise `presence-penalty` back up (accepting the agentic-output risk)
+or tune DRY further before doing so.
 
 ## `n-cpu-moe` tuning status
 
@@ -120,12 +144,41 @@ from the breaker set) for gemma specifically.
 - Gemma's MTP draft (`mtp-gemma-4-26B-A4B-it.gguf`) downloads flat into the
   repo's root directory, not under an `MTP/` subfolder.
 - **gemma-4-E2B/E4B** (added for speed — same family, 2B/4B "effective
-  params", 128K max context, no MoE/no MTP/no separate draft): filenames
+  params", 128K max context): filenames
   `gemma-4-E2B-it-qat-UD-Q4_K_XL.gguf` / `gemma-4-E4B-it-qat-UD-Q4_K_XL.gguf`
   are assumed by analogy with the 26B-A4B naming pattern, **not yet verified
   on disk**. The `--include "*UD-Q4_K_XL*"` glob should match regardless of
   minor naming differences, but the exact `model =` path in the presets
   could be wrong until a real download confirms it.
+
+  **MTP for these two is the highest-risk, least-verified part of this
+  config.** Without MTP, E2B/E4B were observed to be significantly
+  out-throughput by the 26B-A4B (which has MTP) despite being much larger —
+  so MTP isn't optional polish here, it's the point of including these
+  models at all. The current config assumes MTP is embedded in the main
+  `UD-Q4_K_XL.gguf` (same pattern as Qwen3.6, no separate `model-draft`),
+  via `spec-type = draft-mtp` + `spec-draft-n-max = 4` +
+  `flash-attn = off` (overriding `[*]`'s `on`, per unsloth's documented E4B
+  MTP command).
+
+  Unsloth's Gemma 4 qat-GGUF repos are in *very* active flux around MTP
+  right now — files and folder structure (root-level `mtp-gemma-4-*-it.gguf`
+  vs an `MTP/` subfolder vs embedded) have been renamed/reorganized multiple
+  times within days, confirmed by checking 26B-A4B's repo directly (its
+  root-level 252MB `mtp-gemma-4-26B-A4B-it.gguf` drafter was added within
+  the last hour at the time of checking). E2B/E4B may or may not have
+  reached the same state yet.
+
+  **If `spec-type = draft-mtp` causes E2B/E4B to fail loading** (likely if
+  the GGUF has no embedded MTP tensors), the fix is *not* to just remove
+  `spec-type` — per the above, that makes these models not worth running.
+  Instead: check `unsloth/gemma-4-E{2,4}B-it-qat-GGUF` directly for whatever
+  the current MTP drafter situation is (root-level `mtp-gemma-4-E{2,4}B-it.gguf`,
+  an `MTP/` subfolder with a differently-named/precision file, or genuinely
+  not yet available for these sizes), and either point `model-draft` at the
+  correct file, download from the `MTP/` subfolder, or — if MTP truly isn't
+  available yet for E2B/E4B — hold off on these two entries entirely until
+  it lands, rather than shipping them in a state that's "not worth running."
 
 ## Testing
 
