@@ -167,7 +167,8 @@ export function startPage(user: AuthenticatedUser, targets: Array<{ target: Capa
     const timeLeft = (iso) => {
       const ms = new Date(iso).getTime() - Date.now();
       if (ms <= 0) return 'expired';
-      const minutes = Math.ceil(ms / 60000);
+      if (ms < 60000) return '<1m left';
+      const minutes = Math.floor(ms / 60000);
       if (minutes < 60) return minutes + 'm left';
       const hours = Math.floor(minutes / 60);
       const rest = minutes % 60;
@@ -259,7 +260,8 @@ export function reservationPage(user: AuthenticatedUser, reservation: Reservatio
     const timeLeft = (iso) => {
       const ms = new Date(iso).getTime() - Date.now();
       if (ms <= 0) return 'expired';
-      const minutes = Math.ceil(ms / 60000);
+      if (ms < 60000) return '<1m left';
+      const minutes = Math.floor(ms / 60000);
       if (minutes < 60) return minutes + 'm left';
       const hours = Math.floor(minutes / 60);
       const rest = minutes % 60;
@@ -290,7 +292,8 @@ export function adminPage(user: AuthenticatedUser, config: AppConfig): string {
     const timeLeft = (iso) => {
       const ms = new Date(iso).getTime() - Date.now();
       if (ms <= 0) return 'expired';
-      const minutes = Math.ceil(ms / 60000);
+      if (ms < 60000) return '<1m left';
+      const minutes = Math.floor(ms / 60000);
       if (minutes < 60) return minutes + 'm left';
       const hours = Math.floor(minutes / 60);
       const rest = minutes % 60;
