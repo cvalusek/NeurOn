@@ -19,7 +19,7 @@ export class TrafficPoller {
       for (const event of events) {
         const matches = this.resolveTraffic(event.modelId);
         for (const match of matches) {
-          await this.keepalive.recordTraffic(match.target, [match.modelId], now);
+          await this.keepalive.recordTraffic(match.target, [match.modelId], event.seenAt, now);
         }
       }
     } finally {

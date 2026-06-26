@@ -44,6 +44,7 @@ describe("TrafficPoller", () => {
     expect(reservations[0].username).toBe("traffic");
     expect(reservations[0].synthetic).toBe(true);
     expect(reservations[0].modelIds).toEqual(["qwen-3.6-35b-a3b"]);
+    expect(reservations[0].expiresAt).toEqual(new Date("2026-06-24T20:05:00.000Z"));
   });
 
   it("ignores traffic for unknown LiteLLM aliases", async () => {
@@ -79,5 +80,21 @@ describe("TrafficPoller", () => {
     expect(reservations).toHaveLength(1);
     expect(reservations[0].targetIds).toEqual([target.id]);
     expect(reservations[0].modelIds).toEqual(["prefer/gemma-4b-e2b"]);
+  });
+
+  it("does not renew keepalive from stale LiteLLM traffic", async () => {
+    const repository = new InMemoryReservationRepository();
+    const statuses = new InMemoryTargetStatusRepository();
+    statuses.set({ targetId: target.id, desired: "on", observed: "healthy", message: "Ready" });
+    const source: TrafficSource = {
+      async pollRecentTraffic() {
+        return [{ modelId: "qwen-3.6-35b-a3b", seenAt: new Date("2026-06-24T20:00:00.000Z") }];
+      }
+    };
+
+    const poller = new TrafficPoller(source, new ModelCatalog(models, [target]), new TrafficKeepaliveService(repository, statuses));
+    await poller.poll(new Date("2026-06-24T20:06:00.000Z"));
+
+    expect(await repository.list()).toHaveLength(0);
   });
 });

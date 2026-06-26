@@ -158,8 +158,10 @@ describe("traffic keepalive", () => {
     const { repository, statuses } = harness();
     statuses.set({ targetId: target.id, desired: "on", observed: "healthy", message: "Ready" });
     const service = new TrafficKeepaliveService(repository, statuses);
-    expect(await service.recordTraffic(target, ["qwen"], new Date())).toBe(true);
-    expect((await repository.list())[0].username).toBe("traffic");
+    expect(await service.recordTraffic(target, ["qwen"], new Date("2026-06-24T20:00:00.000Z"), new Date("2026-06-24T20:01:00.000Z"))).toBe(true);
+    const reservation = (await repository.list())[0];
+    expect(reservation.username).toBe("traffic");
+    expect(reservation.expiresAt).toEqual(new Date("2026-06-24T20:05:00.000Z"));
   });
 
   it("does not resurrect failed target by itself", async () => {
