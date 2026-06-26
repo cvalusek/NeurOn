@@ -17,10 +17,9 @@ export class TrafficPoller {
     try {
       const events = await this.source.pollRecentTraffic(now);
       for (const event of events) {
-        const model = this.catalog.getModel(event.modelId);
-        if (!model) continue;
-        for (const target of this.catalog.targetsForModels([event.modelId])) {
-          await this.keepalive.recordTraffic(target, [model.id], now);
+        const matches = this.resolveTraffic(event.modelId);
+        for (const match of matches) {
+          await this.keepalive.recordTraffic(match.target, [match.modelId], now);
         }
       }
     } finally {
@@ -31,5 +30,22 @@ export class TrafficPoller {
   start(intervalSeconds: number): NodeJS.Timeout {
     void this.poll().catch(() => undefined);
     return setInterval(() => void this.poll().catch(() => undefined), intervalSeconds * 1000);
+  }
+
+  private resolveTraffic(modelId: string): Array<{ target: ReturnType<ModelCatalog["listTargets"]>[number]; modelId: string }> {
+    const model = this.catalog.getModel(modelId);
+    if (model) {
+      return this.catalog.targetsForModels([modelId]).map((target) => ({ target, modelId: model.id }));
+    }
+
+    const matches: Array<{ target: ReturnType<ModelCatalog["listTargets"]>[number]; modelId: string }> = [];
+    for (const target of this.catalog.listTargets()) {
+      const prefix = target.trafficModelPrefixes?.find((candidate) => modelId.startsWith(candidate));
+      if (!prefix) continue;
+      const unprefixedModelId = modelId.slice(prefix.length);
+      const unprefixedModel = this.catalog.getModel(unprefixedModelId);
+      matches.push({ target, modelId: unprefixedModel?.id ?? modelId });
+    }
+    return matches;
   }
 }

@@ -12,7 +12,8 @@ const target: CapacityTarget = {
   displayName: "Local Runtime",
   provider: "docker-compose",
   modelIds: ["qwen-3.6-35b-a3b"],
-  healthCheckUrl: "http://example.test/health"
+  healthCheckUrl: "http://example.test/health",
+  trafficModelPrefixes: ["prefer/"]
 };
 
 const models: ModelDefinition[] = [
@@ -59,5 +60,24 @@ describe("TrafficPoller", () => {
     await poller.poll();
 
     expect(await repository.list()).toHaveLength(0);
+  });
+
+  it("keeps a target warm when LiteLLM logs a configured model prefix", async () => {
+    const repository = new InMemoryReservationRepository();
+    const statuses = new InMemoryTargetStatusRepository();
+    statuses.set({ targetId: target.id, desired: "on", observed: "healthy", message: "Ready" });
+    const source: TrafficSource = {
+      async pollRecentTraffic(now = new Date()) {
+        return [{ modelId: "prefer/gemma-4b-e2b", seenAt: now }];
+      }
+    };
+
+    const poller = new TrafficPoller(source, new ModelCatalog(models, [target]), new TrafficKeepaliveService(repository, statuses));
+    await poller.poll(new Date("2026-06-24T20:00:00.000Z"));
+
+    const reservations = await repository.list();
+    expect(reservations).toHaveLength(1);
+    expect(reservations[0].targetIds).toEqual([target.id]);
+    expect(reservations[0].modelIds).toEqual(["prefer/gemma-4b-e2b"]);
   });
 });

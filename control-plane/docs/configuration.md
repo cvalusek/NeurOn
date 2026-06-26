@@ -126,12 +126,18 @@ from `/v1/models`:
 ```env
 CAPACITY_TARGET_LOCAL_PROVIDER=docker
 CAPACITY_TARGET_LOCAL_DOCKER_CONTAINER_NAME=prefer
+CAPACITY_TARGET_LOCAL_TRAFFIC_MODEL_PREFIXES=prefer/
 ```
 
 Set `DOCKER_IMAGE` and optional Docker run fields only when NeurOn should
 install a missing container. If the container already exists, NeurOn can start,
 stop, inspect, and discover models from it with just the container name and a
 runtime URL such as `HEALTH_CHECK_URL`.
+
+Set `TRAFFIC_MODEL_PREFIXES` when LiteLLM logs model names with a route prefix,
+for example `prefer/gemma-4b-e2b`. Traffic whose model starts with one of those
+prefixes keeps the matching target warm even if runtime model discovery has not
+seen that exact LiteLLM-facing name.
 
 Use `docker-compose` provider targets when the runtime is still owned by a
 Compose project:

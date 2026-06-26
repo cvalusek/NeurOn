@@ -21,8 +21,8 @@ export class LiteLlmSpendLogsTrafficSource implements TrafficSource {
     const end = now;
     const start = new Date(now.getTime() - this.lookbackSeconds * 1000);
     const url = new URL("/spend/logs/v2", this.apiBaseUrl);
-    url.searchParams.set("start_date", isoWithoutMilliseconds(start));
-    url.searchParams.set("end_date", isoWithoutMilliseconds(end));
+    url.searchParams.set("start_date", dateOnly(start));
+    url.searchParams.set("end_date", dateOnly(end));
     url.searchParams.set("page", "1");
     url.searchParams.set("page_size", "100");
     url.searchParams.set("sort_by", "endTime");
@@ -57,6 +57,6 @@ function parseDate(value: string | null | undefined): Date | undefined {
   return Number.isNaN(date.getTime()) ? undefined : date;
 }
 
-function isoWithoutMilliseconds(date: Date): string {
-  return date.toISOString().replace(/\.\d{3}Z$/, "Z");
+function dateOnly(date: Date): string {
+  return date.toISOString().slice(0, 10);
 }

@@ -29,6 +29,7 @@ const targetSchema = z.object({
       bootstrapTimeoutSeconds: z.number().int().positive().optional()
     })
     .optional(),
+  trafficModelPrefixes: z.array(z.string()).optional(),
   modelsMax: z.number().int().positive().optional(),
   aws: z
     .object({
@@ -202,6 +203,7 @@ function loadTargetsFromEnv(): unknown[] {
         bootstrapOnStartup: boolEnv(`${prefix}_MODEL_DISCOVERY_BOOTSTRAP_ON_STARTUP`),
         bootstrapTimeoutSeconds: intOptionalEnv(`${prefix}_MODEL_DISCOVERY_BOOTSTRAP_TIMEOUT_SECONDS`)
       }),
+      trafficModelPrefixes: listEnv(`${prefix}_TRAFFIC_MODEL_PREFIXES`),
       modelsMax: intOptionalEnv(`${prefix}_MODELS_MAX`),
       aws: provider === "aws-ecs" ? loadAwsTargetFromEnv(prefix) : undefined,
       docker: provider === "docker" ? loadDockerContainerTargetFromEnv(prefix) : undefined,

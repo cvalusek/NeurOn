@@ -3,6 +3,7 @@
     "id": "prefer-local",
     "displayName": "PreFer Local",
     "provider": "docker",
+    "trafficModelPrefixes": ["prefer/"],
     "docker": {
       "containerName": "prefer"
     },

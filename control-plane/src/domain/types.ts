@@ -88,6 +88,7 @@ export interface CapacityTarget {
   modelIds: string[];
   models?: ConfiguredModel[];
   modelDiscovery?: RuntimeModelDiscoveryConfig;
+  trafficModelPrefixes?: string[];
   modelsMax?: number;
   aws?: AwsTargetConfig;
   docker?: DockerContainerTargetConfig;
