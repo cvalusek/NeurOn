@@ -37,6 +37,10 @@ docker compose up --build control-plane
 For app-only development, set `USE_FAKE_PROVIDER=true` and
 `CAPACITY_TARGETS_FILE=examples/capacity-targets.local-fake.json`.
 
+Without `CAPACITY_TARGETS_FILE`, local development defaults to the normal PreFer
+Docker target in `examples/capacity-targets.prefer-docker.json`, which expects a
+container named `prefer`.
+
 ## Runtime Targets
 
 NeurOn does not include an inference container. Configure the targets it should
@@ -92,7 +96,7 @@ Environment variables:
 | `ADMIN_USERS` | any authenticated user | Comma-separated admin usernames |
 | `CAPACITY_TARGETS_JSON` | unset | JSON array of targets |
 | `CAPACITY_TARGET_KEYS` | unset | Comma-separated target keys for env-expanded config |
-| `CAPACITY_TARGETS_FILE` | `examples/capacity-targets.example.json` | Local target config file |
+| `CAPACITY_TARGETS_FILE` | `examples/capacity-targets.prefer-docker.json` | Local target config file |
 | `RECONCILER_INTERVAL_SECONDS` | `60` | Background reconcile loop |
 | `RESERVATION_STATUS_POLL_SECONDS` | `10` | Reservation detail polling |
 | `ADMIN_STATUS_POLL_SECONDS` | `30` | Main/admin status polling |

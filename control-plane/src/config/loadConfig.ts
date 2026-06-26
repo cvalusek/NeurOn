@@ -295,7 +295,7 @@ function normalizeProvider(provider: string): CapacityTarget["provider"] {
 }
 
 async function readTargetsFile(): Promise<string> {
-  const configPath = env("CAPACITY_TARGETS_FILE") ?? path.resolve(process.cwd(), "examples", "capacity-targets.example.json");
+  const configPath = env("CAPACITY_TARGETS_FILE") ?? path.resolve(process.cwd(), "examples", "capacity-targets.prefer-docker.json");
   return readFile(configPath, "utf8");
 }
 
