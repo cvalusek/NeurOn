@@ -139,6 +139,10 @@ for example `prefer/gemma-4b-e2b`. Traffic whose model starts with one of those
 prefixes keeps the matching target warm even if runtime model discovery has not
 seen that exact LiteLLM-facing name.
 
+LiteLLM traffic polling reads `model_group` and `model` from spend logs. NeurOn
+tries `/spend/logs/v2` first, then falls back to the legacy `/spend/logs`
+response shape when v2 is empty.
+
 Use `docker-compose` provider targets when the runtime is still owned by a
 Compose project:
 
