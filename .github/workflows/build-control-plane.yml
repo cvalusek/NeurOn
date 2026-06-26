@@ -1,6 +1,16 @@
 name: Build NeurOn image
 
 on:
+  pull_request:
+    paths:
+      - "control-plane/**"
+      - ".github/workflows/build-control-plane.yml"
+  push:
+    branches:
+      - main
+    paths:
+      - "control-plane/**"
+      - ".github/workflows/build-control-plane.yml"
   workflow_dispatch:
 
 jobs:
