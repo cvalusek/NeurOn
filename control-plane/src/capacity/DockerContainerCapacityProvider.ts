@@ -8,8 +8,9 @@ const execFileAsync = promisify(execFile);
 export class DockerContainerCapacityProvider implements CapacityProvider {
   async installTarget(target: CapacityTarget): Promise<void> {
     const docker = requireDocker(target);
-    await this.docker(["pull", docker.image]);
     if (await this.containerExists(docker.containerName)) return;
+    if (!docker.image) throw new Error(`Target ${target.id} container ${docker.containerName} is missing and docker.image is not configured`);
+    await this.docker(["pull", docker.image]);
     await this.docker(["create", ...runArgs(docker), "--name", docker.containerName, docker.image, ...(docker.command ?? [])]);
   }
 

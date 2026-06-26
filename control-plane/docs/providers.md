@@ -98,9 +98,9 @@ GET /v1/pods/{podId}
 
 ## Docker Container
 
-The Docker provider controls a named container from an image. It is the
-preferred local provider when the runtime project publishes an image and NeurOn
-should not depend on that project's checkout.
+The Docker provider controls a named container. It is the preferred local
+provider when the runtime project owns the container setup and NeurOn only needs
+to start, stop, inspect, and discover models from that container.
 When NeurOn runs inside Docker, this provider needs access to the host Docker
 daemon, typically by mounting `/var/run/docker.sock`.
 
@@ -124,6 +124,8 @@ docker stop <container>
 ```
 
 If a reservation starts a missing container, the provider installs it first.
+Install requires `docker.image`; otherwise a missing container is reported as a
+configuration error.
 The admin Discover action uses the same lifecycle to start a target briefly,
 read `/v1/models`, record discovered models, and stop it again.
 

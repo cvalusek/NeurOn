@@ -53,16 +53,16 @@ control with one of:
 The examples directory includes:
 
 - `capacity-targets.local-fake.json` for local UI/API development
-- `capacity-targets.prefer-docker.json` as an installable PreFer container
+- `capacity-targets.prefer-docker.json` as the default local PreFer container
   example
 - `capacity-targets.local-docker.json` as a bring-your-own Docker Compose
   runtime example
 - `capacity-targets.runpod.example.json` as a RunPod Pod example
 - `capacity-targets.example.json` as an AWS ECS/ASG example
 
-For Docker targets, NeurOn installs by pulling the configured image and
-creating the named container if it is missing. Normal reservations start and
-stop that installed container.
+For Docker targets, NeurOn starts and stops the configured container. If an
+image is configured and the container is missing, NeurOn installs it by pulling
+the image and creating the named container.
 Use the admin Discover action to temporarily start the runtime, read
 `/v1/models`, add those runtime models as selectable choices, and stop the
 target again.

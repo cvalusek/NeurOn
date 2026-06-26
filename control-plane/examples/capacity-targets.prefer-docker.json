@@ -4,16 +4,7 @@
     "displayName": "PreFer Local",
     "provider": "docker",
     "docker": {
-      "containerName": "prefer",
-      "image": "ghcr.io/cvalusek/prefer:latest",
-      "ports": ["8080:8080"],
-      "volumes": ["prefer-model-cache:/models"],
-      "environment": {
-        "LLAMA_ARG_MODELS_MAX": "1",
-        "PRESTAGE_MODELS": "qwen-3.6-35b-a3b"
-      },
-      "gpus": "all",
-      "restart": "no"
+      "containerName": "prefer"
     },
     "healthCheckUrl": "http://host.docker.internal:8080/health"
   }

@@ -44,7 +44,7 @@ const targetSchema = z.object({
   docker: z
     .object({
       containerName: z.string(),
-      image: z.string(),
+      image: z.string().optional(),
       ports: z.array(z.string()).optional(),
       volumes: z.array(z.string()).optional(),
       environment: z.record(z.string()).optional(),
@@ -261,7 +261,7 @@ function loadDockerTargetFromEnv(prefix: string): unknown {
 function loadDockerContainerTargetFromEnv(prefix: string): unknown {
   return compactObject({
     containerName: requiredScopedEnv(`${prefix}_DOCKER_CONTAINER_NAME`),
-    image: requiredScopedEnv(`${prefix}_DOCKER_IMAGE`),
+    image: env(`${prefix}_DOCKER_IMAGE`),
     ports: listEnv(`${prefix}_DOCKER_PORTS`),
     volumes: listEnv(`${prefix}_DOCKER_VOLUMES`),
     environment: loadDockerEnvironmentFromEnv(prefix),

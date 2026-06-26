@@ -119,20 +119,19 @@ they are not required for RunPod start/stop or model discovery.
 
 ## Docker Env Fields
 
-Use `docker` provider targets when NeurOn should install and control a named
-container from an image. Model lists may be omitted when you want runtime
-discovery to populate choices from `/v1/models`:
+Use `docker` provider targets when NeurOn should control a named container.
+Model lists may be omitted when you want runtime discovery to populate choices
+from `/v1/models`:
 
 ```env
 CAPACITY_TARGET_LOCAL_PROVIDER=docker
 CAPACITY_TARGET_LOCAL_DOCKER_CONTAINER_NAME=prefer
-CAPACITY_TARGET_LOCAL_DOCKER_IMAGE=ghcr.io/cvalusek/prefer:latest
-CAPACITY_TARGET_LOCAL_DOCKER_PORTS=8080:8080
-CAPACITY_TARGET_LOCAL_DOCKER_VOLUMES=prefer-model-cache:/models
-CAPACITY_TARGET_LOCAL_DOCKER_GPUS=all
-CAPACITY_TARGET_LOCAL_DOCKER_ENV_KEYS=LLAMA_ARG_MODELS_MAX
-CAPACITY_TARGET_LOCAL_DOCKER_ENV_LLAMA_ARG_MODELS_MAX=1
 ```
+
+Set `DOCKER_IMAGE` and optional Docker run fields only when NeurOn should
+install a missing container. If the container already exists, NeurOn can start,
+stop, inspect, and discover models from it with just the container name and a
+runtime URL such as `HEALTH_CHECK_URL`.
 
 Use `docker-compose` provider targets when the runtime is still owned by a
 Compose project:

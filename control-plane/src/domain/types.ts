@@ -44,7 +44,7 @@ export interface DockerComposeTargetConfig {
 
 export interface DockerContainerTargetConfig {
   containerName: string;
-  image: string;
+  image?: string;
   ports?: string[];
   volumes?: string[];
   environment?: Record<string, string>;
