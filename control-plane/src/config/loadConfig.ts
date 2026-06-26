@@ -2,7 +2,6 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { z } from "zod";
 import type { AppConfig, CapacityTarget, ModelDefinition } from "../domain/types.js";
-import { loadModelsFromPreset } from "../models/presetParser.js";
 
 const targetSchema = z.object({
   id: z.string().min(1),
@@ -16,6 +15,7 @@ const targetSchema = z.object({
         displayName: z.string().optional(),
         modelFamily: z.string().optional(),
         aliases: z.array(z.string()).optional(),
+        tags: z.array(z.object({ label: z.string(), title: z.string().optional() })).optional(),
         description: z.string().optional(),
         backendModelIds: z.array(z.string()).optional(),
         contextWindowTokens: z.number().int().positive().optional(),
@@ -29,7 +29,6 @@ const targetSchema = z.object({
       bootstrapTimeoutSeconds: z.number().int().positive().optional()
     })
     .optional(),
-  modelPresetPath: z.string().optional(),
   modelsMax: z.number().int().positive().optional(),
   aws: z
     .object({
@@ -42,16 +41,42 @@ const targetSchema = z.object({
     .refine((value) => Boolean(value.cluster ?? value.clusterName), "AWS cluster is required")
     .refine((value) => Boolean(value.service ?? value.serviceName), "AWS service is required")
     .optional(),
+  docker: z
+    .object({
+      containerName: z.string(),
+      image: z.string(),
+      ports: z.array(z.string()).optional(),
+      volumes: z.array(z.string()).optional(),
+      environment: z.record(z.string()).optional(),
+      gpus: z.string().optional(),
+      restart: z.string().optional(),
+      network: z.string().optional(),
+      command: z.array(z.string()).optional(),
+      extraArgs: z.array(z.string()).optional()
+    })
+    .optional(),
   dockerCompose: z
     .object({
       projectDirectory: z.string(),
       projectName: z.string().optional(),
       composeFile: z.string().optional(),
       composeFiles: z.array(z.string()).optional(),
+      profiles: z.array(z.string()).optional(),
       serviceName: z.string()
     })
     .optional(),
-  healthCheckUrl: z.string().url(),
+  runpod: z
+    .object({
+      podId: z.string().optional(),
+      apiKey: z.string().optional(),
+      apiKeyEnv: z.string().optional(),
+      apiBaseUrl: z.string().url().optional(),
+      runtimePort: z.number().int().positive().optional(),
+      create: z.record(z.unknown()).optional()
+    })
+    .optional(),
+  healthCheckUrl: z.string().url().optional(),
+  runtimeApiBaseUrl: z.string().url().optional(),
   litellm: z
     .object({
       backendName: z.string(),
@@ -60,31 +85,31 @@ const targetSchema = z.object({
     .optional()
 });
 
-export async function loadConfig(repoRoot = path.resolve(process.cwd(), "..")): Promise<{ config: AppConfig; models: ModelDefinition[] }> {
+export async function loadConfig(): Promise<{ config: AppConfig; models: ModelDefinition[] }> {
   const capacityTargets = await loadCapacityTargets();
   const modelsById = new Map<string, ModelDefinition>();
 
   for (const target of capacityTargets) {
-    const fromPreset = target.modelPresetPath ? await loadModelsFromPreset(repoRoot, target.modelPresetPath) : [];
     const configuredModels: ModelDefinition[] = (target.models ?? []).map((model) => ({
       id: model.id,
       displayName: model.displayName ?? model.id,
       modelFamily: model.modelFamily ?? inferModelFamily(model.displayName ?? model.id),
       aliases: Array.from(new Set([model.id, ...(model.aliases ?? [])])),
+      tags: model.tags,
       description: model.description,
       backendModelIds: model.backendModelIds,
       contextWindowTokens: model.contextWindowTokens,
       contextLabel: model.contextLabel ?? contextLabelForTokens(model.contextWindowTokens) ?? inferContextLabel(model.id),
       targetIds: [target.id]
     }));
-    const selectableModels = configuredModels.length > 0 ? configuredModels : fromPreset.map((model) => ({ ...model, targetIds: [target.id] }));
-    const targetModelIds = new Set([...target.modelIds, ...selectableModels.map((model) => model.id)]);
+    const targetModelIds = new Set([...target.modelIds, ...configuredModels.map((model) => model.id)]);
     target.modelIds = Array.from(targetModelIds);
-    for (const model of selectableModels) {
+    for (const model of configuredModels) {
       const existing = modelsById.get(model.id);
       if (existing) {
         existing.targetIds = Array.from(new Set([...existing.targetIds, target.id]));
         existing.aliases = mergeRequired(existing.aliases, model.aliases);
+        existing.tags = mergeTags(existing.tags, model.tags);
         existing.runtimeModelIds = mergeOptional(existing.runtimeModelIds, model.runtimeModelIds);
         existing.backendModelIds = mergeOptional(existing.backendModelIds, model.backendModelIds);
       } else {
@@ -132,6 +157,13 @@ function mergeOptional(left: string[] | undefined, right: string[] | undefined):
   return merged.length > 0 ? merged : undefined;
 }
 
+function mergeTags(left: ModelDefinition["tags"], right: ModelDefinition["tags"]): ModelDefinition["tags"] {
+  const merged = new Map<string, NonNullable<ModelDefinition["tags"]>[number]>();
+  for (const tag of [...(left ?? []), ...(right ?? [])]) merged.set(tag.label, tag);
+  const tags = Array.from(merged.values());
+  return tags.length > 0 ? tags : undefined;
+}
+
 function contextLabelForTokens(tokens: number | undefined): string | undefined {
   if (!tokens) return undefined;
   if (tokens % 1000 === 0) return `${tokens / 1000}k`;
@@ -151,15 +183,15 @@ function inferModelFamily(value: string): string | undefined {
 }
 
 async function loadCapacityTargets(): Promise<CapacityTarget[]> {
-  const raw = process.env.CAPACITY_TARGETS_JSON ?? (process.env.CAPACITY_TARGET_KEYS ? JSON.stringify(loadTargetsFromEnv()) : await readTargetsFile());
+  const raw = env("CAPACITY_TARGETS_JSON") ?? (env("CAPACITY_TARGET_KEYS") ? JSON.stringify(loadTargetsFromEnv()) : await readTargetsFile());
   const parsed = z.array(targetSchema).parse(JSON.parse(raw));
-  return parsed.map((target) => ({ ...target, provider: target.provider as CapacityTarget["provider"] }));
+  return parsed.map((target) => ({ ...target, provider: normalizeProvider(target.provider) }));
 }
 
 function loadTargetsFromEnv(): unknown[] {
   return listEnv("CAPACITY_TARGET_KEYS").map((targetKey) => {
     const prefix = `CAPACITY_TARGET_${envKey(targetKey)}`;
-    const provider = env(`${prefix}_PROVIDER`) ?? "aws-ecs";
+    const provider = normalizeProvider(env(`${prefix}_PROVIDER`) ?? "aws-ecs");
     return compactObject({
       id: env(`${prefix}_ID`) ?? targetKey.toLowerCase().replace(/_/g, "-"),
       displayName: requiredScopedEnv(`${prefix}_DISPLAY_NAME`),
@@ -170,11 +202,13 @@ function loadTargetsFromEnv(): unknown[] {
         bootstrapOnStartup: boolEnv(`${prefix}_MODEL_DISCOVERY_BOOTSTRAP_ON_STARTUP`),
         bootstrapTimeoutSeconds: intOptionalEnv(`${prefix}_MODEL_DISCOVERY_BOOTSTRAP_TIMEOUT_SECONDS`)
       }),
-      modelPresetPath: env(`${prefix}_MODEL_PRESET_PATH`),
       modelsMax: intOptionalEnv(`${prefix}_MODELS_MAX`),
       aws: provider === "aws-ecs" ? loadAwsTargetFromEnv(prefix) : undefined,
+      docker: provider === "docker" ? loadDockerContainerTargetFromEnv(prefix) : undefined,
       dockerCompose: provider === "docker-compose" ? loadDockerTargetFromEnv(prefix) : undefined,
-      healthCheckUrl: requiredScopedEnv(`${prefix}_HEALTH_CHECK_URL`),
+      runpod: provider === "runpod" ? loadRunPodTargetFromEnv(prefix) : undefined,
+      healthCheckUrl: env(`${prefix}_HEALTH_CHECK_URL`),
+      runtimeApiBaseUrl: env(`${prefix}_RUNTIME_API_BASE_URL`),
       litellm: env(`${prefix}_LITELLM_BACKEND_NAME`) || env(`${prefix}_LITELLM_API_BASE_URL`)
         ? {
             backendName: requiredScopedEnv(`${prefix}_LITELLM_BACKEND_NAME`),
@@ -219,12 +253,49 @@ function loadDockerTargetFromEnv(prefix: string): unknown {
     projectName: env(`${prefix}_DOCKER_PROJECT_NAME`),
     composeFile: env(`${prefix}_DOCKER_COMPOSE_FILE`),
     composeFiles: listEnv(`${prefix}_DOCKER_COMPOSE_FILES`),
+    profiles: listEnv(`${prefix}_DOCKER_PROFILES`),
     serviceName: requiredScopedEnv(`${prefix}_DOCKER_SERVICE_NAME`)
   });
 }
 
+function loadDockerContainerTargetFromEnv(prefix: string): unknown {
+  return compactObject({
+    containerName: requiredScopedEnv(`${prefix}_DOCKER_CONTAINER_NAME`),
+    image: requiredScopedEnv(`${prefix}_DOCKER_IMAGE`),
+    ports: listEnv(`${prefix}_DOCKER_PORTS`),
+    volumes: listEnv(`${prefix}_DOCKER_VOLUMES`),
+    environment: loadDockerEnvironmentFromEnv(prefix),
+    gpus: env(`${prefix}_DOCKER_GPUS`),
+    restart: env(`${prefix}_DOCKER_RESTART`),
+    network: env(`${prefix}_DOCKER_NETWORK`),
+    command: listEnv(`${prefix}_DOCKER_COMMAND`),
+    extraArgs: listEnv(`${prefix}_DOCKER_EXTRA_ARGS`)
+  });
+}
+
+function loadDockerEnvironmentFromEnv(prefix: string): Record<string, string> | undefined {
+  const keys = listEnv(`${prefix}_DOCKER_ENV_KEYS`);
+  if (keys.length === 0) return undefined;
+  return Object.fromEntries(keys.map((key) => [key, env(`${prefix}_DOCKER_ENV_${envKey(key)}`) ?? ""]));
+}
+
+function loadRunPodTargetFromEnv(prefix: string): unknown {
+  return compactObject({
+    podId: env(`${prefix}_RUNPOD_POD_ID`),
+    apiKey: env(`${prefix}_RUNPOD_API_KEY`),
+    apiKeyEnv: env(`${prefix}_RUNPOD_API_KEY_ENV`),
+    apiBaseUrl: env(`${prefix}_RUNPOD_API_BASE_URL`),
+    runtimePort: intOptionalEnv(`${prefix}_RUNPOD_RUNTIME_PORT`),
+    create: jsonOptionalEnv(`${prefix}_RUNPOD_CREATE_JSON`)
+  });
+}
+
+function normalizeProvider(provider: string): CapacityTarget["provider"] {
+  return provider === "compose" ? "docker-compose" : (provider as CapacityTarget["provider"]);
+}
+
 async function readTargetsFile(): Promise<string> {
-  const configPath = process.env.CAPACITY_TARGETS_FILE ?? path.resolve(process.cwd(), "examples", "capacity-targets.example.json");
+  const configPath = env("CAPACITY_TARGETS_FILE") ?? path.resolve(process.cwd(), "examples", "capacity-targets.example.json");
   return readFile(configPath, "utf8");
 }
 
@@ -246,6 +317,12 @@ function boolEnv(name: string): boolean | undefined {
   const value = env(name);
   if (!value) return undefined;
   return ["1", "true", "yes", "on"].includes(value.toLowerCase());
+}
+
+function jsonOptionalEnv(name: string): unknown | undefined {
+  const value = env(name);
+  if (!value) return undefined;
+  return JSON.parse(value) as unknown;
 }
 
 function listEnv(name: string): string[] {

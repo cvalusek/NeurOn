@@ -1,0 +1,29 @@
+[
+  {
+    "id": "demo-gpu-pool",
+    "displayName": "Demo GPU Pool",
+    "provider": "fake",
+    "models": [
+      {
+        "id": "qwen",
+        "displayName": "Qwen",
+        "modelFamily": "Qwen",
+        "description": "Demo model for local UI/API development",
+        "aliases": ["qwen-latest"],
+        "backendModelIds": ["qwen", "qwen-latest"],
+        "contextLabel": "256k"
+      },
+      {
+        "id": "gemma",
+        "displayName": "Gemma",
+        "modelFamily": "Gemma",
+        "description": "Demo model for local UI/API development",
+        "aliases": ["gemma-latest"],
+        "backendModelIds": ["gemma", "gemma-latest"],
+        "contextLabel": "128k"
+      }
+    ],
+    "modelsMax": 2,
+    "healthCheckUrl": "http://demo-gpu-pool.local/health"
+  }
+]

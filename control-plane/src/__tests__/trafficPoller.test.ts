@@ -8,8 +8,8 @@ import { TrafficKeepaliveService } from "../services/TrafficKeepaliveService.js"
 import { TrafficPoller } from "../services/TrafficPoller.js";
 
 const target: CapacityTarget = {
-  id: "multiple-moe-local",
-  displayName: "Multiple MoE",
+  id: "local-runtime",
+  displayName: "Local Runtime",
   provider: "docker-compose",
   modelIds: ["qwen-3.6-35b-a3b"],
   healthCheckUrl: "http://example.test/health"

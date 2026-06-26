@@ -29,7 +29,7 @@ export class TrafficPoller {
   }
 
   start(intervalSeconds: number): NodeJS.Timeout {
-    void this.poll();
+    void this.poll().catch(() => undefined);
     return setInterval(() => void this.poll().catch(() => undefined), intervalSeconds * 1000);
   }
 }

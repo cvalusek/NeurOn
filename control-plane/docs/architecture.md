@@ -63,10 +63,12 @@ Important fields:
 - `displayName`
 - `modelFamily`
 - `aliases`
+- `tags`
 - `backendModelIds`
 - `contextLabel` or `contextWindowTokens`
 - `targetIds`
 - `runtimeModelIds`
+- `runtimeMeta`
 
 ## Interfaces
 
@@ -96,7 +98,10 @@ into AWS, Docker, LiteLLM, or the in-memory repository from unrelated code.
 - `BackendConfigSync`: pushes backend configuration/availability into LiteLLM
   or another proxy when runtime state changes.
 - `RuntimeModelDiscovery`: reads OpenAI-compatible `/v1/models` from healthy
-  targets and records matching runtime IDs.
+  targets, records runtime IDs, trusts API-provided aliases, and uses runtime
+  metadata such as context size, parameter count, vocabulary size, and model
+  size when it is provided. A later discovery pass can enrich an already
+  discovered model after the runtime has loaded it.
 
 ## Request Flow
 

@@ -63,6 +63,70 @@ The task role needs, at a high level:
 - `ecs:UpdateService`
 - `ecs:DescribeServices`
 
+## RunPod
+
+The RunPod provider uses the RunPod REST API. It can start and stop an existing
+Pod by ID, read Pod status, and create a Pod from a configured create request
+body during install.
+Health checks are optional for RunPod targets. NeurOn can use RunPod Pod status
+as the capacity signal. Discovery uses `runtimeApiBaseUrl` when configured, or
+infers RunPod's proxy URL from Pod ID and runtime port.
+
+Install:
+
+```bash
+POST /v1/pods
+```
+
+On:
+
+```bash
+POST /v1/pods/{podId}/start
+```
+
+Off:
+
+```bash
+POST /v1/pods/{podId}/stop
+```
+
+Status:
+
+```bash
+GET /v1/pods/{podId}
+```
+
+## Docker Container
+
+The Docker provider controls a named container from an image. It is the
+preferred local provider when the runtime project publishes an image and NeurOn
+should not depend on that project's checkout.
+When NeurOn runs inside Docker, this provider needs access to the host Docker
+daemon, typically by mounting `/var/run/docker.sock`.
+
+Install:
+
+```bash
+docker pull <image>
+docker create ... --name <container> <image>
+```
+
+On:
+
+```bash
+docker start <container>
+```
+
+Off:
+
+```bash
+docker stop <container>
+```
+
+If a reservation starts a missing container, the provider installs it first.
+The admin Discover action uses the same lifecycle to start a target briefly,
+read `/v1/models`, record discovered models, and stop it again.
+
 ## Docker Compose
 
 The Docker Compose provider exists for local development. It shells out to

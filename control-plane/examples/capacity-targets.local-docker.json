@@ -1,7 +1,7 @@
 [
   {
-    "id": "multiple-moe-local",
-    "displayName": "Multiple MoE Local Compose",
+    "id": "local-runtime",
+    "displayName": "Local Runtime",
     "provider": "docker-compose",
     "models": [
       {
@@ -66,14 +66,15 @@
     "modelsMax": 2,
     "dockerCompose": {
       "projectDirectory": "/workspace",
-      "projectName": "llm-hosting",
+      "projectName": "local-llm",
       "composeFile": "docker-compose.yml",
-      "serviceName": "multiple-moe"
+      "profiles": ["PreFer"],
+      "serviceName": "llm-runtime"
     },
-    "healthCheckUrl": "http://multiple-moe:8080/health",
+    "healthCheckUrl": "http://llm-runtime:8080/health",
     "litellm": {
-      "backendName": "local-llama-96gb",
-      "apiBaseUrl": "http://multiple-moe:8080/v1"
+      "backendName": "local-runtime",
+      "apiBaseUrl": "http://llm-runtime:8080/v1"
     }
   }
 ]

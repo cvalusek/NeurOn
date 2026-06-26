@@ -1,0 +1,12 @@
+[
+  {
+    "id": "prefer-runpod",
+    "displayName": "PreFer RunPod",
+    "provider": "runpod",
+    "runpod": {
+      "podId": "your-runpod-pod-id",
+      "apiKeyEnv": "RUNPOD_API_KEY",
+      "runtimePort": 8080
+    }
+  }
+]

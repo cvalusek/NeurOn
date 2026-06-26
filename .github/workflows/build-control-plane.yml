@@ -1,4 +1,4 @@
-name: Build control-plane image
+name: Build NeurOn image
 
 on:
   workflow_dispatch:
@@ -19,4 +19,4 @@ jobs:
       - run: npm ci
       - run: npm run typecheck
       - run: npm test
-      - run: docker build -t llm-capacity-control-plane .
+      - run: docker build -t neuron-control-plane .

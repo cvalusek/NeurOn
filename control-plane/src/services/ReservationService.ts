@@ -10,15 +10,16 @@ export class ReservationService {
     private readonly catalog: ModelCatalog
   ) {}
 
-  async createForUser(user: AuthenticatedUser, input: { modelIds: string[]; durationMinutes: number }): Promise<Reservation> {
+  async createForUser(user: AuthenticatedUser, input: { modelIds?: string[]; targetIds?: string[]; durationMinutes: number }): Promise<Reservation> {
     this.validateInput(input);
-    const modelIds = this.catalog.canonicalModelIds(input.modelIds);
+    const requestedModelIds = unique(input.modelIds ?? []);
+    const modelIds = requestedModelIds.length > 0 ? this.catalog.canonicalModelIds(requestedModelIds) : [];
     const now = new Date();
-    const targets = this.catalog.targetsForModels(modelIds);
+    const targetIds = modelIds.length > 0 ? this.catalog.targetsForModels(modelIds).map((target) => target.id) : this.catalog.validateTargetIds(unique(input.targetIds ?? []));
     return this.repository.create({
       username: user.username,
       modelIds,
-      targetIds: targets.map((target) => target.id),
+      targetIds,
       createdAt: now,
       expiresAt: new Date(now.getTime() + input.durationMinutes * 60_000),
       status: "active"
@@ -48,8 +49,13 @@ export class ReservationService {
     });
   }
 
-  private validateInput(input: { modelIds: string[]; durationMinutes: number }): void {
-    this.catalog.validateModelIds(unique(input.modelIds));
+  private validateInput(input: { modelIds?: string[]; targetIds?: string[]; durationMinutes: number }): void {
+    const modelIds = unique(input.modelIds ?? []);
+    if (modelIds.length > 0) {
+      this.catalog.validateModelIds(modelIds);
+    } else {
+      this.catalog.validateTargetIds(unique(input.targetIds ?? []));
+    }
     if (!Number.isFinite(input.durationMinutes) || input.durationMinutes <= 0 || input.durationMinutes > MAX_DURATION_MINUTES) {
       throw new Error(`Duration must be between 1 and ${MAX_DURATION_MINUTES} minutes`);
     }

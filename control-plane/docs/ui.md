@@ -49,12 +49,15 @@ Model cards show:
 
 - display name
 - context pill
+- model trait pills such as parameter shape, instruction tuning, and quantization
 - short description
 - copy chips for the shortest alias, canonical ID, and other aliases
 
+Aliases discovered from llama.cpp `/v1/models` are treated as authoritative.
 The shortest supported alias is rendered first and emphasized. The card does
 not label it as "recommended alias" because the chip order carries that meaning
-without extra text.
+without extra text. Trait pills are visual metadata only; they are not copyable
+model aliases.
 
 ## Status Cards
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildApp } from "../app.js";
+import { buildApp, shouldBootstrapRuntimeModels } from "../app.js";
 import type { AppConfig, ModelDefinition } from "../domain/types.js";
 
 const config: AppConfig = {
@@ -32,5 +32,14 @@ describe("API authentication context", () => {
     await app.close();
     expect(response.statusCode).toBe(201);
     expect(response.json().username).toBe("actual");
+  });
+});
+
+describe("runtime model bootstrap selection", () => {
+  it("discovers models by default when a target has no configured models unless disabled", () => {
+    expect(shouldBootstrapRuntimeModels({ modelIds: [] })).toBe(true);
+    expect(shouldBootstrapRuntimeModels({ modelIds: [], modelDiscovery: { bootstrapOnStartup: false } })).toBe(false);
+    expect(shouldBootstrapRuntimeModels({ modelIds: ["configured"] })).toBe(false);
+    expect(shouldBootstrapRuntimeModels({ modelIds: ["configured"], modelDiscovery: { bootstrapOnStartup: true } })).toBe(true);
   });
 });

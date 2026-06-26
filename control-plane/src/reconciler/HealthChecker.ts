@@ -9,6 +9,7 @@ export class HealthChecker {
   constructor(private readonly timeoutSeconds: number) {}
 
   async check(target: CapacityTarget): Promise<HealthCheckResult> {
+    if (!target.healthCheckUrl) return { ok: true, message: "Provider reported ready" };
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), this.timeoutSeconds * 1000);
     try {

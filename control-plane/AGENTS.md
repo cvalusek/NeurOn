@@ -8,9 +8,9 @@ NeurOn is a lightweight internal control plane for shared self-hosted LLM
 capacity. Developers reserve capacity targets and models, and a reconciler keeps
 the required runtime capacity on while demand exists.
 
-This directory is intended to split into its own repository later. Avoid adding
-new dependencies on parent PreFer files unless the integration is explicitly
-local-development-only.
+This repository is NeurOn. Do not add bundled inference images or model-preset
+logic back into the control plane; runtime details belong in target
+configuration or in the external runtime project.
 
 ## Product Principles
 
@@ -43,8 +43,8 @@ local-development-only.
   ARNs. Keep `clusterName` and `serviceName` backward-compatible.
 - ASG config uses `autoScalingGroupName`; the AWS APIs used here require the
   ASG name.
-- Do not make PreFer preset parsing the production source of truth. It is a
-  fallback/convenience path.
+- Model choices are owned by NeurOn target configuration. Do not infer the
+  production catalog from external preset files.
 
 ## UI Rules
 

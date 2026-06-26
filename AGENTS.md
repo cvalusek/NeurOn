@@ -1,220 +1,82 @@
 # AGENTS.md
 
-Context for AI agents (and future humans) working on this repo. This
-captures decisions and rationale that aren't visible from the files alone —
-read this before changing presets, the Dockerfile, or the detection scripts.
+Context for AI agents and future humans working on NeurOn.
 
-## Project overview
+## Project Overview
 
-llama.cpp router containers for self-hosted LLM inference, primarily for
-RunPod. `docker/multiple-moe/` hosts three models — gemma-4-26B-A4B,
-Qwen3.6-35B-A3B, and GLM-4.7-Flash-REAP-23B-A3B — via `llama-server`'s router
-mode, with models downloaded from Hugging Face on first start.
+NeurOn is a lightweight internal control plane for shared self-hosted LLM
+capacity. Developers reserve capacity targets and models, and a reconciler keeps
+the required runtime capacity on while demand exists.
 
-## Conventions
+This repository owns the control plane only. Do not add bundled inference
+images, model-download scripts, or runtime-specific model tuning back into this
+repo. Those details belong with the external runtime project and should be
+referenced through NeurOn target configuration.
 
-- **Preset naming**: `presets/<N>gb.ini`, where `N` is a VRAM tier in GB.
-  `detect-preset.sh` picks the largest tier that fits the detected GPU's
-  total VRAM (falling back to the smallest tier if VRAM is below all of
-  them). Adding a new tier (e.g. `16gb.ini`) requires no changes to the
-  detection script.
-- **Router model id naming**: `<model>-<context>` where context is the
-  approximate ctx-size in "k" (e.g. `gemma-4-26b-a4b-64k`,
-  `glm-4.7-flash-reap-23b-a3b-198k`). Ids should reflect the *actual*
-  ctx-size, not a historical/arbitrary label.
-- **Shared defaults use `[*]`**, not per-section duplication. A per-section
-  "common defaults" convention (duplicating `[*]`'s values into every model
-  section, with `[*]` commented out as documentation) was tried and
-  reverted — it didn't avoid the phantom "default" model entry (see below)
-  and added maintenance burden for no benefit.
-- **No comments inside `.ini` files** (deliberate preference). Rationale for
-  any non-obvious value lives in this file instead.
-- `mmap = false` is set on any preset where `n-cpu-moe > 0` — combining
-  mmap with CPU-offloaded MoE tensors triggers a llama.cpp performance
-  warning.
-- `sleep-idle-seconds = 1800` is set on `12gb.ini`/`8gb.ini` only.
-  `96gb.ini` deliberately omits it (not needed with that much headroom).
+## Repository Layout
 
-## Base image
+- `control-plane/` contains the Fastify/TypeScript app, tests, examples, and
+  product docs.
+- `.github/workflows/` contains the control-plane build workflow.
+- `docker/certs/` is reserved for local corporate CA material used by the
+  Netskope Dockerfile.
 
-Pinned to `ghcr.io/ggml-org/llama.cpp:server-cuda-b9592`, **not** the rolling
-`server-cuda` tag. Builds around the gemma4-assistant MTP merge (#23398,
-~b9549, merged 2026-06-07) were unstable; b9592 was confirmed working
-(gemma's MTP draft loads, web UI serves correctly).
+## Architecture Rules
 
-To bump this pin: rebuild with `--pull` against a candidate tag, then verify
-on actual hardware that (1) the web UI loads at `/` and (2) gemma's draft
-model (`mtp-gemma-4-26B-A4B-it.gguf`) loads without an
-`unknown model architecture: 'gemma4-assistant'` error before changing the
-`FROM` line.
+- Request handlers mutate reservation state only. Infrastructure lifecycle
+  transitions belong to the reconciler.
+- Keep AWS, Docker Compose, and LiteLLM assumptions inside provider and
+  integration adapters.
+- Prefer the existing interfaces before adding new abstractions:
+  `CapacityProvider`, `BackendConfigSync`, `ReservationRepository`,
+  `AuthProvider`, `TrafficSource`, and `TargetStatusRepository`.
+- v1 storage is in memory. Do not add SQLite/Postgres unless the task is
+  explicitly about persistence.
+- Model choices are owned by target configuration. Do not infer the production
+  catalog from external preset files.
 
-## Known upstream llama.cpp issues (not fixable via our config)
+## Configuration Rules
 
-- **#22364** — router synthesizes a phantom `"default"` model entry in
-  `/v1/models` regardless of whether `[*]`/`default-model` are used.
-  Apparently cosmetic (`status: unloaded`), but if real models stop loading
-  under `models-max=1`, check whether this entry is consuming a slot.
-- **#21375 / #21338 / #22786** — cluster of Gemma 4 thinking+tool-calling
-  bugs in llama-server's `peg-gemma4` chat format: infinite repetition loops
-  where the model never exits a `<|tool_call>` block. #21418 (merged
-  2026-04-04) fixed the original #21375 case and should be included in
-  b9592 — but looping has still been observed on b9592, possibly a new
-  regression from the June 7 MTP merge interacting with
-  tool-calling+reasoning. Mitigated (not fixed) via DRY sampling (see
-  below). If still problematic: try `reasoning = off` for gemma (known
-  workaround, loses thinking output), or test with `spec-type`/`model-draft`
-  removed from gemma to isolate whether MTP is the trigger.
-- **GLM tokenizer warnings** (`special_eot_id`/`special_eom_id` not in
-  `special_eog_ids`) — known issue across GLM-4.x GGUFs. Generation usually
-  still stops correctly via other EOG tokens (e.g. `<|user|>`), but "breaks
-  sometimes". If this persists: try `temp = 0.6` (down from `0.7`) on GLM,
-  or as a deeper fix, patch the GGUF's tokenizer metadata with
-  `gguf-set-metadata.py`.
-- **#19379** — `sleep-idle-seconds` leaves ~600MiB resident on the idle
-  subprocess (doesn't fully terminate it). With `models-max=1` on
-  `12gb.ini`/`8gb.ini`, this is bounded to at most one subprocess and gets
-  cleaned up on the next model switch via LRU eviction — not considered a
-  real problem here.
-- **#20137 / #21678** — `models-max` LRU eviction has TOCTOU races and
-  doesn't check for in-flight requests before evicting. Acceptable for
-  single-developer use ("these are dev tools, not 5 nines").
+- Config must work without mounting a file. Maintain the env-expanded target
+  pattern documented in `control-plane/docs/configuration.md`.
+- Keep `CAPACITY_TARGETS_JSON` and `CAPACITY_TARGETS_FILE` working.
+- For AWS, prefer `aws.cluster` and `aws.service` because ECS accepts names or
+  ARNs. Keep `clusterName` and `serviceName` backward-compatible.
+- ASG config uses `autoScalingGroupName`; the AWS APIs used here require the
+  ASG name.
 
-## DRY sampling
+## UI Rules
 
-`dry-multiplier = 0.8`, `dry-base = 1.75`, `dry-allowed-length = 24` are set
-globally (in every preset's `[*]`) as a mitigation for repetition loops,
-particularly Gemma 4's tool-calling loop issue (see above). `allowed_length`
-was deliberately raised from DRY's "chat" default of `2` to `24` — at `2`,
-DRY penalizes *any* 3+ token verbatim repeat, which corrupted agentic output
-(an agent re-typing the same file path or identifier across tool calls would
-get penalized into producing a near-neighbor token instead — e.g. `repos`
-becoming `Repositories`). At `24`, short identifiers/paths repeat freely,
-while a genuinely looping sequence still gets exponentially penalized after
-~24 tokens (`0.8 × 1.75^(n-24)`), which is a tight enough bound in practice.
-Caveats: DRY prevents loops from *forming*, it can't break one already in
-progress (so a max-tokens cap is still the real backstop for worst-case
-cost). Default sequence breakers (`\n`, `:`, `"`, `*`) are common in JSON
-tool-call syntax and may reduce DRY's effectiveness for that specific case —
-if loops persist on gemma tool calls despite DRY, consider
-`dry-sequence-breaker = none` (or dropping `:`/`"` from the breaker set) for
-gemma specifically.
+- Server-rendered HTML plus small browser JavaScript only.
+- Do not introduce React/Next/Vite SPA machinery.
+- Main page status should stay grouped by capacity target.
+- Model cards should preserve copy chips for aliases/IDs and context pills.
+- Keep copy interactions usable without making the whole card ambiguous.
 
-## KV cache type: f16 on 96gb, q4_0 on 12gb/8gb
+## Reconciler Rules
 
-`12gb.ini`/`8gb.ini` use `cache-type-k/v = q4_0` out of necessity — without
-it, the long-context variants wouldn't fit in 12GB/8GB at all. `96gb.ini`
-uses `cache-type-k/v = f16`, deliberately diverging, for two reasons found
-via research:
-
-1. **Speed**: q4_0 KV cache gets significantly *slower* than f16 as context
-   grows — a TurboQuant-related benchmark found q4_0 roughly 12% slower than
-   f16 at ~24K context and ~37% slower at ~110K, with dequantization
-   overhead during decode becoming the bottleneck at long context. Since
-   96gb's whole point is long context (up to 262144), q4_0 there would
-   likely cost speed, not save it.
-2. **Quality, specifically for gemma-4-26B-A4B**: a KL-divergence benchmark
-   of Gemma 4 and Qwen3.6 with quantized KV cache found gemma-4-26B-A4B is
-   unusually sensitive — q8_0 cache gives KL 0.377 (vs Qwen's <0.04), and
-   q4_0 reaches KL 1.088 with only 68% top-1 token match. Cache quantization
-   and weight quantization are independent error sources that stack — our
-   gemma weights are already `UD-Q4_K_XL` (4-bit), so adding q4_0 KV cache on
-   top compounds onto the most quantization-sensitive model in that
-   benchmark. Qwen and GLM weren't shown to have this sensitivity, but f16
-   is applied uniformly via `[*]` for simplicity, and the speed argument
-   applies to all three regardless.
-
-96gb has no VRAM pressure (unlike 12gb/8gb), so there's no real downside to
-trade off here — **except** that f16 KV cache is ~4x q4_0's size, and 96gb
-now has 5 `load-on-startup` models (the original 3 plus E2B/E4B). This
-change has not yet been tested for OOM with all 5 loaded — if it doesn't
-fit, q8_0 would be the fallback for gemma at minimum (still better than
-q4_0's KL 1.088, though q8_0's 0.377 isn't great either) while keeping f16
-for Qwen/GLM if their headroom allows.
-
-## Qwen sampling: `presence-penalty`
-
-Qwen3.6's official recommendation is `presence_penalty = 1.5` (alongside
-`temp=1.0, top_p=0.95, top_k=20`) to avoid loops in long reasoning — but
-presence penalty applies to *every* token seen so far in the context,
-regardless of whether repeating it is a loop or legitimate verbatim reuse
-(e.g. an agent re-typing the same file path). This is a documented tension
-in the Qwen community itself, not unique to our setup. Since the
-`dry-allowed-length = 24` change above covers the same "long reasoning loop"
-failure mode more precisely (only penalizing actual repeated *sequences*,
-not all repeated tokens), Qwen's `presence-penalty` was set to `0.0` across
-all presets, relying on DRY instead. If long-reasoning loops reappear on
-Qwen without presence_penalty, that'd be the first thing to revisit —
-either raise `presence-penalty` back up (accepting the agentic-output risk)
-or tune DRY further before doing so.
-
-## `n-cpu-moe` tuning status
-
-- **`96gb.ini`**: `n-cpu-moe = 0` for all three models — confirmed working
-  (all three load and generate correctly).
-- **`12gb.ini`**: `gemma-4-26b-a4b-64k` (`n-cpu-moe=12`) and
-  `glm-4.7-flash-reap-23b-a3b-64k` (`n-cpu-moe=12`) are confirmed working on
-  actual Titan X Pascal hardware (GLM measured at ~21 tok/s).
-  `qwen3.6-35b-a3b-64k` (`n-cpu-moe=18`) was confirmed loading and working
-  but "slow" *before* `mmap=false` was added — worth retesting now that
-  mmap is disabled. The four `-256k`/`-198k` variants (`n-cpu-moe` 20/26/18)
-  are **heuristic guesses** (scaled from the 64k values by context-size
-  ratio), untested.
-- **`8gb.ini`**: **entirely heuristic** — all six `n-cpu-moe` values are
-  scaled from `12gb.ini`'s numbers by a rough 33% VRAM-reduction factor.
-  Nothing here has been tested on real 8GB hardware (GTX 1070) yet.
-
-## Download / Hugging Face specifics
-
-- Uses the `hf` CLI (not the deprecated `huggingface-cli`).
-- `HF_HOME=/models` so the HF cache/staging directory shares the model
-  volume (avoids filling the container's ephemeral filesystem, and survives
-  restarts).
-- Qwen's actual GGUF filename is `Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf` — no
-  `-MTP-` in the filename despite the repo being named
-  `Qwen3.6-35B-A3B-MTP-GGUF`. The MTP layer is embedded in this file (no
-  separate `model-draft`).
-- Gemma's MTP draft (`mtp-gemma-4-26B-A4B-it.gguf`) downloads flat into the
-  repo's root directory, not under an `MTP/` subfolder.
-- **gemma-4-E2B/E4B** (added for speed — same family, 2B/4B "effective
-  params", 128K max context). **Confirmed on disk** (2026-06-15):
-  `gemma-4-E2B-it-qat-UD-Q4_K_XL.gguf` (2.62 GB) +
-  `mtp-gemma-4-E2B-it.gguf` (59.2 MB), and
-  `gemma-4-E4B-it-qat-UD-Q4_K_XL.gguf` (4.22 GB) +
-  `mtp-gemma-4-E4B-it.gguf` (59.7 MB), both at the repo root — same
-  root-level-drafter pattern as 26B-A4B's `mtp-gemma-4-26B-A4B-it.gguf`
-  (252 MB next to its 14.2 GB main file). All four filenames/paths in
-  `download-models.sh` and the presets are correct.
-
-  Without MTP, E2B/E4B were observed to be significantly out-throughput by
-  the 26B-A4B (which has MTP) despite being much larger — so MTP isn't
-  optional polish here, it's the point of including these models at all.
-  Config: `model-draft = mtp-gemma-4-E{2,4}B-it.gguf`,
-  `spec-type = draft-mtp`, `spec-draft-n-max = 4`. unsloth's documented E4B
-  MTP command also uses `flash-attn = off`, which originally conflicted with
-  `[*]`'s `cache-type-k/v = q4_0` ("V cache quantization requires
-  flash_attn") — on `96gb.ini`, `[*]` is now `f16` (see KV cache section
-  above), which doesn't have that requirement, so `flash-attn = off` was
-  restored for E2B/E4B there, matching unsloth's documented command.
-  `12gb.ini`/`8gb.ini` still use `q4_0` cache, so `flash-attn = off` would
-  still conflict there — E2B/E4B on those two presets keep `flash-attn = on`
-  (from `[*]`), same as 26B-A4B's confirmed-working MTP + flash-attn=on
-  combination. `spec-draft-n-max = 4` is carried over from unsloth's
-  documented command and not independently verified for E2B/E4B, but the
-  drafter files themselves are confirmed present.
+- Avoid crashing the app on provider errors.
+- Before shutting down a previously-on target, keep the last-minute traffic poll
+  behavior unless replacing it with a stronger traffic signal.
+- Traffic keepalive must not resurrect failed targets by itself.
+- Startup estimates are observational and in-memory. Do not use them for
+  scheduling decisions.
 
 ## Testing
 
-There's no automated test suite — all verification so far has been manual,
-on actual GPU hardware (a Blackwell-class ~96GB card and a Titan X Pascal
-12GB card). Useful manual checks:
+Run before handing off code changes:
 
-- `docker compose config` — verify env var resolution (especially
-  `LLAMA_ARG_MODELS_PRESET`/`LLAMA_ARG_MODELS_MAX`) before `up`.
-- `docker compose run --rm multiple-moe /download-models.sh` — pre-warm the
-  model cache without starting the GPU server.
-- `GET /v1/models` and a minimal `POST /v1/chat/completions` per model id —
-  confirm a preset's models load and respond.
+```bash
+cd control-plane
+npm run typecheck
+npm test
+```
 
-If adding an automated smoke test, it would need to run on a GPU host (no
-CPU-only fallback is practical given model sizes) — not currently set up in
-CI.
+Most lifecycle behavior should be tested with fake providers. Do not require AWS
+or Docker for ordinary unit tests.
+
+## Documentation
+
+Update `control-plane/docs/` when changing design rationale, config shape,
+provider behavior, or reconciler semantics. The docs are part of the product
+surface for future operators and agents.

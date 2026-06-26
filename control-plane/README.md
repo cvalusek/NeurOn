@@ -11,89 +11,74 @@ It is intentionally small:
 - server-rendered HTML, not a SPA
 - OpenAPI-compatible REST endpoints
 - in-memory v1 state behind repository interfaces
-- provider adapters for Docker Compose locally and AWS ECS/ASG in production
+- provider adapters for Docker containers, Docker Compose, and AWS ECS/ASG
 - LiteLLM request-log polling for traffic-based keepalive
-
-NeurOn currently lives inside the PreFer repo for local iteration, but it is
-designed to split into its own repository.
 
 ## Local Run
 
-For pure app development without touching Docker capacity:
+For pure app development without touching real capacity:
 
 ```bash
 cd control-plane
 npm install
-SHARED_PASSWORD=dev-password USE_FAKE_PROVIDER=true npm run dev
+SHARED_PASSWORD=dev-password USE_FAKE_PROVIDER=true CAPACITY_TARGETS_FILE=examples/capacity-targets.local-fake.json npm run dev
 ```
 
 Open `http://localhost:8090`, sign in with any username and `dev-password`, or
 use Basic Auth for API calls.
 
-## Local Compose Capacity
-
-From the repository root, NeurOn starts by default. The inference container is
-behind the `llm-capacity` profile and only starts when a reservation needs it.
+From the repository root, Docker Compose runs NeurOn with the Docker provider
+and the default PreFer container target:
 
 ```bash
 docker compose up --build control-plane
 ```
 
-Then open `http://localhost:8090`.
+For app-only development, set `USE_FAKE_PROVIDER=true` and
+`CAPACITY_TARGETS_FILE=examples/capacity-targets.local-fake.json`.
 
-The local Docker provider starts capacity with:
+## Runtime Targets
+
+NeurOn does not include an inference container. Configure the targets it should
+control with one of:
+
+1. `CAPACITY_TARGETS_JSON`
+2. `CAPACITY_TARGET_KEYS` and scoped environment variables
+3. `CAPACITY_TARGETS_FILE`
+
+The examples directory includes:
+
+- `capacity-targets.local-fake.json` for local UI/API development
+- `capacity-targets.prefer-docker.json` as an installable PreFer container
+  example
+- `capacity-targets.local-docker.json` as a bring-your-own Docker Compose
+  runtime example
+- `capacity-targets.runpod.example.json` as a RunPod Pod example
+- `capacity-targets.example.json` as an AWS ECS/ASG example
+
+For Docker targets, NeurOn installs by pulling the configured image and
+creating the named container if it is missing. Normal reservations start and
+stop that installed container.
+Use the admin Discover action to temporarily start the runtime, read
+`/v1/models`, add those runtime models as selectable choices, and stop the
+target again.
+
+For Docker Compose targets, NeurOn starts capacity with:
 
 ```bash
-docker compose -p llm-hosting -f docker-compose.yml up -d --no-build multiple-moe
+docker compose -p <project-name> -f <compose-file> up -d --no-build <service>
 ```
 
 And stops it with:
 
 ```bash
-docker compose -p llm-hosting -f docker-compose.yml stop multiple-moe
+docker compose -p <project-name> -f <compose-file> stop <service>
 ```
 
-Models live in a named Docker volume mounted at `/models`, defaulting to
-`llm-hosting-model-cache`. Set `LLM_MODEL_VOLUME` to use a different cache.
-
-## Netskope Builds
-
-If local Docker builds fail with certificate errors, export your Netskope or
-corporate root/intermediate CA as `.crt` files under:
-
-```bash
-docker/certs/
-```
-
-Then build/run with the overlay:
-
-```bash
-docker compose -f docker-compose.yml -f docker-compose.netskope.yml --profile llm-capacity build multiple-moe
-docker compose -f docker-compose.yml -f docker-compose.netskope.yml up --build -d control-plane
-```
-
-With the overlay, NeurOn uses
-`control-plane/examples/capacity-targets.local-netskope.json`, so nested
-Compose starts capacity with both compose files.
-
-## UI
-
-`GET /` is the main workspace:
-
-- current user's active reservation
-- selectable model buttons
-- quick duration buttons plus custom duration
-- per-server capacity status
-- reservations grouped under the target they use
-
-Target status cards include a recent startup estimate once NeurOn has observed
-one or more provisioning-to-healthy transitions, shown as a usual time plus a
-min/max range. This state is in memory for v1 and resets when NeurOn restarts.
-
-`GET /admin` adds target controls such as reconcile and force-stop.
-
-Reservation detail pages still exist at `/reservations/:id` for direct links,
-but normal create/done/extend flows return to `/`.
+The target compose project, service, health URL, and models are all supplied by
+configuration.
+If the target service is gated by a Compose profile, set
+`dockerCompose.profiles` or `CAPACITY_TARGET_<KEY>_DOCKER_PROFILES`.
 
 ## Configuration
 
@@ -123,135 +108,20 @@ Environment variables:
 Model choices are configuration-first. Put the user-facing choices in each
 target's `models` array with display names, aliases, backend model IDs, and
 context metadata. The start page asks users to choose a capacity target first,
-then the models they expect to use on that target. When a target becomes
-healthy, NeurOn polls the target's OpenAI-compatible `/v1/models` endpoint and
-records matching runtime model IDs from `backendModelIds`/`aliases`; that
-enriches status and traffic mapping without creating surprise UI options or
-changing capacity decisions.
+then the models they expect to use on that target.
 
-`modelPresetPath` still exists as a convenience fallback for colocated PreFer
-development, but it is not the recommended production source of truth. For
-split repositories, keep the model list in NeurOn config. If you want NeurOn
-to briefly start a target once to discover runtime model IDs, enable
-`modelDiscovery.bootstrapOnStartup`.
+When a target becomes healthy, NeurOn polls the target's OpenAI-compatible
+`/v1/models` endpoint and records matching runtime model IDs from
+`backendModelIds`/`aliases`. That enriches status and traffic mapping without
+creating surprise UI options or changing capacity decisions.
+If a target has no configured models, NeurOn bootstraps runtime discovery on
+startup by briefly starting the target, reading `/v1/models`, and stopping it
+again. Set `modelDiscovery.bootstrapOnStartup=false` to disable that behavior,
+or `true` to force it for a target with configured models.
+If discovery has not populated models yet, users can still reserve the target
+itself; NeurOn treats that as keeping the full runtime available.
 
-Config precedence is:
-
-1. `CAPACITY_TARGETS_JSON`
-2. `CAPACITY_TARGET_KEYS` and scoped environment variables
-3. `CAPACITY_TARGETS_FILE`
-
-The scoped env pattern uses stable keys. For a target key `MULTIPLE_MOE_96GB`,
-target variables start with `CAPACITY_TARGET_MULTIPLE_MOE_96GB_`. Model keys
-are declared per target and nested under that same prefix.
-
-Env-only AWS example:
-
-```env
-CAPACITY_TARGET_KEYS=MULTIPLE_MOE_96GB
-CAPACITY_TARGET_MULTIPLE_MOE_96GB_ID=multiple-moe-96gb
-CAPACITY_TARGET_MULTIPLE_MOE_96GB_DISPLAY_NAME=Multiple MoE 96GB
-CAPACITY_TARGET_MULTIPLE_MOE_96GB_PROVIDER=aws-ecs
-CAPACITY_TARGET_MULTIPLE_MOE_96GB_HEALTH_CHECK_URL=http://llm-96gb.internal:8080/health
-CAPACITY_TARGET_MULTIPLE_MOE_96GB_MODELS_MAX=2
-
-CAPACITY_TARGET_MULTIPLE_MOE_96GB_AWS_CLUSTER=arn:aws:ecs:us-east-1:123456789012:cluster/llm-cluster
-CAPACITY_TARGET_MULTIPLE_MOE_96GB_AWS_SERVICE=arn:aws:ecs:us-east-1:123456789012:service/llm-cluster/llama-cpp-multiple-moe-96gb
-CAPACITY_TARGET_MULTIPLE_MOE_96GB_AWS_ASG_NAME=llm-multiple-moe-96gb-asg
-
-CAPACITY_TARGET_MULTIPLE_MOE_96GB_LITELLM_BACKEND_NAME=ecs-llama-96gb
-CAPACITY_TARGET_MULTIPLE_MOE_96GB_LITELLM_API_BASE_URL=http://llm-96gb.internal:8080/v1
-
-CAPACITY_TARGET_MULTIPLE_MOE_96GB_MODEL_KEYS=QWEN_36,GEMMA_4,GLM_47
-
-CAPACITY_TARGET_MULTIPLE_MOE_96GB_MODEL_QWEN_36_ID=qwen-3.6-35b-a3b
-CAPACITY_TARGET_MULTIPLE_MOE_96GB_MODEL_QWEN_36_DISPLAY_NAME=Qwen3.6 35B A3B
-CAPACITY_TARGET_MULTIPLE_MOE_96GB_MODEL_QWEN_36_FAMILY=Qwen 3.6
-CAPACITY_TARGET_MULTIPLE_MOE_96GB_MODEL_QWEN_36_DESCRIPTION=General coding and reasoning model
-CAPACITY_TARGET_MULTIPLE_MOE_96GB_MODEL_QWEN_36_ALIASES=qwen-3.6
-CAPACITY_TARGET_MULTIPLE_MOE_96GB_MODEL_QWEN_36_BACKEND_MODEL_IDS=qwen-3.6,qwen-3.6-35b-a3b
-CAPACITY_TARGET_MULTIPLE_MOE_96GB_MODEL_QWEN_36_CONTEXT_LABEL=256k
-
-CAPACITY_TARGET_MULTIPLE_MOE_96GB_MODEL_GEMMA_4_ID=gemma-4-26b-a4b
-CAPACITY_TARGET_MULTIPLE_MOE_96GB_MODEL_GEMMA_4_DISPLAY_NAME=Gemma 4 26B A4B
-CAPACITY_TARGET_MULTIPLE_MOE_96GB_MODEL_GEMMA_4_FAMILY=Gemma 4
-CAPACITY_TARGET_MULTIPLE_MOE_96GB_MODEL_GEMMA_4_ALIASES=gemma-4
-CAPACITY_TARGET_MULTIPLE_MOE_96GB_MODEL_GEMMA_4_BACKEND_MODEL_IDS=gemma-4,gemma-4-26b-a4b
-CAPACITY_TARGET_MULTIPLE_MOE_96GB_MODEL_GEMMA_4_CONTEXT_LABEL=128k
-
-CAPACITY_TARGET_MULTIPLE_MOE_96GB_MODEL_GLM_47_ID=glm-4.7-flash
-CAPACITY_TARGET_MULTIPLE_MOE_96GB_MODEL_GLM_47_DISPLAY_NAME=GLM 4.7 Flash
-CAPACITY_TARGET_MULTIPLE_MOE_96GB_MODEL_GLM_47_FAMILY=GLM 4.7 Flash
-CAPACITY_TARGET_MULTIPLE_MOE_96GB_MODEL_GLM_47_BACKEND_MODEL_IDS=glm-4.7-flash
-CAPACITY_TARGET_MULTIPLE_MOE_96GB_MODEL_GLM_47_CONTEXT_LABEL=198k
-```
-
-For ECS, `AWS_CLUSTER` and `AWS_SERVICE` may be names or ARNs. The Auto
-Scaling Group still uses its group name because the ASG APIs require
-`AutoScalingGroupName`.
-
-Example target config:
-
-```json
-[
-  {
-    "id": "multiple-moe-96gb",
-    "displayName": "Multiple MoE 96GB",
-    "provider": "aws-ecs",
-    "models": [
-      {
-        "id": "qwen-3.6-35b-a3b",
-        "displayName": "Qwen3.6 35B A3B",
-        "modelFamily": "Qwen 3.6",
-        "description": "General coding and reasoning model",
-        "aliases": ["qwen-3.6"],
-        "backendModelIds": ["qwen-3.6", "qwen-3.6-35b-a3b"],
-        "contextLabel": "256k"
-      },
-      {
-        "id": "qwen-3.6-35b-a3b-1m",
-        "displayName": "Qwen3.6 35B A3B 1M",
-        "modelFamily": "Qwen 3.6",
-        "description": "Long-context Qwen profile",
-        "backendModelIds": ["qwen-3.6-35b-a3b-1m"],
-        "contextLabel": "1m"
-      },
-      {
-        "id": "gemma-4-26b-a4b",
-        "displayName": "Gemma 4 26B A4B",
-        "modelFamily": "Gemma 4",
-        "description": "Gemma 4 with MTP draft support",
-        "aliases": ["gemma-4"],
-        "backendModelIds": ["gemma-4", "gemma-4-26b-a4b"],
-        "contextLabel": "128k"
-      },
-      {
-        "id": "glm-4.7-flash",
-        "displayName": "GLM 4.7 Flash",
-        "modelFamily": "GLM 4.7 Flash",
-        "description": "GLM flash/reasoning MoE model",
-        "backendModelIds": ["glm-4.7-flash"],
-        "contextLabel": "198k"
-      }
-    ],
-    "modelDiscovery": {
-      "bootstrapOnStartup": false,
-      "bootstrapTimeoutSeconds": 600
-    },
-    "modelsMax": 2,
-    "aws": {
-      "cluster": "llm-cluster",
-      "service": "llama-cpp-multiple-moe-96gb",
-      "autoScalingGroupName": "llm-multiple-moe-96gb-asg"
-    },
-    "healthCheckUrl": "http://llm-96gb.internal:8080/health",
-    "litellm": {
-      "backendName": "ecs-llama-96gb",
-      "apiBaseUrl": "http://llm-96gb.internal:8080/v1"
-    }
-  }
-]
-```
+Full configuration details live in [docs/configuration.md](docs/configuration.md).
 
 ## API Examples
 
@@ -261,7 +131,7 @@ curl -u clint:dev-password http://localhost:8090/api/models
 
 ```bash
 curl -u clint:dev-password -H 'content-type: application/json' \
-  -d '{"modelIds":["qwen-3.6-35b-a3b"],"durationMinutes":15}' \
+  -d '{"modelIds":["qwen"],"durationMinutes":15}' \
   http://localhost:8090/api/reservations
 ```
 
@@ -286,9 +156,7 @@ LITELLM_TRAFFIC_LOOKBACK_SECONDS=300
 When `LITELLM_API_BASE_URL` and `LITELLM_API_KEY` are set, the poller reads
 `GET /spend/logs/v2`, maps recent `model` values to NeurOn model IDs, and
 refreshes a synthetic `traffic` reservation. It will not resurrect a failed
-target by itself. The reconciler also performs one immediate traffic poll
-before shutting a target down, so a recent request has a chance to extend the
-keepalive before capacity is stopped.
+target by itself.
 
 ## Deployment Notes
 
@@ -318,9 +186,9 @@ Store, grant read access and inject `LITELLM_API_KEY` at runtime.
 npm run typecheck
 npm test
 npm run lint
-docker build -t llm-capacity-control-plane .
+docker build -t neuron-control-plane .
 ```
 
 State is in memory for v1. Restarting NeurOn loses reservations, but the
-reconciler reads provider state and tolerates restart without request
-handlers owning infrastructure lifecycle transitions.
+reconciler reads provider state and tolerates restart without request handlers
+owning infrastructure lifecycle transitions.

@@ -1,6 +1,7 @@
 import type { AuthenticatedUser, CapacityProviderStatus, CapacityTarget, Reservation, TargetStatus } from "./types.js";
 
 export interface CapacityProvider {
+  installTarget(target: CapacityTarget): Promise<void>;
   ensureTargetOn(target: CapacityTarget): Promise<void>;
   ensureTargetOff(target: CapacityTarget): Promise<void>;
   getTargetStatus(target: CapacityTarget): Promise<CapacityProviderStatus>;

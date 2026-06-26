@@ -4,6 +4,10 @@ import type { CapacityProviderStatus, CapacityTarget } from "../domain/types.js"
 export class CompositeCapacityProvider implements CapacityProvider {
   constructor(private readonly providers: Record<string, CapacityProvider>) {}
 
+  async installTarget(target: CapacityTarget): Promise<void> {
+    await this.providerFor(target).installTarget(target);
+  }
+
   async ensureTargetOn(target: CapacityTarget): Promise<void> {
     await this.providerFor(target).ensureTargetOn(target);
   }

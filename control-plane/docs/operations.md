@@ -72,6 +72,9 @@ Traffic keepalive cannot resurrect a failed target by itself.
 
 ## Local Development
 
-Local compose uses the Docker Compose provider and faster polling defaults.
-Netskope/corporate CA builds are supported through the compose overlay and
-`.netskope` Dockerfiles.
+Local compose uses the Docker provider and mounts the host Docker socket so
+NeurOn can install, start, and stop the configured PreFer container. Treat that
+as trusted local-admin access to Docker. Set `USE_FAKE_PROVIDER=true` for
+app-only development or tests. The Docker Compose provider remains available
+for bring-your-own local runtime projects. Netskope/corporate CA builds are
+supported through the compose overlay and `.netskope` Dockerfile.

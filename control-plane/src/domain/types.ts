@@ -38,7 +38,30 @@ export interface DockerComposeTargetConfig {
   projectName?: string;
   composeFile?: string;
   composeFiles?: string[];
+  profiles?: string[];
   serviceName: string;
+}
+
+export interface DockerContainerTargetConfig {
+  containerName: string;
+  image: string;
+  ports?: string[];
+  volumes?: string[];
+  environment?: Record<string, string>;
+  gpus?: string;
+  restart?: string;
+  network?: string;
+  command?: string[];
+  extraArgs?: string[];
+}
+
+export interface RunPodTargetConfig {
+  podId?: string;
+  apiKey?: string;
+  apiKeyEnv?: string;
+  apiBaseUrl?: string;
+  runtimePort?: number;
+  create?: Record<string, unknown>;
 }
 
 export interface ConfiguredModel {
@@ -46,6 +69,7 @@ export interface ConfiguredModel {
   displayName?: string;
   modelFamily?: string;
   aliases?: string[];
+  tags?: ModelTag[];
   description?: string;
   backendModelIds?: string[];
   contextWindowTokens?: number;
@@ -64,11 +88,13 @@ export interface CapacityTarget {
   modelIds: string[];
   models?: ConfiguredModel[];
   modelDiscovery?: RuntimeModelDiscoveryConfig;
-  modelPresetPath?: string;
   modelsMax?: number;
   aws?: AwsTargetConfig;
+  docker?: DockerContainerTargetConfig;
   dockerCompose?: DockerComposeTargetConfig;
-  healthCheckUrl: string;
+  runpod?: RunPodTargetConfig;
+  healthCheckUrl?: string;
+  runtimeApiBaseUrl?: string;
   litellm?: LiteLlmTargetConfig;
 }
 
@@ -77,14 +103,29 @@ export interface ModelDefinition {
   displayName: string;
   modelFamily?: string;
   aliases: string[];
+  tags?: ModelTag[];
   targetIds: string[];
   description?: string;
   backendModelIds?: string[];
   runtimeModelIds?: string[];
+  runtimeMeta?: RuntimeModelMeta;
   contextWindowTokens?: number;
   contextLabel?: string;
-  presetSection?: string;
-  modelPath?: string;
+}
+
+export interface ModelTag {
+  label: string;
+  title?: string;
+}
+
+export interface RuntimeModelMeta {
+  vocab_type?: number;
+  n_vocab?: number;
+  n_ctx?: number;
+  n_ctx_train?: number;
+  n_embd?: number;
+  n_params?: number;
+  size?: number;
 }
 
 export interface TargetStatus {

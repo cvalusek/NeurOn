@@ -35,6 +35,9 @@ export function layout(title: string, user: AuthenticatedUser | undefined, body:
     .copy-row { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
     .copy-chip { border: 1px solid #c8d0c9; border-radius: 999px; padding: 3px 8px; background: white; color: #334155; font: 12px ui-monospace, SFMono-Regular, Menlo, monospace; max-width: 100%; overflow-wrap: anywhere; }
     .copy-chip.primary { border-color: #0f766e; color: #0f766e; background: #f0faf7; }
+    .tag-row { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 7px; }
+    .model-tag { border-radius: 999px; padding: 2px 7px; background: #f5efe2; color: #6f4e12; font-size: 11px; font-weight: 800; letter-spacing: 0; white-space: nowrap; }
+    .model-meta { margin-top: 7px; font-size: 12px; color: #657266; }
     .status-grid { display: grid; gap: 12px; }
     .target-status-card { border: 1px solid #d8ddd7; border-radius: 8px; padding: 14px; background: #fbfcfb; }
     .target-status-head, .reservation-card { display: flex; justify-content: space-between; gap: 12px; align-items: start; }
@@ -146,7 +149,9 @@ export function startPage(user: AuthenticatedUser, targets: Array<{ target: Capa
     });
     const escapeText = (value) => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' }[char]));
     const copyButton = (value, primary = false) => '<button class="copy-chip ' + (primary ? 'primary' : '') + '" type="button" data-copy="' + escapeText(value) + '">' + escapeText(value) + '</button>';
-    const modelChipRow = (modelIds) => '<span class="chip-row">' + modelIds.map((id, index) => copyButton(modelLookup[id]?.recommendedAlias ?? id, index === 0) + ((modelLookup[id]?.recommendedAlias && modelLookup[id].recommendedAlias !== id) ? copyButton(id) : '')).join('') + '</span>';
+    const modelChipRow = (modelIds) => modelIds.length
+      ? '<span class="chip-row">' + modelIds.map((id, index) => copyButton(modelLookup[id]?.recommendedAlias ?? id, index === 0) + ((modelLookup[id]?.recommendedAlias && modelLookup[id].recommendedAlias !== id) ? copyButton(id) : '')).join('') + '</span>'
+      : '<span class="chip-row"><span class="pill">All models</span></span>';
     const statusPill = (value) => '<span class="pill ' + escapeText(value) + '">' + escapeText(value) + '</span>';
     const durationShort = (seconds) => {
       if (seconds < 60) return seconds + 's';
@@ -213,7 +218,8 @@ export function startPage(user: AuthenticatedUser, targets: Array<{ target: Capa
       selectDuration(customButton);
     });
     form.addEventListener('submit', (event) => {
-      if (!modelInputs.some(input => !input.disabled && input.checked)) {
+      const activeModelInputs = modelInputs.filter(input => !input.disabled);
+      if (activeModelInputs.length > 0 && !activeModelInputs.some(input => input.checked)) {
         event.preventDefault();
         modelInputs[0]?.setCustomValidity('Select at least one model');
         modelInputs[0]?.reportValidity();
@@ -298,13 +304,15 @@ export function adminPage(user: AuthenticatedUser, config: AppConfig): string {
       return reservation.status + ' at ' + formatDateTime(reservation.expiresAt);
     };
     async function post(url) { await fetch(url, { method: 'POST' }); refresh(); }
+    window.installTarget = (id) => post('/api/admin/targets/' + id + '/install');
+    window.discoverTarget = (id) => post('/api/admin/targets/' + id + '/discover');
     window.forceStop = (id) => post('/api/admin/targets/' + id + '/force-stop');
     window.reconcileTarget = (id) => post('/api/admin/targets/' + id + '/reconcile');
     async function refresh() {
       const res = await fetch('/api/admin/status');
       if (!res.ok) return;
       const data = await res.json();
-      const targets = data.capacityTargets.map(t => '<tr><td>' + t.id + '</td><td>' + t.desired + '</td><td>' + t.observed + '</td><td>' + t.message + '</td><td>' + t.activeUsers.join(', ') + '</td><td><button onclick="reconcileTarget(\\'' + t.id + '\\')">Reconcile</button> <button class="danger" onclick="forceStop(\\'' + t.id + '\\')">Force stop</button></td></tr>').join('');
+      const targets = data.capacityTargets.map(t => '<tr><td>' + t.id + '</td><td>' + t.desired + '</td><td>' + t.observed + '</td><td>' + t.message + '</td><td>' + t.activeUsers.join(', ') + '</td><td><button onclick="installTarget(\\'' + t.id + '\\')">Install</button> <button onclick="discoverTarget(\\'' + t.id + '\\')">Discover</button> <button onclick="reconcileTarget(\\'' + t.id + '\\')">Reconcile</button> <button class="danger" onclick="forceStop(\\'' + t.id + '\\')">Force stop</button></td></tr>').join('');
       const reservations = data.reservations.map(r => '<tr><td>' + r.reservationId + '</td><td>' + r.username + '</td><td>' + statusBadge(r.status) + '</td><td>' + reservationTime(r) + '</td><td>' + r.modelIds.join(', ') + '</td></tr>').join('');
       document.querySelector('#admin-status').innerHTML = '<h2>Targets</h2><table><thead><tr><th>Target</th><th>Desired</th><th>Observed</th><th>Message</th><th>Users</th><th></th></tr></thead><tbody>' + targets + '</tbody></table><h2>Reservations</h2><table><thead><tr><th>ID</th><th>User</th><th>Status</th><th>Expires</th><th>Models</th></tr></thead><tbody>' + reservations + '</tbody></table>';
     }
@@ -338,12 +346,15 @@ function modelOption(model: ModelDefinition): string {
     ...otherAliases.map((alias) => copyChip(alias)),
     ...runtimeModelIds.map((id) => copyChip(id))
   ].join("");
-  const context = model.contextLabel ? `<span class="pill">${escapeHtml(model.contextLabel)}</span>` : "";
+  const context = model.contextLabel ? `<span class="pill" title="${escapeHtml(contextTitle(model))}">${escapeHtml(model.contextLabel)}</span>` : "";
   const description = model.description ? `<div class="muted">${escapeHtml(model.description)}</div>` : "";
-  return `<label class="option"><input type="checkbox" name="modelIds" value="${escapeHtml(model.id)}"><span class="model-body"><span class="model-head"><strong>${escapeHtml(model.displayName)}</strong>${context}</span>${description}<span class="copy-row">${chips}</span></span></label>`;
+  const tags = model.tags?.length ? `<span class="tag-row">${model.tags.map(modelTag).join("")}</span>` : "";
+  const meta = runtimeMetaLine(model);
+  return `<label class="option"><input type="checkbox" name="modelIds" value="${escapeHtml(model.id)}"><span class="model-body"><span class="model-head"><strong>${escapeHtml(model.displayName)}</strong>${context}</span>${description}${tags}${meta}<span class="copy-row">${chips}</span></span></label>`;
 }
 
 function modelFamilySections(models: ModelDefinition[]): string {
+  if (models.length === 0) return `<p class="muted">No models discovered yet. Reserving this target keeps the full runtime available.</p>`;
   return groupModelsByFamily(models)
     .map(
       ([family, familyModels]) =>
@@ -377,6 +388,51 @@ function aliasesForDisplay(model: ModelDefinition): string[] {
 function copyChip(value: string, variant = ""): string {
   const classes = ["copy-chip", variant].filter(Boolean).join(" ");
   return `<button class="${classes}" type="button" data-copy="${escapeHtml(value)}" title="Copy ${escapeHtml(value)}">${escapeHtml(value)}</button>`;
+}
+
+function modelTag(tag: NonNullable<ModelDefinition["tags"]>[number]): string {
+  const title = tag.title ? ` title="${escapeHtml(tag.title)}"` : "";
+  return `<span class="model-tag"${title}>${escapeHtml(tag.label)}</span>`;
+}
+
+function contextTitle(model: ModelDefinition): string {
+  const meta = model.runtimeMeta;
+  if (!meta) return "Context window";
+  const details = [];
+  if (meta.n_ctx) details.push(`loaded context ${formatInteger(meta.n_ctx)}`);
+  if (meta.n_ctx_train && meta.n_ctx_train !== meta.n_ctx) details.push(`training context ${formatInteger(meta.n_ctx_train)}`);
+  return details.length ? details.join(", ") : "Context window";
+}
+
+function runtimeMetaLine(model: ModelDefinition): string {
+  const meta = model.runtimeMeta;
+  if (!meta) return "";
+  const details = [
+    meta.n_params ? `${formatCompactNumber(meta.n_params)} params` : "",
+    meta.size ? formatBytes(meta.size) : "",
+    meta.n_vocab ? `${formatInteger(meta.n_vocab)} vocab` : "",
+    meta.n_embd ? `${formatInteger(meta.n_embd)} embd` : ""
+  ].filter(Boolean);
+  return details.length ? `<div class="model-meta">${escapeHtml(details.join(" | "))}</div>` : "";
+}
+
+function formatInteger(value: number): string {
+  return new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 }).format(value);
+}
+
+function formatCompactNumber(value: number): string {
+  return new Intl.NumberFormat("en-US", { notation: "compact", maximumFractionDigits: 1 }).format(value);
+}
+
+function formatBytes(value: number): string {
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  let size = value;
+  let unitIndex = 0;
+  while (size >= 1000 && unitIndex < units.length - 1) {
+    size /= 1000;
+    unitIndex += 1;
+  }
+  return `${new Intl.NumberFormat("en-US", { maximumFractionDigits: 1 }).format(size)} ${units[unitIndex]}`;
 }
 
 function modelLookupForTargets(targets: Array<{ target: CapacityTarget; models: ModelDefinition[] }>): Record<string, { displayName: string; recommendedAlias: string }> {

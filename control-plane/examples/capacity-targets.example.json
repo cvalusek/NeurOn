@@ -1,7 +1,7 @@
 [
   {
-    "id": "multiple-moe-96gb",
-    "displayName": "Multiple MoE 96GB",
+    "id": "gpu-pool-96gb",
+    "displayName": "GPU Pool 96GB",
     "provider": "aws-ecs",
     "models": [
       {
@@ -46,8 +46,8 @@
     "modelsMax": 2,
     "aws": {
       "cluster": "llm-cluster",
-      "service": "llama-cpp-multiple-moe-96gb",
-      "autoScalingGroupName": "llm-multiple-moe-96gb-asg"
+      "service": "llama-cpp-gpu-pool-96gb",
+      "autoScalingGroupName": "llm-gpu-pool-96gb-asg"
     },
     "healthCheckUrl": "http://llm-96gb.internal:8080/health",
     "litellm": {

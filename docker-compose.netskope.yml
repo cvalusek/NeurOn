@@ -3,10 +3,3 @@ services:
     build:
       context: .
       dockerfile: control-plane/Dockerfile.netskope
-    environment:
-      - CAPACITY_TARGETS_FILE=/workspace/control-plane/examples/capacity-targets.local-netskope.json
-
-  multiple-moe:
-    build:
-      context: .
-      dockerfile: docker/multiple-moe/Dockerfile.netskope

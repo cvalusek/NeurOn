@@ -23,9 +23,9 @@ knowledge that should survive the eventual split into a dedicated repository.
 
 # Scope
 
-This bundle documents NeurOn, not the PreFer inference presets. PreFer-specific
-GPU, model-download, and llama.cpp preset rationale belongs in the parent repo's
-documentation.
+This bundle documents NeurOn. Runtime-specific GPU, model-download, and
+llama.cpp tuning rationale belongs with the external runtime project that owns
+those choices.
 
 # Citations
 

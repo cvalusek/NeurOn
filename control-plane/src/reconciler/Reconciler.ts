@@ -30,6 +30,9 @@ export class Reconciler {
         let desired: DesiredState = desiredOn.has(target.id) ? "on" : "off";
         const previous = this.statuses.get(target.id);
         try {
+          if (desired === "off" && previous?.observed === "failed" && previous.message.startsWith("Runtime model discovery bootstrap failed")) {
+            continue;
+          }
           if (desired === "off" && previous?.desired === "on" && this.trafficPoller) {
             await this.trafficPoller.poll(now);
             const refreshedActive = await this.reservations.listActive(now);
@@ -43,7 +46,7 @@ export class Reconciler {
           const providerStatus = await this.capacityProvider.getTargetStatus(target);
           let observed = desired === "off" && providerStatus.observed === "healthy" ? "stopping" : providerStatus.observed;
           let message = providerStatus.message;
-          if (desired === "on" && providerStatus.observed === "healthy" && this.healthChecker) {
+          if (desired === "on" && providerStatus.observed === "healthy" && this.healthChecker && target.healthCheckUrl) {
             const health = await this.healthChecker.check(target);
             observed = health.ok ? "healthy" : "provisioning";
             message = health.message;

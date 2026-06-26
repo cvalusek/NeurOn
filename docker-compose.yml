@@ -3,7 +3,9 @@ services:
     build:
       context: ./control-plane
       dockerfile: Dockerfile
-    image: llm-capacity-control-plane:local
+    image: neuron-control-plane:local
+    env_file:
+      - .env
     ports:
       - "${CONTROL_PLANE_PORT:-8090}:8090"
     volumes:
@@ -13,40 +15,18 @@ services:
       - PORT=8090
       - SHARED_PASSWORD=${SHARED_PASSWORD:-dev-password}
       - COOKIE_SECRET=${COOKIE_SECRET:-dev-cookie-secret}
-      - CAPACITY_TARGETS_FILE=/workspace/control-plane/examples/capacity-targets.local-docker.json
-      - USE_FAKE_PROVIDER=false
+      - ADMIN_USERS=${ADMIN_USERS:-}
+      - CAPACITY_TARGETS_FILE=${CAPACITY_TARGETS_FILE:-/workspace/control-plane/examples/capacity-targets.prefer-docker.json}
+      - CAPACITY_TARGETS_JSON=${CAPACITY_TARGETS_JSON:-}
+      - CAPACITY_TARGET_KEYS=${CAPACITY_TARGET_KEYS:-}
+      - USE_FAKE_PROVIDER=${USE_FAKE_PROVIDER:-false}
       - RECONCILER_INTERVAL_SECONDS=${RECONCILER_INTERVAL_SECONDS:-15}
       - RESERVATION_STATUS_POLL_SECONDS=${RESERVATION_STATUS_POLL_SECONDS:-5}
       - ADMIN_STATUS_POLL_SECONDS=${ADMIN_STATUS_POLL_SECONDS:-10}
-      - HF_TOKEN=${HF_TOKEN:-}
-      - LLAMA_ARG_MODELS_PRESET=${LLAMA_ARG_MODELS_PRESET:-}
-      - LLAMA_ARG_MODELS_MAX=${LLAMA_ARG_MODELS_MAX:-1}
-      - PRESTAGE_MODELS=${PRESTAGE_MODELS:-}
-
-  multiple-moe:
-    profiles:
-      - llm-capacity
-    build:
-      context: ./docker/multiple-moe
-      dockerfile: Dockerfile
-    image: multiple-moe:local
-    ports:
-      - "${LLM_PORT:-8080}:8080"
-    volumes:
-      - llm-model-cache:/models
-    environment:
-      - HF_TOKEN=${HF_TOKEN:-}
-      - LLAMA_ARG_MODELS_PRESET=${LLAMA_ARG_MODELS_PRESET:-}
-      - LLAMA_ARG_MODELS_MAX=${LLAMA_ARG_MODELS_MAX:-1}
-      - PRESTAGE_MODELS=${PRESTAGE_MODELS:-}
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [gpu]
-
-volumes:
-  llm-model-cache:
-    name: ${LLM_MODEL_VOLUME:-llm-hosting-model-cache}
+      - HEALTH_CHECK_TIMEOUT_SECONDS=${HEALTH_CHECK_TIMEOUT_SECONDS:-5}
+      - HEALTH_CHECK_INTERVAL_SECONDS=${HEALTH_CHECK_INTERVAL_SECONDS:-15}
+      - LITELLM_API_BASE_URL=${LITELLM_API_BASE_URL:-}
+      - LITELLM_API_KEY=${LITELLM_API_KEY:-}
+      - LITELLM_TRAFFIC_POLL_SECONDS=${LITELLM_TRAFFIC_POLL_SECONDS:-60}
+      - LITELLM_TRAFFIC_LOOKBACK_SECONDS=${LITELLM_TRAFFIC_LOOKBACK_SECONDS:-300}
+      - AWS_REGION=${AWS_REGION:-us-east-1}

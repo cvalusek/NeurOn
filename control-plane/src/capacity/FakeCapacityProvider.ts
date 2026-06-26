@@ -5,6 +5,10 @@ export class FakeCapacityProvider implements CapacityProvider {
   readonly desired = new Map<string, "on" | "off">();
   readonly statuses = new Map<string, CapacityProviderStatus>();
 
+  async installTarget(target: CapacityTarget): Promise<void> {
+    if (!this.statuses.has(target.id)) this.statuses.set(target.id, { observed: "stopped", message: "Installed fake target" });
+  }
+
   async ensureTargetOn(target: CapacityTarget): Promise<void> {
     this.desired.set(target.id, "on");
     if (!this.statuses.has(target.id)) this.statuses.set(target.id, { observed: "provisioning", message: "Provisioning" });

@@ -6,6 +6,12 @@ import type { CapacityProviderStatus, CapacityTarget } from "../domain/types.js"
 const execFileAsync = promisify(execFile);
 
 export class DockerComposeCapacityProvider implements CapacityProvider {
+  async installTarget(target: CapacityTarget): Promise<void> {
+    const docker = requireDockerCompose(target);
+    await this.compose(target, ["pull", docker.serviceName]);
+    await this.compose(target, ["create", "--no-start", docker.serviceName], false);
+  }
+
   async ensureTargetOn(target: CapacityTarget): Promise<void> {
     const docker = requireDockerCompose(target);
     await this.compose(target, ["up", "-d", "--no-build", docker.serviceName]);
@@ -42,6 +48,9 @@ export class DockerComposeCapacityProvider implements CapacityProvider {
     if (docker.projectName) composeArgs.push("-p", docker.projectName);
     for (const composeFile of docker.composeFiles ?? (docker.composeFile ? [docker.composeFile] : [])) {
       composeArgs.push("-f", composeFile);
+    }
+    for (const profile of docker.profiles ?? []) {
+      composeArgs.push("--profile", profile);
     }
     composeArgs.push(...args);
     try {

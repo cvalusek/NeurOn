@@ -12,6 +12,10 @@ export class AwsEcsAsgCapacityProvider implements CapacityProvider {
     this.asg = new AutoScalingClient({ region });
   }
 
+  async installTarget(_target: CapacityTarget): Promise<void> {
+    throw new Error("AWS ECS/ASG target installation is not implemented");
+  }
+
   async ensureTargetOn(target: CapacityTarget): Promise<void> {
     const aws = requireAws(target);
     await this.asg.send(new SetDesiredCapacityCommand({ AutoScalingGroupName: aws.autoScalingGroupName, DesiredCapacity: 1, HonorCooldown: false }));

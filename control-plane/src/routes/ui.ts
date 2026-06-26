@@ -29,9 +29,15 @@ export function registerUiRoutes(
   });
   app.post("/reservations", async (request, reply) => {
     try {
-      const raw = z.object({ modelIds: z.union([z.string(), z.array(z.string())]), durationMinutes: z.coerce.number() }).parse(request.body);
-      const modelIds = Array.isArray(raw.modelIds) ? raw.modelIds : [raw.modelIds];
-      await reservationService.createForUser(requireUser(request), { modelIds, durationMinutes: raw.durationMinutes });
+      const raw = z
+        .object({
+          modelIds: z.union([z.string(), z.array(z.string())]).optional(),
+          targetId: z.string(),
+          durationMinutes: z.coerce.number()
+        })
+        .parse(request.body);
+      const modelIds = raw.modelIds ? (Array.isArray(raw.modelIds) ? raw.modelIds : [raw.modelIds]) : [];
+      await reservationService.createForUser(requireUser(request), { modelIds, targetIds: [raw.targetId], durationMinutes: raw.durationMinutes });
       return reply.redirect("/");
     } catch (error) {
       const message = reservationFormErrorMessage(error);
@@ -63,6 +69,9 @@ function reservationFormErrorMessage(error: unknown): string {
   }
   if (error instanceof Error && error.message.includes("At least one model")) {
     return "Select at least one model";
+  }
+  if (error instanceof Error && error.message.includes("At least one target")) {
+    return "Select a target";
   }
   if (error instanceof Error && error.message.includes("Duration")) {
     return error.message;

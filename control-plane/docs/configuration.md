@@ -53,8 +53,8 @@ CAPACITY_TARGET_KEYS=MULTIPLE_MOE_96GB
 Then define scoped variables:
 
 ```env
-CAPACITY_TARGET_MULTIPLE_MOE_96GB_ID=multiple-moe-96gb
-CAPACITY_TARGET_MULTIPLE_MOE_96GB_DISPLAY_NAME=Multiple MoE 96GB
+CAPACITY_TARGET_MULTIPLE_MOE_96GB_ID=gpu-pool-96gb
+CAPACITY_TARGET_MULTIPLE_MOE_96GB_DISPLAY_NAME=GPU Pool 96GB
 CAPACITY_TARGET_MULTIPLE_MOE_96GB_PROVIDER=aws-ecs
 CAPACITY_TARGET_MULTIPLE_MOE_96GB_HEALTH_CHECK_URL=http://llm-96gb.internal:8080/health
 ```
@@ -75,8 +75,8 @@ CAPACITY_TARGET_MULTIPLE_MOE_96GB_MODEL_QWEN_36_CONTEXT_LABEL=256k
 
 ```env
 CAPACITY_TARGET_MULTIPLE_MOE_96GB_AWS_CLUSTER=llm-cluster
-CAPACITY_TARGET_MULTIPLE_MOE_96GB_AWS_SERVICE=llama-cpp-multiple-moe-96gb
-CAPACITY_TARGET_MULTIPLE_MOE_96GB_AWS_ASG_NAME=llm-multiple-moe-96gb-asg
+CAPACITY_TARGET_MULTIPLE_MOE_96GB_AWS_SERVICE=llama-cpp-gpu-pool-96gb
+CAPACITY_TARGET_MULTIPLE_MOE_96GB_AWS_ASG_NAME=llm-gpu-pool-96gb-asg
 ```
 
 `AWS_CLUSTER` and `AWS_SERVICE` may be names or ARNs. The Auto Scaling Group
@@ -85,22 +85,78 @@ must be supplied by name because Auto Scaling APIs use `AutoScalingGroupName`.
 Older JSON fields `clusterName` and `serviceName` are still supported, but new
 configs should use `cluster` and `service`.
 
-## Docker Compose Env Fields
+## RunPod Env Fields
+
+Use `runpod` provider targets when NeurOn should start and stop an existing
+RunPod Pod:
+
+```env
+CAPACITY_TARGET_RUNPOD_PROVIDER=runpod
+CAPACITY_TARGET_RUNPOD_RUNPOD_POD_ID=your-runpod-pod-id
+CAPACITY_TARGET_RUNPOD_RUNPOD_API_KEY_ENV=RUNPOD_API_KEY
+CAPACITY_TARGET_RUNPOD_RUNPOD_RUNTIME_PORT=8080
+```
+
+`HEALTH_CHECK_URL` is optional for RunPod targets. Without it, NeurOn trusts
+RunPod Pod status for capacity readiness. For model discovery, NeurOn infers
+RunPod's proxy URL as `https://<pod-id>-<port>.proxy.runpod.net/v1` from
+`RUNPOD_POD_ID` and `RUNPOD_RUNTIME_PORT`. Set `RUNTIME_API_BASE_URL` only when
+that inferred URL is not right for your runtime.
+
+For installable targets, provide the RunPod create Pod request body as JSON:
+
+```env
+CAPACITY_TARGET_RUNPOD_RUNPOD_CREATE_JSON={"name":"prefer","imageName":"ghcr.io/cvalusek/prefer:latest"}
+```
+
+Created Pod IDs are held in memory for v1. For durable deployments, prefer
+configuring an existing `podId` until persistent target installation state
+exists.
+
+`LITELLM_BACKEND_NAME` and target-level `LITELLM_API_BASE_URL` are optional.
+They are only for syncing a LiteLLM backend entry when a target becomes healthy;
+they are not required for RunPod start/stop or model discovery.
+
+## Docker Env Fields
+
+Use `docker` provider targets when NeurOn should install and control a named
+container from an image. Model lists may be omitted when you want runtime
+discovery to populate choices from `/v1/models`:
+
+```env
+CAPACITY_TARGET_LOCAL_PROVIDER=docker
+CAPACITY_TARGET_LOCAL_DOCKER_CONTAINER_NAME=prefer
+CAPACITY_TARGET_LOCAL_DOCKER_IMAGE=ghcr.io/cvalusek/prefer:latest
+CAPACITY_TARGET_LOCAL_DOCKER_PORTS=8080:8080
+CAPACITY_TARGET_LOCAL_DOCKER_VOLUMES=prefer-model-cache:/models
+CAPACITY_TARGET_LOCAL_DOCKER_GPUS=all
+CAPACITY_TARGET_LOCAL_DOCKER_ENV_KEYS=LLAMA_ARG_MODELS_MAX
+CAPACITY_TARGET_LOCAL_DOCKER_ENV_LLAMA_ARG_MODELS_MAX=1
+```
+
+Use `docker-compose` provider targets when the runtime is still owned by a
+Compose project:
 
 ```env
 CAPACITY_TARGET_LOCAL_PROVIDER=docker-compose
 CAPACITY_TARGET_LOCAL_DOCKER_PROJECT_DIRECTORY=/workspace
-CAPACITY_TARGET_LOCAL_DOCKER_PROJECT_NAME=llm-hosting
+CAPACITY_TARGET_LOCAL_DOCKER_PROJECT_NAME=local-llm
 CAPACITY_TARGET_LOCAL_DOCKER_COMPOSE_FILE=docker-compose.yml
-CAPACITY_TARGET_LOCAL_DOCKER_SERVICE_NAME=multiple-moe
+CAPACITY_TARGET_LOCAL_DOCKER_PROFILES=PreFer
+CAPACITY_TARGET_LOCAL_DOCKER_SERVICE_NAME=llm-runtime
 ```
 
 Use `DOCKER_COMPOSE_FILES` as a comma-separated list when an overlay is needed.
+Use `DOCKER_PROFILES` as a comma-separated list when the target service lives
+behind one or more Compose profiles.
 
 ## Runtime Model Discovery
 
 Explicit model config is the normal source of truth. Runtime discovery enriches
 models with IDs reported by the backend. It should not be treated as a solver.
+When a target has no configured models, NeurOn bootstraps discovery on startup
+by starting the target, waiting for health, reading `/v1/models`, and stopping
+the target again. Set `bootstrapOnStartup=false` to opt out.
 
 Optional bootstrap:
 
