@@ -1,5 +1,7 @@
 # NeurOn
 
+[![License: AGPL v3](https://img.shields.io/badge/License-AGPL%20v3-blue.svg)](https://www.gnu.org/licenses/agpl-3.0)
+
 NeurOn is a lightweight control plane for shared self-hosted LLM capacity. It
 lets developers reserve the runtime targets and models they expect to use,
 keeps matching capacity on while reservations or recent traffic need it, and
