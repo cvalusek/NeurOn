@@ -92,7 +92,8 @@ export function startPage(user: AuthenticatedUser, targets: Array<{ target: Capa
     <h1>Start capacity</h1>
     ${error ? `<p class="status">${escapeHtml(error)}</p>` : ""}
     <form id="start-form" method="post" action="/reservations">
-      <input id="duration-minutes" type="hidden" name="durationMinutes" value="5">
+      <input id="duration-minutes" type="hidden" name="durationMinutes" value="2">
+      <input id="keepalive-minutes" type="hidden" name="keepaliveMinutes" value="2">
       <h2>Target</h2>
       <div class="targets">${targets
         .map(({ target }, index) => targetOption(target, index === 0))
@@ -106,7 +107,9 @@ export function startPage(user: AuthenticatedUser, targets: Array<{ target: Capa
         .join("")}
       <h2>Duration</h2>
       <div class="row" aria-label="Duration">
-        <button class="choice" type="button" data-duration="5" aria-pressed="true">5 min</button>
+        <button class="choice" type="button" data-duration="1" aria-pressed="false">1 min</button>
+        <button class="choice" type="button" data-duration="2" aria-pressed="true">2 min</button>
+        <button class="choice" type="button" data-duration="5" aria-pressed="false">5 min</button>
         <button class="choice" type="button" data-duration="15" aria-pressed="false">15 min</button>
         <button class="choice" type="button" data-duration="30" aria-pressed="false">30 min</button>
         <button class="choice" type="button" data-duration="60" aria-pressed="false">1 hour</button>
@@ -115,6 +118,17 @@ export function startPage(user: AuthenticatedUser, targets: Array<{ target: Capa
       <div class="row" style="margin-top: 12px;">
         <button class="choice" type="button" data-custom-duration="true" aria-pressed="false">Custom</button>
         <label id="custom-duration-wrap" class="hidden">Minutes <input id="custom-duration" type="number" min="1" max="720" value="120"></label>
+      </div>
+      <h2>Keepalive</h2>
+      <div class="row" aria-label="Keepalive">
+        <button class="choice" type="button" data-keepalive="1" aria-pressed="false">1 min</button>
+        <button class="choice" type="button" data-keepalive="2" aria-pressed="true">2 min</button>
+        <button class="choice" type="button" data-keepalive="5" aria-pressed="false">5 min</button>
+        <button class="choice" type="button" data-keepalive="15" aria-pressed="false">15 min</button>
+      </div>
+      <div class="row" style="margin-top: 12px;">
+        <button class="choice" type="button" data-custom-keepalive="true" aria-pressed="false">Custom</button>
+        <label id="custom-keepalive-wrap" class="hidden">Minutes <input id="custom-keepalive" type="number" min="1" max="60" value="2"></label>
       </div>
       <div class="actions">
         <button type="submit">Reserve</button>
@@ -130,11 +144,15 @@ export function startPage(user: AuthenticatedUser, targets: Array<{ target: Capa
     const targetLookup = ${safeJson(targetLookupForTargets(targets))};
     const form = document.querySelector('#start-form');
     const duration = document.querySelector('#duration-minutes');
+    const keepalive = document.querySelector('#keepalive-minutes');
     const custom = document.querySelector('#custom-duration');
+    const customKeepalive = document.querySelector('#custom-keepalive');
     const modelInputs = [...document.querySelectorAll('input[name="modelIds"]')];
     const targetInputs = [...document.querySelectorAll('input[name="targetId"]')];
     const durationButtons = [...document.querySelectorAll('[data-duration], [data-custom-duration]')];
+    const keepaliveButtons = [...document.querySelectorAll('[data-keepalive], [data-custom-keepalive]')];
     const customWrap = document.querySelector('#custom-duration-wrap');
+    const customKeepaliveWrap = document.querySelector('#custom-keepalive-wrap');
     document.addEventListener('click', async (event) => {
       const button = event.target.closest('[data-copy]');
       if (!button) return;
@@ -184,7 +202,7 @@ export function startPage(user: AuthenticatedUser, targets: Array<{ target: Capa
     const reservationTargets = (reservation) => reservation.targets.map(target => targetLookup[target.id]?.displayName ?? target.id).join(', ');
     const reservationCard = (reservation, includeActions = false) => {
       const actions = includeActions
-        ? '<div class="reservation-actions"><form method="post" action="/reservations/' + reservation.reservationId + '/extend"><button class="secondary" name="durationMinutes" value="5" type="submit">+5 min</button></form><form method="post" action="/reservations/' + reservation.reservationId + '/extend"><button class="secondary" name="durationMinutes" value="15" type="submit">+15 min</button></form><form method="post" action="/reservations/' + reservation.reservationId + '/extend"><button class="secondary" name="durationMinutes" value="30" type="submit">+30 min</button></form><form method="post" action="/reservations/' + reservation.reservationId + '/extend"><button class="secondary" name="durationMinutes" value="60" type="submit">+1 hour</button></form><form method="post" action="/reservations/' + reservation.reservationId + '/done"><button class="danger" type="submit">I\\'m done</button></form></div>'
+        ? '<div class="reservation-actions"><form method="post" action="/reservations/' + reservation.reservationId + '/extend"><button class="secondary" name="durationMinutes" value="1" type="submit">+1 min</button></form><form method="post" action="/reservations/' + reservation.reservationId + '/extend"><button class="secondary" name="durationMinutes" value="2" type="submit">+2 min</button></form><form method="post" action="/reservations/' + reservation.reservationId + '/extend"><button class="secondary" name="durationMinutes" value="5" type="submit">+5 min</button></form><form method="post" action="/reservations/' + reservation.reservationId + '/extend"><button class="secondary" name="durationMinutes" value="15" type="submit">+15 min</button></form><form method="post" action="/reservations/' + reservation.reservationId + '/extend"><button class="secondary" name="durationMinutes" value="30" type="submit">+30 min</button></form><form method="post" action="/reservations/' + reservation.reservationId + '/extend"><button class="secondary" name="durationMinutes" value="60" type="submit">+1 hour</button></form><form method="post" action="/reservations/' + reservation.reservationId + '/done"><button class="danger" type="submit">I\\'m done</button></form></div>'
         : '';
       return '<div class="reservation-card"><div><div class="reservation-meta">' + statusBadge(reservation.status) + '<strong>' + escapeText(reservation.username) + '</strong><span class="muted">' + escapeText(reservationTime(reservation)) + '</span></div><div class="muted">' + escapeText(reservationTargets(reservation)) + '</div>' + modelChipRow(reservation.modelIds) + '</div>' + actions + '</div>';
     };
@@ -202,6 +220,14 @@ export function startPage(user: AuthenticatedUser, targets: Array<{ target: Capa
       if (isCustom) custom.focus();
     };
     durationButtons.forEach(button => button.addEventListener('click', () => selectDuration(button)));
+    const selectKeepalive = (button) => {
+      keepaliveButtons.forEach(candidate => candidate.setAttribute('aria-pressed', candidate === button ? 'true' : 'false'));
+      const isCustom = Boolean(button?.dataset.customKeepalive);
+      customKeepaliveWrap.classList.toggle('hidden', !isCustom);
+      keepalive.value = isCustom ? customKeepalive.value : button?.dataset.keepalive ?? keepalive.value;
+      if (isCustom) customKeepalive.focus();
+    };
+    keepaliveButtons.forEach(button => button.addEventListener('click', () => selectKeepalive(button)));
     const selectTarget = (targetId) => {
       document.querySelectorAll('[data-target-models]').forEach(group => {
         const active = group.dataset.targetModels === targetId;
@@ -217,6 +243,10 @@ export function startPage(user: AuthenticatedUser, targets: Array<{ target: Capa
     custom.addEventListener('input', () => {
       const customButton = document.querySelector('[data-custom-duration]');
       selectDuration(customButton);
+    });
+    customKeepalive.addEventListener('input', () => {
+      const customButton = document.querySelector('[data-custom-keepalive]');
+      selectKeepalive(customButton);
     });
     form.addEventListener('submit', (event) => {
       const activeModelInputs = modelInputs.filter(input => !input.disabled);

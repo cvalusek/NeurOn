@@ -26,7 +26,7 @@ export function registerApiRoutes(
 
   app.post("/api/reservations", async (request, reply) => {
     try {
-      const body = z.object({ modelIds: z.array(z.string()).default([]), targetIds: z.array(z.string()).default([]), durationMinutes: z.number() }).parse(request.body);
+      const body = z.object({ modelIds: z.array(z.string()).default([]), targetIds: z.array(z.string()).default([]), durationMinutes: z.number(), keepaliveMinutes: z.number().optional() }).parse(request.body);
       const reservation = await reservationService.createForUser(requireUser(request), body);
       return reply.code(201).send(reservationJson(reservation, statuses.list()));
     } catch (error) {

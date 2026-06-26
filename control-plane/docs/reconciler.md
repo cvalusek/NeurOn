@@ -59,7 +59,9 @@ refresh the synthetic `traffic` reservation before capacity is stopped.
 
 The keepalive still cannot resurrect a failed target by itself. It only extends
 capacity that is already healthy or currently needed by a real active
-reservation.
+reservation. When real reservations are active, traffic keepalive uses their
+configured keepalive window; otherwise an existing synthetic traffic reservation
+keeps carrying its previous window.
 
 ## Startup Estimates
 

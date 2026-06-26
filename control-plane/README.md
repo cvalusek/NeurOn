@@ -160,7 +160,8 @@ LITELLM_TRAFFIC_LOOKBACK_SECONDS=300
 When `LITELLM_API_BASE_URL` and `LITELLM_API_KEY` are set, the poller reads
 LiteLLM spend logs, maps recent `model_group`/`model` values to NeurOn model IDs
 or target traffic prefixes, and refreshes a synthetic `traffic` reservation. It
-will not resurrect a failed target by itself.
+uses the active reservation's keepalive window and will not resurrect a failed
+target by itself.
 
 ## Deployment Notes
 

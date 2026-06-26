@@ -26,6 +26,8 @@ Important fields:
 - `targetIds`
 - `createdAt`
 - `expiresAt`
+- `keepaliveMinutes`: the traffic keepalive window to apply while the
+  reservation is active
 - `endedAt`
 - `status`: `active`, `done`, `expired`, or `failed`
 - optional `failureMessage`
@@ -106,7 +108,8 @@ into AWS, Docker, LiteLLM, or the in-memory repository from unrelated code.
 ## Request Flow
 
 1. Auth resolves an `AuthenticatedUser`.
-2. UI or API creates a reservation with model IDs and duration.
+2. UI or API creates a reservation with model IDs, duration, and keepalive
+   window.
 3. `ReservationService` maps models to targets through `ModelCatalog`.
 4. Request handler stores intent only. It does not directly start or stop
    infrastructure.

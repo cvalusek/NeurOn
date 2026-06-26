@@ -1,7 +1,7 @@
 import type { ReservationRepository, TargetStatusRepository } from "../domain/interfaces.js";
 import type { CapacityTarget } from "../domain/types.js";
 
-const TRAFFIC_KEEPALIVE_MINUTES = 5;
+const DEFAULT_TRAFFIC_KEEPALIVE_MINUTES = 2;
 
 export class TrafficKeepaliveService {
   constructor(
@@ -13,17 +13,19 @@ export class TrafficKeepaliveService {
     const status = this.statuses.get(target.id);
     if (status?.observed === "failed") return false;
 
-    const expiresAt = new Date(seenAt.getTime() + TRAFFIC_KEEPALIVE_MINUTES * 60_000);
+    const active = await this.repository.listActive(checkedAt);
+    const realReservations = active.filter((reservation) => !reservation.synthetic && reservation.targetIds.includes(target.id));
+    const existing = active.find((reservation) => reservation.synthetic && reservation.username === "traffic" && reservation.targetIds.includes(target.id));
+    const keepaliveMinutes = keepaliveMinutesFor(realReservations, existing?.keepaliveMinutes);
+    const expiresAt = new Date(seenAt.getTime() + keepaliveMinutes * 60_000);
     if (expiresAt <= checkedAt) return false;
 
-    const active = await this.repository.listActive(checkedAt);
-    const hasRealReservation = active.some((reservation) => !reservation.synthetic && reservation.targetIds.includes(target.id));
+    const hasRealReservation = realReservations.length > 0;
     const alreadyHealthy = status?.observed === "healthy";
     if (!hasRealReservation && !alreadyHealthy) return false;
 
-    const existing = active.find((reservation) => reservation.synthetic && reservation.username === "traffic" && reservation.targetIds.includes(target.id));
     if (existing) {
-      await this.repository.update(existing.id, { expiresAt, modelIds: Array.from(new Set([...existing.modelIds, ...modelIds])) });
+      await this.repository.update(existing.id, { expiresAt, keepaliveMinutes, modelIds: Array.from(new Set([...existing.modelIds, ...modelIds])) });
     } else {
       await this.repository.create({
         username: "traffic",
@@ -31,10 +33,17 @@ export class TrafficKeepaliveService {
         targetIds: [target.id],
         createdAt: seenAt,
         expiresAt,
+        keepaliveMinutes,
         status: "active",
         synthetic: true
       });
     }
     return true;
   }
+}
+
+function keepaliveMinutesFor(realReservations: Array<{ keepaliveMinutes?: number }>, existingSyntheticKeepaliveMinutes: number | undefined): number {
+  const configured = realReservations.map((reservation) => reservation.keepaliveMinutes).filter((value): value is number => Number.isFinite(value));
+  if (configured.length > 0) return Math.max(...configured);
+  return existingSyntheticKeepaliveMinutes ?? DEFAULT_TRAFFIC_KEEPALIVE_MINUTES;
 }

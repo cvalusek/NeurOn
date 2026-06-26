@@ -33,11 +33,12 @@ export function registerUiRoutes(
         .object({
           modelIds: z.union([z.string(), z.array(z.string())]).optional(),
           targetId: z.string(),
-          durationMinutes: z.coerce.number()
+          durationMinutes: z.coerce.number(),
+          keepaliveMinutes: z.coerce.number().optional()
         })
         .parse(request.body);
       const modelIds = raw.modelIds ? (Array.isArray(raw.modelIds) ? raw.modelIds : [raw.modelIds]) : [];
-      await reservationService.createForUser(requireUser(request), { modelIds, targetIds: [raw.targetId], durationMinutes: raw.durationMinutes });
+      await reservationService.createForUser(requireUser(request), { modelIds, targetIds: [raw.targetId], durationMinutes: raw.durationMinutes, keepaliveMinutes: raw.keepaliveMinutes });
       return reply.redirect("/");
     } catch (error) {
       const message = reservationFormErrorMessage(error);
@@ -74,6 +75,9 @@ function reservationFormErrorMessage(error: unknown): string {
     return "Select a target";
   }
   if (error instanceof Error && error.message.includes("Duration")) {
+    return error.message;
+  }
+  if (error instanceof Error && error.message.includes("Keepalive")) {
     return error.message;
   }
   return "Could not create reservation";

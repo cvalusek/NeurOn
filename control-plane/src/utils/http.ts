@@ -13,6 +13,7 @@ export function reservationJson(reservation: Reservation, statuses: TargetStatus
     username: reservation.username,
     status: reservation.status,
     expiresAt: reservation.expiresAt.toISOString(),
+    keepaliveMinutes: reservation.keepaliveMinutes,
     endedAt: reservation.endedAt?.toISOString(),
     modelIds: reservation.modelIds,
     targets: reservation.targetIds.map((targetId) => {

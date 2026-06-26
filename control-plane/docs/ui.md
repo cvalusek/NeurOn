@@ -26,6 +26,7 @@ The main page contains:
 - target-first reservation form
 - model groups under the selected target
 - duration quick buttons plus custom duration
+- keepalive quick buttons plus custom keepalive
 - per-target status cards
 - reservations grouped under each target status card
 
@@ -38,6 +39,7 @@ Users choose:
 1. Capacity target
 2. Models they expect to use on that target
 3. Duration
+4. Traffic keepalive window
 
 This avoids implying that model selection is a placement solver. A future
 solver could invert this flow back to model-first if NeurOn owns enough data to

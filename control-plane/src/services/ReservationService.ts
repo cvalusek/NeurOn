@@ -3,6 +3,8 @@ import type { AuthenticatedUser, Reservation } from "../domain/types.js";
 import { ModelCatalog } from "./ModelCatalog.js";
 
 const MAX_DURATION_MINUTES = 12 * 60;
+const DEFAULT_KEEPALIVE_MINUTES = 2;
+const MAX_KEEPALIVE_MINUTES = 60;
 
 export class ReservationService {
   constructor(
@@ -10,7 +12,7 @@ export class ReservationService {
     private readonly catalog: ModelCatalog
   ) {}
 
-  async createForUser(user: AuthenticatedUser, input: { modelIds?: string[]; targetIds?: string[]; durationMinutes: number }): Promise<Reservation> {
+  async createForUser(user: AuthenticatedUser, input: { modelIds?: string[]; targetIds?: string[]; durationMinutes: number; keepaliveMinutes?: number }): Promise<Reservation> {
     this.validateInput(input);
     const requestedModelIds = unique(input.modelIds ?? []);
     const modelIds = requestedModelIds.length > 0 ? this.catalog.canonicalModelIds(requestedModelIds) : [];
@@ -22,6 +24,7 @@ export class ReservationService {
       targetIds,
       createdAt: now,
       expiresAt: new Date(now.getTime() + input.durationMinutes * 60_000),
+      keepaliveMinutes: input.keepaliveMinutes ?? DEFAULT_KEEPALIVE_MINUTES,
       status: "active"
     });
   }
@@ -49,7 +52,7 @@ export class ReservationService {
     });
   }
 
-  private validateInput(input: { modelIds?: string[]; targetIds?: string[]; durationMinutes: number }): void {
+  private validateInput(input: { modelIds?: string[]; targetIds?: string[]; durationMinutes: number; keepaliveMinutes?: number }): void {
     const modelIds = unique(input.modelIds ?? []);
     if (modelIds.length > 0) {
       this.catalog.validateModelIds(modelIds);
@@ -58,6 +61,9 @@ export class ReservationService {
     }
     if (!Number.isFinite(input.durationMinutes) || input.durationMinutes <= 0 || input.durationMinutes > MAX_DURATION_MINUTES) {
       throw new Error(`Duration must be between 1 and ${MAX_DURATION_MINUTES} minutes`);
+    }
+    if (input.keepaliveMinutes !== undefined && (!Number.isFinite(input.keepaliveMinutes) || input.keepaliveMinutes <= 0 || input.keepaliveMinutes > MAX_KEEPALIVE_MINUTES)) {
+      throw new Error(`Keepalive must be between 1 and ${MAX_KEEPALIVE_MINUTES} minutes`);
     }
   }
 }

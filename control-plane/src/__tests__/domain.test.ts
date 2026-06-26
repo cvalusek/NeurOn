@@ -161,7 +161,8 @@ describe("traffic keepalive", () => {
     expect(await service.recordTraffic(target, ["qwen"], new Date("2026-06-24T20:00:00.000Z"), new Date("2026-06-24T20:01:00.000Z"))).toBe(true);
     const reservation = (await repository.list())[0];
     expect(reservation.username).toBe("traffic");
-    expect(reservation.expiresAt).toEqual(new Date("2026-06-24T20:05:00.000Z"));
+    expect(reservation.keepaliveMinutes).toBe(2);
+    expect(reservation.expiresAt).toEqual(new Date("2026-06-24T20:02:00.000Z"));
   });
 
   it("does not resurrect failed target by itself", async () => {

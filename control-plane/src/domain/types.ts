@@ -14,6 +14,7 @@ export interface Reservation {
   targetIds: string[];
   createdAt: Date;
   expiresAt: Date;
+  keepaliveMinutes?: number;
   endedAt?: Date;
   status: ReservationStatus;
   failureMessage?: string;
