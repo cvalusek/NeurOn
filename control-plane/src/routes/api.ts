@@ -61,7 +61,7 @@ export function registerApiRoutes(
   app.get("/api/status", async () => statusPayload(catalog, reservations, statuses));
   app.get("/api/admin/reservations", async () => ({ reservations: (await reservations.list()).map((reservation) => reservationJson(reservation, statuses.list())) }));
   app.get("/api/admin/targets", async () => ({ capacityTargets: await targetsPayload(catalog, reservations, statuses) }));
-  app.get("/api/admin/status", async () => statusPayload(catalog, reservations, statuses));
+  app.get("/api/admin/status", async () => statusPayload(catalog, reservations, statuses, { includeReservationHistory: true }));
 
   app.post("/api/admin/targets/:id/reconcile", async (request, reply) => {
     try {
@@ -142,11 +142,12 @@ async function reservationEndpoint(request: { params: unknown }, reply: { code: 
   }
 }
 
-async function statusPayload(catalog: ModelCatalog, reservations: ReservationRepository, statuses: TargetStatusRepository) {
-  const allReservations = await reservations.list();
+async function statusPayload(catalog: ModelCatalog, reservations: ReservationRepository, statuses: TargetStatusRepository, options: { includeReservationHistory?: boolean } = {}) {
+  const activeReservations = await reservations.listActive(new Date());
+  const visibleReservations = options.includeReservationHistory ? await reservations.list() : activeReservations;
   return {
-    reservations: allReservations.map((reservation) => reservationJson(reservation, statuses.list())),
-    activeReservations: (await reservations.listActive(new Date())).map((reservation) => reservationJson(reservation, statuses.list())),
+    reservations: visibleReservations.map((reservation) => reservationJson(reservation, statuses.list())),
+    activeReservations: activeReservations.map((reservation) => reservationJson(reservation, statuses.list())),
     capacityTargets: await targetsPayload(catalog, reservations, statuses)
   };
 }

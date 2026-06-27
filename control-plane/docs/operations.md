@@ -21,15 +21,20 @@ shared password via Basic Auth and optional signed HTTP-only login cookie.
 
 ## Persistence
 
-v1 uses in-memory repositories:
+Reservation storage is configurable:
 
-- reservations reset on restart
-- target startup estimates reset on restart
-- runtime model IDs discovered from healthy targets reset on restart
+- `STORAGE_DRIVER=memory` keeps all reservations in process memory
+- `STORAGE_DRIVER=sqlite` stores reservations in `SQLITE_PATH`
+- `STORAGE_DRIVER=postgres` stores reservations in `DATABASE_URL`
 
-This is acceptable for v1 because provider state is still observed during
-reconciliation. A durable repository can replace the in-memory implementation
-behind `ReservationRepository` and `TargetStatusRepository` later.
+SQLite is the local Compose default and uses `/app/data/neuron.db`, mounted from
+the repository `./data` directory. Durable reservations allow NeurOn to restart
+without forgetting active demand, so the reconciler continues to desire matching
+targets on after the process comes back.
+
+Target startup estimates, runtime model IDs discovered from healthy targets,
+and target status remain in memory. They are observational state and are rebuilt
+by reconciliation; they are not used for scheduling decisions.
 
 ## Polling Defaults
 

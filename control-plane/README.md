@@ -10,7 +10,7 @@ It is intentionally small:
 - Fastify + TypeScript
 - server-rendered HTML, not a SPA
 - OpenAPI-compatible REST endpoints
-- in-memory v1 state behind repository interfaces
+- durable reservation storage with memory, SQLite, or Postgres options
 - provider adapters for Docker containers, Docker Compose, and AWS ECS/ASG
 - LiteLLM request-log polling for traffic-based keepalive
 
@@ -28,7 +28,8 @@ Open `http://localhost:8090`, sign in with any username and `dev-password`, or
 use Basic Auth for API calls.
 
 From the repository root, Docker Compose runs NeurOn with the Docker provider
-and the default PreFer container target:
+and the default PreFer container target. Local Compose stores reservations in
+`./data/neuron.db` so restarting NeurOn does not forget active demand:
 
 ```bash
 docker compose up --build control-plane
@@ -94,6 +95,9 @@ Environment variables:
 | `SHARED_PASSWORD` | required in production | Basic/cookie auth password |
 | `COOKIE_SECRET` | unset | Enables login cookie auth |
 | `ADMIN_USERS` | any authenticated user | Comma-separated admin usernames |
+| `STORAGE_DRIVER` | `memory` | `memory`, `sqlite`, or `postgres` reservation storage |
+| `SQLITE_PATH` | `data/neuron.db` | SQLite database path when `STORAGE_DRIVER=sqlite` |
+| `DATABASE_URL` | unset | Postgres connection string when `STORAGE_DRIVER=postgres` |
 | `CAPACITY_TARGETS_JSON` | unset | JSON array of targets |
 | `CAPACITY_TARGET_KEYS` | unset | Comma-separated target keys for env-expanded config |
 | `CAPACITY_TARGETS_FILE` | `examples/capacity-targets.prefer-docker.json` | Local target config file |
@@ -194,6 +198,9 @@ npm run lint
 docker build -t neuron-control-plane .
 ```
 
-State is in memory for v1. Restarting NeurOn loses reservations, but the
-reconciler reads provider state and tolerates restart without request handlers
-owning infrastructure lifecycle transitions.
+Reservation storage defaults to memory for direct local runs. Set
+`STORAGE_DRIVER=sqlite` for a single-file durable database or
+`STORAGE_DRIVER=postgres` with `DATABASE_URL` for Postgres. The local Compose
+file defaults to SQLite at `/app/data/neuron.db` and mounts the repository
+`./data` directory there. Target status, runtime discovery cache, and startup
+estimates remain in memory and are rebuilt observationally by reconciliation.

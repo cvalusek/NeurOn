@@ -84,7 +84,7 @@ The core interfaces keep replaceable parts isolated:
 - `TargetStatusRepository`
 
 Implementations should depend on these interfaces instead of directly reaching
-into AWS, Docker, LiteLLM, or the in-memory repository from unrelated code.
+into AWS, Docker, LiteLLM, or a concrete repository from unrelated code.
 
 ## Main Services
 
@@ -118,6 +118,12 @@ into AWS, Docker, LiteLLM, or the in-memory repository from unrelated code.
 
 ## State
 
-v1 uses in-memory repositories. This keeps the implementation small, but it
-means reservations and startup estimates reset on app restart. Provider state is
-still observed on the next reconciliation loop.
+Reservations can use memory, SQLite, or Postgres storage behind
+`ReservationRepository`. Durable reservation storage lets NeurOn restart without
+forgetting active demand, so reconciliation continues to keep matching targets
+on after the process comes back.
+
+Target status, startup estimates, and runtime model discovery cache remain
+in-memory observational state. Provider state is still observed on the next
+reconciliation loop, and startup estimates are not used for scheduling
+decisions.

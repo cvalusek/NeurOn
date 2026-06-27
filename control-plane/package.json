@@ -18,12 +18,16 @@
     "@fastify/formbody": "^7.4.0",
     "@fastify/swagger": "^8.15.0",
     "@fastify/swagger-ui": "^2.1.0",
+    "better-sqlite3": "^12.11.1",
     "fastify": "^4.28.1",
     "nanoid": "^5.0.7",
+    "pg": "^8.22.0",
     "zod": "^3.23.8"
   },
   "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^20.14.10",
+    "@types/pg": "^8.20.0",
     "@typescript-eslint/eslint-plugin": "^7.15.0",
     "@typescript-eslint/parser": "^7.15.0",
     "eslint": "^8.57.0",

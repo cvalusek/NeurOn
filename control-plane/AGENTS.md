@@ -30,8 +30,9 @@ configuration or in the external runtime project.
 - Prefer the existing interfaces before adding new abstractions:
   `CapacityProvider`, `BackendConfigSync`, `ReservationRepository`,
   `AuthProvider`, `TrafficSource`, and `TargetStatusRepository`.
-- v1 storage is in memory. Do not add SQLite/Postgres unless the task is
-  explicitly about persistence.
+- Reservation storage can be memory, SQLite, or Postgres behind
+  `ReservationRepository`. Keep target status and startup estimates
+  observational and in-memory unless a task is explicitly about persisting them.
 - Use explicit service classes and typed interfaces over framework magic.
 
 ## Configuration Rules

@@ -23,6 +23,9 @@ deployments where mounting a file is awkward.
 - `SHARED_PASSWORD`
 - `COOKIE_SECRET`
 - `ADMIN_USERS`
+- `STORAGE_DRIVER`
+- `SQLITE_PATH`
+- `DATABASE_URL`
 - `AWS_REGION`
 - `LITELLM_API_BASE_URL`
 - `LITELLM_API_KEY`
@@ -41,6 +44,33 @@ Production-friendly defaults are intentionally calmer than local development:
 - LiteLLM traffic polling: 60 seconds when LiteLLM API config is present
 
 Local compose overrides the important polling settings for faster iteration.
+
+## Storage
+
+Reservation storage defaults to memory for direct local runs:
+
+```env
+STORAGE_DRIVER=memory
+```
+
+Use SQLite for single-node durable storage:
+
+```env
+STORAGE_DRIVER=sqlite
+SQLITE_PATH=./data/neuron.db
+```
+
+Use Postgres when the control plane should use external database storage:
+
+```env
+STORAGE_DRIVER=postgres
+DATABASE_URL=postgres://neuron:secret@postgres:5432/neuron
+```
+
+Local Compose defaults to SQLite at `/app/data/neuron.db` and mounts the
+repository `./data` directory into `/app/data`. Target status, runtime discovery
+cache, and startup estimates remain in memory because they are observational and
+rebuilt by reconciliation.
 
 ## Env-Expanded Target Config
 

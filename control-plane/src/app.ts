@@ -15,8 +15,8 @@ import { LiteLlmSpendLogsTrafficSource } from "./litellm/LiteLlmSpendLogsTraffic
 import { LiteLlmBackendConfigSync, NoopBackendConfigSync } from "./litellm/LiteLlmBackendConfigSync.js";
 import { HealthChecker } from "./reconciler/HealthChecker.js";
 import { Reconciler } from "./reconciler/Reconciler.js";
-import { InMemoryReservationRepository } from "./repository/InMemoryReservationRepository.js";
 import { InMemoryTargetStatusRepository } from "./repository/InMemoryTargetStatusRepository.js";
+import { createReservationRepository } from "./repository/createReservationRepository.js";
 import { registerApiRoutes } from "./routes/api.js";
 import { registerUiRoutes } from "./routes/ui.js";
 import { ModelCatalog } from "./services/ModelCatalog.js";
@@ -29,7 +29,8 @@ export async function buildApp(config: AppConfig, models: ModelDefinition[]) {
   const app = Fastify({ logger: true });
   const authProvider = new SharedPasswordAuthProvider(config.sharedPassword, config.adminUsers, config.cookieSecret);
   const catalog = new ModelCatalog(models, config.capacityTargets);
-  const reservations = new InMemoryReservationRepository();
+  const reservationRepository = await createReservationRepository(config.storage);
+  const reservations = reservationRepository.repository;
   const statuses = new InMemoryTargetStatusRepository();
   const capacityProvider =
     process.env.USE_FAKE_PROVIDER === "true"
@@ -64,6 +65,7 @@ export async function buildApp(config: AppConfig, models: ModelDefinition[]) {
   await app.register(formbody);
   await app.register(swagger, { openapi: { info: { title: "NeurOn", version: "0.1.0" } } });
   await app.register(swaggerUi, { routePrefix: "/docs" });
+  app.addHook("onClose", async () => reservationRepository.close());
 
   app.addHook("preHandler", async (request, reply) => {
     if (request.url === "/healthz" || request.url === "/login" || request.url.startsWith("/docs")) return;

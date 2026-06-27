@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { z } from "zod";
-import type { AppConfig, CapacityTarget, ModelDefinition } from "../domain/types.js";
+import type { AppConfig, CapacityTarget, ModelDefinition, StorageConfig } from "../domain/types.js";
 
 const targetSchema = z.object({
   id: z.string().min(1),
@@ -129,6 +129,7 @@ export async function loadConfig(): Promise<{ config: AppConfig; models: ModelDe
       port: intEnv("PORT", 8090),
       sharedPassword: requiredEnv("SHARED_PASSWORD", "dev-password"),
       cookieSecret: process.env.COOKIE_SECRET,
+      storage: loadStorageConfig(),
       awsRegion: process.env.AWS_REGION ?? "us-east-1",
       litellmApiBaseUrl: process.env.LITELLM_API_BASE_URL,
       litellmApiKey: process.env.LITELLM_API_KEY,
@@ -294,6 +295,14 @@ function loadRunPodTargetFromEnv(prefix: string): unknown {
 
 function normalizeProvider(provider: string): CapacityTarget["provider"] {
   return provider === "compose" ? "docker-compose" : (provider as CapacityTarget["provider"]);
+}
+
+function loadStorageConfig(): StorageConfig {
+  const driver = (env("STORAGE_DRIVER") ?? "memory").toLowerCase();
+  if (driver === "memory") return { driver: "memory" };
+  if (driver === "sqlite") return { driver: "sqlite", path: env("SQLITE_PATH") ?? path.resolve(process.cwd(), "data", "neuron.db") };
+  if (driver === "postgres") return { driver: "postgres", connectionString: requiredScopedEnv("DATABASE_URL") };
+  throw new Error(`Unsupported STORAGE_DRIVER: ${driver}`);
 }
 
 async function readTargetsFile(): Promise<string> {

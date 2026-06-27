@@ -28,3 +28,7 @@ dist/
 # Local dev server logs
 .neuron-dev*.log
 **/.neuron-dev*.log
+
+# Local durable app data
+data/
+**/data/

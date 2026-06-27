@@ -10,12 +10,16 @@ services:
       - "${CONTROL_PLANE_PORT:-8090}:8090"
     volumes:
       - .:/workspace:ro
+      - ./data:/app/data
       - /var/run/docker.sock:/var/run/docker.sock
     environment:
       - PORT=8090
       - SHARED_PASSWORD=${SHARED_PASSWORD:-dev-password}
       - COOKIE_SECRET=${COOKIE_SECRET:-dev-cookie-secret}
       - ADMIN_USERS=${ADMIN_USERS:-}
+      - STORAGE_DRIVER=${STORAGE_DRIVER:-sqlite}
+      - SQLITE_PATH=${SQLITE_PATH:-/app/data/neuron.db}
+      - DATABASE_URL=${DATABASE_URL:-}
       - CAPACITY_TARGETS_FILE=${CAPACITY_TARGETS_FILE:-/workspace/control-plane/examples/capacity-targets.prefer-docker.json}
       - CAPACITY_TARGETS_JSON=${CAPACITY_TARGETS_JSON:-}
       - CAPACITY_TARGET_KEYS=${CAPACITY_TARGET_KEYS:-}

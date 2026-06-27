@@ -5,6 +5,7 @@ import type { AppConfig, ModelDefinition } from "../domain/types.js";
 const config: AppConfig = {
   port: 0,
   sharedPassword: "secret",
+  storage: { driver: "memory" },
   awsRegion: "us-east-1",
   litellmTrafficPollSeconds: 0,
   litellmTrafficLookbackSeconds: 300,
@@ -32,6 +33,32 @@ describe("API authentication context", () => {
     await app.close();
     expect(response.statusCode).toBe(201);
     expect(response.json().username).toBe("actual");
+  });
+
+  it("hides expired reservations from the default status payload", async () => {
+    process.env.USE_FAKE_PROVIDER = "true";
+    const { app } = await buildApp(config, models);
+    const auth = { authorization: `Basic ${Buffer.from("actual:secret").toString("base64")}` };
+    const active = await app.inject({
+      method: "POST",
+      url: "/api/reservations",
+      headers: auth,
+      payload: { modelIds: ["m1"], durationMinutes: 10 }
+    });
+    const expired = await app.inject({
+      method: "POST",
+      url: "/api/reservations",
+      headers: auth,
+      payload: { modelIds: ["m1"], durationMinutes: 10 }
+    });
+    await app.inject({ method: "POST", url: `/api/reservations/${expired.json().reservationId}/done`, headers: auth });
+
+    const status = await app.inject({ method: "GET", url: "/api/status", headers: auth });
+    const adminStatus = await app.inject({ method: "GET", url: "/api/admin/status", headers: auth });
+    await app.close();
+
+    expect(status.json().reservations.map((reservation: { reservationId: string }) => reservation.reservationId)).toEqual([active.json().reservationId]);
+    expect(adminStatus.json().reservations.map((reservation: { reservationId: string }) => reservation.reservationId)).toContain(expired.json().reservationId);
   });
 });
 

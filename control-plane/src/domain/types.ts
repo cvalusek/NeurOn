@@ -157,6 +157,7 @@ export interface AppConfig {
   port: number;
   sharedPassword: string;
   cookieSecret?: string;
+  storage: StorageConfig;
   awsRegion: string;
   litellmApiBaseUrl?: string;
   litellmApiKey?: string;
@@ -170,3 +171,8 @@ export interface AppConfig {
   healthCheckIntervalSeconds: number;
   adminUsers: string[];
 }
+
+export type StorageConfig =
+  | { driver: "memory" }
+  | { driver: "sqlite"; path: string }
+  | { driver: "postgres"; connectionString: string };
