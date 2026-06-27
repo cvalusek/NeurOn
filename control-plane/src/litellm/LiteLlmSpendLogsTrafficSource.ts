@@ -38,7 +38,7 @@ export class LiteLlmSpendLogsTrafficSource implements TrafficSource {
     const v2Logs = await this.fetchJson(spendLogsV2Url(this.apiBaseUrl, start, end));
     const v2List = logsFromResponse(v2Logs);
     if (v2List.length > 0) return v2List;
-    return logsFromResponse(await this.fetchJson(new URL("/spend/logs", this.apiBaseUrl)));
+    return logsFromResponse(await this.fetchJson(spendLogsLegacyUrl(this.apiBaseUrl, start, end)));
   }
 
   private async fetchJson(url: URL): Promise<SpendLogsResponse | LiteLlmSpendLog[]> {
@@ -56,12 +56,20 @@ export class LiteLlmSpendLogsTrafficSource implements TrafficSource {
 
 function spendLogsV2Url(apiBaseUrl: string, start: Date, end: Date): URL {
   const url = new URL("/spend/logs/v2", apiBaseUrl);
-  url.searchParams.set("start_date", dateOnly(start));
-  url.searchParams.set("end_date", dateOnly(end));
+  url.searchParams.set("start_date", utcDateOnly(start));
+  url.searchParams.set("end_date", nextUtcDateOnly(end));
   url.searchParams.set("page", "1");
   url.searchParams.set("page_size", "100");
   url.searchParams.set("sort_by", "endTime");
   url.searchParams.set("sort_order", "desc");
+  return url;
+}
+
+function spendLogsLegacyUrl(apiBaseUrl: string, start: Date, end: Date): URL {
+  const url = new URL("/spend/logs", apiBaseUrl);
+  url.searchParams.set("start_date", utcDateOnly(start));
+  url.searchParams.set("end_date", nextUtcDateOnly(end));
+  url.searchParams.set("summarize", "false");
   return url;
 }
 
@@ -79,6 +87,11 @@ function parseDate(value: string | null | undefined): Date | undefined {
   return Number.isNaN(date.getTime()) ? undefined : date;
 }
 
-function dateOnly(date: Date): string {
+function utcDateOnly(date: Date): string {
   return date.toISOString().slice(0, 10);
+}
+
+function nextUtcDateOnly(date: Date): string {
+  const next = new Date(date.getTime() + 24 * 60 * 60 * 1000);
+  return utcDateOnly(next);
 }

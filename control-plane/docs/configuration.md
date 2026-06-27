@@ -95,6 +95,7 @@ CAPACITY_TARGET_RUNPOD_PROVIDER=runpod
 CAPACITY_TARGET_RUNPOD_RUNPOD_POD_ID=your-runpod-pod-id
 CAPACITY_TARGET_RUNPOD_RUNPOD_API_KEY_ENV=RUNPOD_API_KEY
 CAPACITY_TARGET_RUNPOD_RUNPOD_RUNTIME_PORT=8080
+CAPACITY_TARGET_RUNPOD_TRAFFIC_MODEL_PREFIXES=prefer/
 ```
 
 `HEALTH_CHECK_URL` is optional for RunPod targets. Without it, NeurOn trusts
@@ -117,6 +118,10 @@ exists.
 They are only for syncing a LiteLLM backend entry when a target becomes healthy;
 they are not required for RunPod start/stop or model discovery.
 
+Set `TRAFFIC_MODEL_PREFIXES` when LiteLLM logs model groups with a route prefix,
+for example `prefer/gemma-4b-e2b`. The prefix is target configuration; NeurOn
+does not require `prefer/` specifically.
+
 ## Docker Env Fields
 
 Use `docker` provider targets when NeurOn should control a named container.
@@ -137,7 +142,8 @@ runtime URL such as `HEALTH_CHECK_URL`.
 Set `TRAFFIC_MODEL_PREFIXES` when LiteLLM logs model names with a route prefix,
 for example `prefer/gemma-4b-e2b`. Traffic whose model starts with one of those
 prefixes keeps the matching target warm even if runtime model discovery has not
-seen that exact LiteLLM-facing name.
+seen that exact LiteLLM-facing name. The prefix can be any target-specific
+route prefix, not only `prefer/`.
 
 LiteLLM traffic polling reads `model_group` and `model` from spend logs. NeurOn
 tries `/spend/logs/v2` first, then falls back to the legacy `/spend/logs`

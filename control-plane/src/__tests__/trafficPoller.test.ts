@@ -82,6 +82,29 @@ describe("TrafficPoller", () => {
     expect(reservations[0].modelIds).toEqual(["prefer/gemma-4b-e2b"]);
   });
 
+  it("uses the target traffic prefix from config instead of requiring prefer", async () => {
+    const configuredPrefixTarget: CapacityTarget = {
+      ...target,
+      trafficModelPrefixes: ["runpod/"]
+    };
+    const repository = new InMemoryReservationRepository();
+    const statuses = new InMemoryTargetStatusRepository();
+    statuses.set({ targetId: configuredPrefixTarget.id, desired: "on", observed: "healthy", message: "Ready" });
+    const source: TrafficSource = {
+      async pollRecentTraffic(now = new Date()) {
+        return [{ modelId: "runpod/gemma-4b-e2b", seenAt: now }];
+      }
+    };
+
+    const poller = new TrafficPoller(source, new ModelCatalog(models, [configuredPrefixTarget]), new TrafficKeepaliveService(repository, statuses));
+    await poller.poll(new Date("2026-06-24T20:00:00.000Z"));
+
+    const reservations = await repository.list();
+    expect(reservations).toHaveLength(1);
+    expect(reservations[0].targetIds).toEqual([configuredPrefixTarget.id]);
+    expect(reservations[0].modelIds).toEqual(["runpod/gemma-4b-e2b"]);
+  });
+
   it("does not renew keepalive from stale LiteLLM traffic", async () => {
     const repository = new InMemoryReservationRepository();
     const statuses = new InMemoryTargetStatusRepository();

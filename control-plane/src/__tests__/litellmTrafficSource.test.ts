@@ -6,7 +6,7 @@ describe("LiteLlmSpendLogsTrafficSource", () => {
     vi.unstubAllGlobals();
   });
 
-  it("queries spend logs with date-only bounds", async () => {
+  it("queries spend logs with UTC date-only bounds and next-day end", async () => {
     const requestedUrls: string[] = [];
     const fetchMock = vi.fn(async (input: string | URL | Request) => {
       requestedUrls.push(String(input));
@@ -20,7 +20,7 @@ describe("LiteLlmSpendLogsTrafficSource", () => {
     const url = new URL(requestedUrls[0]);
     expect(url.pathname).toBe("/spend/logs/v2");
     expect(url.searchParams.get("start_date")).toBe("2026-06-26");
-    expect(url.searchParams.get("end_date")).toBe("2026-06-26");
+    expect(url.searchParams.get("end_date")).toBe("2026-06-27");
     expect(requestedUrls).toHaveLength(1);
   });
 
@@ -48,7 +48,11 @@ describe("LiteLlmSpendLogsTrafficSource", () => {
     const events = await source.pollRecentTraffic(new Date("2026-06-26T17:48:51.000Z"));
 
     expect(new URL(requestedUrls[0]).pathname).toBe("/spend/logs/v2");
-    expect(new URL(requestedUrls[1]).pathname).toBe("/spend/logs");
+    const legacyUrl = new URL(requestedUrls[1]);
+    expect(legacyUrl.pathname).toBe("/spend/logs");
+    expect(legacyUrl.searchParams.get("start_date")).toBe("2026-06-26");
+    expect(legacyUrl.searchParams.get("end_date")).toBe("2026-06-27");
+    expect(legacyUrl.searchParams.get("summarize")).toBe("false");
     expect(events).toEqual([
       { modelId: "prefer/gemma-4b-e2b", seenAt: new Date("2026-06-26T17:48:00.000Z") },
       { modelId: "unsloth/gemma-4-E2B-it-qat-GGUF:UD-Q4_K_XL", seenAt: new Date("2026-06-26T17:48:00.000Z") }
