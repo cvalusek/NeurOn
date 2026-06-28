@@ -20,6 +20,7 @@ export class ReservationService {
     const targetIds = modelIds.length > 0 ? this.catalog.targetsForModels(modelIds).map((target) => target.id) : this.catalog.validateTargetIds(unique(input.targetIds ?? []));
     return this.repository.create({
       username: user.username,
+      apiKeyName: user.apiKeyName,
       modelIds,
       targetIds,
       createdAt: now,
@@ -41,14 +42,15 @@ export class ReservationService {
     return this.repository.update(id, { status: "done", endedAt: new Date() });
   }
 
-  async extend(id: string, user: AuthenticatedUser, durationMinutes: number): Promise<Reservation> {
+  async extend(id: string, user: AuthenticatedUser, durationMinutes: number, options: { fromNow?: boolean } = {}): Promise<Reservation> {
     if (!Number.isFinite(durationMinutes) || durationMinutes <= 0 || durationMinutes > MAX_DURATION_MINUTES) {
       throw new Error(`Duration must be between 1 and ${MAX_DURATION_MINUTES} minutes`);
     }
     const reservation = await this.getOwned(id, user);
     if (reservation.status !== "active") throw new Error("Only active reservations can be extended");
+    const baseTime = options.fromNow ? Date.now() : Math.max(Date.now(), reservation.expiresAt.getTime());
     return this.repository.update(id, {
-      expiresAt: new Date(Math.max(Date.now(), reservation.expiresAt.getTime()) + durationMinutes * 60_000)
+      expiresAt: new Date(baseTime + durationMinutes * 60_000)
     });
   }
 

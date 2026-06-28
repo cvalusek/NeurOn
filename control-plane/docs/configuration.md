@@ -175,6 +175,13 @@ Set `TRAFFIC_MODEL_PREFIXES` when LiteLLM logs model groups with a route prefix,
 for example `prefer/gemma-4b-e2b`. The prefix is target configuration; NeurOn
 does not require `prefer/` specifically.
 
+Set `LITELLM_DISPLAY_PREFIX` when client-facing LiteLLM model names differ from
+traffic log prefixes. By default, plugin clients can use the first
+`TRAFFIC_MODEL_PREFIXES` value as the display prefix. Set
+`CAPACITY_TARGET_<KEY>_LITELLM_DISPLAY_PREFIX=__empty__` to publish an empty
+prefix from environment config when LiteLLM aliases the prefix away. JSON config
+can use `"litellmDisplayPrefix": ""` directly.
+
 ## Docker Env Fields
 
 Use `docker` provider targets when NeurOn should control a named container.
@@ -197,6 +204,10 @@ for example `prefer/gemma-4b-e2b`. Traffic whose model starts with one of those
 prefixes keeps the matching target warm even if runtime model discovery has not
 seen that exact LiteLLM-facing name. The prefix can be any target-specific
 route prefix, not only `prefer/`.
+
+Set `LITELLM_DISPLAY_PREFIX` separately when tools show a different
+LiteLLM-facing model name than the traffic log prefix. Use `__empty__` in
+environment config to publish an intentionally empty display prefix.
 
 LiteLLM traffic polling reads `model_group` and `model` from spend logs. NeurOn
 tries `/spend/logs/v2` first, then falls back to the legacy `/spend/logs`
@@ -235,3 +246,26 @@ CAPACITY_TARGET_MULTIPLE_MOE_96GB_MODEL_DISCOVERY_BOOTSTRAP_TIMEOUT_SECONDS=600
 
 When enabled, NeurOn starts the target once before accepting requests, waits for
 health, reads `/v1/models`, records runtime IDs, and stops the target again.
+
+## Model Warmup
+
+When an active reservation names specific models and a target reports healthy,
+NeurOn sends a one-token OpenAI-compatible `/chat/completions` request for each
+requested model before marking the target healthy. This keeps plugin clients
+waiting until the runtime has loaded the model, not merely until the process is
+up.
+
+Warmup uses `MODEL_WARMUP_API_BASE_URL` when configured. Otherwise it falls back
+to `RUNTIME_API_BASE_URL`, target-level LiteLLM `apiBaseUrl`, an inferred RunPod
+proxy URL, or the `/v1` origin derived from `HEALTH_CHECK_URL`.
+
+Env-expanded target settings:
+
+```env
+CAPACITY_TARGET_LOCAL_MODEL_WARMUP_ENABLED=true
+CAPACITY_TARGET_LOCAL_MODEL_WARMUP_API_BASE_URL=http://runtime.internal:8080/v1
+CAPACITY_TARGET_LOCAL_MODEL_WARMUP_API_KEY_ENV=RUNTIME_API_KEY
+CAPACITY_TARGET_LOCAL_MODEL_WARMUP_TIMEOUT_SECONDS=60
+```
+
+Set `MODEL_WARMUP_ENABLED=false` on a target to skip warmup.

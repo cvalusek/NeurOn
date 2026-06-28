@@ -196,17 +196,18 @@ export function startPage(user: AuthenticatedUser, targets: Array<{ target: Capa
     };
     const friendlyExpiration = (iso) => formatDateTime(iso) + ' (' + timeLeft(iso) + ')';
     const statusBadge = (status) => '<span class="badge ' + status + '">' + status + '</span>';
-    const reservationTime = (reservation) => {
-      if (reservation.status === 'active') return 'until ' + friendlyExpiration(reservation.expiresAt);
-      if (reservation.endedAt) return reservation.status === 'done' ? 'ended ' + formatDateTime(reservation.endedAt) : reservation.status + ' ' + formatDateTime(reservation.endedAt);
-      return reservation.status + ' at ' + formatDateTime(reservation.expiresAt);
+    const countdown = (iso) => '<span class="countdown" data-countdown-expires="' + escapeText(iso) + '">' + escapeText(timeLeft(iso)) + '</span>';
+    const reservationTimeHtml = (reservation) => {
+      if (reservation.status === 'active') return 'until ' + escapeText(formatDateTime(reservation.expiresAt)) + ' (' + countdown(reservation.expiresAt) + ')';
+      if (reservation.endedAt) return escapeText(reservation.status === 'done' ? 'ended ' + formatDateTime(reservation.endedAt) : reservation.status + ' ' + formatDateTime(reservation.endedAt));
+      return escapeText(reservation.status + ' at ' + formatDateTime(reservation.expiresAt));
     };
     const reservationTargets = (reservation) => reservation.targets.map(target => targetLookup[target.id]?.displayName ?? target.id).join(', ');
     const reservationCard = (reservation, includeActions = false) => {
       const actions = includeActions
         ? '<div class="reservation-actions"><form method="post" action="/reservations/' + reservation.reservationId + '/extend"><button class="secondary" name="durationMinutes" value="1" type="submit">+1 min</button></form><form method="post" action="/reservations/' + reservation.reservationId + '/extend"><button class="secondary" name="durationMinutes" value="2" type="submit">+2 min</button></form><form method="post" action="/reservations/' + reservation.reservationId + '/extend"><button class="secondary" name="durationMinutes" value="5" type="submit">+5 min</button></form><form method="post" action="/reservations/' + reservation.reservationId + '/extend"><button class="secondary" name="durationMinutes" value="15" type="submit">+15 min</button></form><form method="post" action="/reservations/' + reservation.reservationId + '/extend"><button class="secondary" name="durationMinutes" value="30" type="submit">+30 min</button></form><form method="post" action="/reservations/' + reservation.reservationId + '/extend"><button class="secondary" name="durationMinutes" value="60" type="submit">+1 hour</button></form><form method="post" action="/reservations/' + reservation.reservationId + '/done"><button class="danger" type="submit">I\\'m done</button></form></div>'
         : '';
-      return '<div class="reservation-card"><div><div class="reservation-meta">' + statusBadge(reservation.status) + '<strong>' + escapeText(reservation.username) + '</strong><span class="muted">' + escapeText(reservationTime(reservation)) + '</span></div><div class="muted">' + escapeText(reservationTargets(reservation)) + '</div>' + modelChipRow(reservation.modelIds) + '</div>' + actions + '</div>';
+      return '<div class="reservation-card"><div><div class="reservation-meta">' + statusBadge(reservation.status) + '<strong>' + escapeText(reservation.displayUsername ?? reservation.username) + '</strong><span class="muted">' + reservationTimeHtml(reservation) + '</span></div><div class="muted">' + escapeText(reservationTargets(reservation)) + '</div>' + modelChipRow(reservation.modelIds) + '</div>' + actions + '</div>';
     };
     const targetStatusCard = (target, reservations) => {
       const relevant = reservations.filter(reservation => reservation.targets.some(candidate => candidate.id === target.id));
@@ -271,8 +272,15 @@ export function startPage(user: AuthenticatedUser, targets: Array<{ target: Capa
       document.querySelector('#server-status').innerHTML = data.capacityTargets.length
         ? '<div class="status-grid">' + data.capacityTargets.map(target => targetStatusCard(target, data.reservations)).join('') + '</div>'
         : '<p class="muted">No targets configured</p>';
+      updateCountdowns();
+    }
+    function updateCountdowns() {
+      document.querySelectorAll('[data-countdown-expires]').forEach(element => {
+        element.textContent = timeLeft(element.dataset.countdownExpires);
+      });
     }
     refreshServerStatus();
+    setInterval(updateCountdowns, 1000);
     setInterval(refreshServerStatus, 10000);
   </script>`);
 }
@@ -380,7 +388,7 @@ export function adminPage(user: AuthenticatedUser, config: AppConfig): string {
       if (!res.ok) return;
       const data = await res.json();
       const targets = data.capacityTargets.map(t => '<tr><td>' + t.id + '</td><td>' + t.desired + '</td><td>' + t.observed + '</td><td>' + t.message + '</td><td>' + t.activeUsers.join(', ') + '</td><td><button onclick="installTarget(\\'' + t.id + '\\')">Install</button> <button onclick="discoverTarget(\\'' + t.id + '\\')">Discover</button> <button onclick="reconcileTarget(\\'' + t.id + '\\')">Reconcile</button> <button class="danger" onclick="forceStop(\\'' + t.id + '\\')">Force stop</button></td></tr>').join('');
-      const reservations = data.reservations.map(r => '<tr><td>' + r.reservationId + '</td><td>' + r.username + '</td><td>' + statusBadge(r.status) + '</td><td>' + reservationTime(r) + '</td><td>' + r.modelIds.join(', ') + '</td></tr>').join('');
+      const reservations = data.reservations.map(r => '<tr><td>' + r.reservationId + '</td><td>' + (r.displayUsername ?? r.username) + '</td><td>' + statusBadge(r.status) + '</td><td>' + reservationTime(r) + '</td><td>' + r.modelIds.join(', ') + '</td></tr>').join('');
       document.querySelector('#admin-status').innerHTML = '<h2>Targets</h2><table><thead><tr><th>Target</th><th>Desired</th><th>Observed</th><th>Message</th><th>Users</th><th></th></tr></thead><tbody>' + targets + '</tbody></table><h2>Reservations</h2><table><thead><tr><th>ID</th><th>User</th><th>Status</th><th>Expires</th><th>Models</th></tr></thead><tbody>' + reservations + '</tbody></table>';
     }
     refresh();

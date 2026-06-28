@@ -23,6 +23,10 @@ Generated keys use the `sk-neuron-...` format. The full key is shown only once
 in the creation response/page. After that, NeurOn stores only a SHA-256 hash and
 a display prefix.
 
+Reservations created with an API key keep the real owner as the username, but
+status pages show the API key name in parentheses, for example
+`clint ( OpenCode )`.
+
 Use keys with Bearer auth:
 
 ```http
@@ -67,6 +71,59 @@ Good read-only smoke tests:
 curl -H "Authorization: Bearer sk-neuron-..." http://localhost:8090/api/models
 curl -H "Authorization: Bearer sk-neuron-..." http://localhost:8090/api/status
 ```
+
+## OpenCode Plugin
+
+This repository includes a project-local OpenCode plugin at
+`.opencode/plugins/neuron.js`. It reads `NEURON_API_KEY` by default and creates
+a short NeurOn reservation before a chat message is sent. Later messages for
+the same model wait for health before the request is sent. Completion events
+refresh that reservation to the configured duration from now without waiting for
+health again or stacking more time onto the old expiration.
+
+The plugin package is publishable as `opencode-neuron` from the `.opencode`
+directory. The plugin build workflow checks syntax, unit tests, and `npm pack
+--dry-run`.
+
+Release process:
+
+1. Update `.opencode/package.json` and `.opencode/package-lock.json` to the new
+   version.
+2. Merge the change after the plugin build workflow passes.
+3. Run the `Publish OpenCode plugin` workflow manually with the same version.
+4. Leave `dry_run=true` for a release rehearsal, then rerun with
+   `dry_run=false` to publish to npm using the repository `NPM_TOKEN` secret.
+
+For local registry testing, publish to Verdaccio with:
+
+```bash
+cd .opencode
+npm publish --registry http://localhost:4873
+```
+
+Default behavior:
+
+- `NEURON_API_BASE_URL=http://localhost:8090`
+- `NEURON_RESERVATION_DURATION_MINUTES=2`
+- `NEURON_RESERVATION_KEEPALIVE_MINUTES=2`
+- `NEURON_WAIT_FOR_HEALTHY=true`
+
+When `NEURON_WAIT_FOR_HEALTHY` is enabled, the plugin blocks the chat message
+until all reservation targets report `healthy`. NeurOn performs any configured
+model warmup before reporting `healthy`, so the plugin only waits for NeurOn's
+readiness signal.
+
+The plugin maps OpenCode's LiteLLM-facing model name to NeurOn model metadata
+using model IDs, aliases, backend IDs, runtime IDs, and each target's
+`litellmDisplayPrefix`. If `litellmDisplayPrefix` is not configured, NeurOn
+publishes the first `trafficModelPrefixes` value as the display prefix. Set the
+display prefix to `""` in JSON config, or `__empty__` in env-expanded config,
+when LiteLLM aliases the route prefix away for users.
+
+LiteLLM traffic monitoring remains useful for clients that cannot run a plugin.
+The OpenCode plugin is a stronger signal when it is available because it can
+reserve capacity before sending traffic, rather than reacting to logs after a
+request has already reached LiteLLM.
 
 ## MCP
 

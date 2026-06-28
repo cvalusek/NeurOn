@@ -91,6 +91,25 @@ describe("API authentication context", () => {
     expect(bearerModels.statusCode).toBe(200);
     expect(bearerModels.json().models).toHaveLength(1);
 
+    const bearerReservation = await app.inject({
+      method: "POST",
+      url: "/api/reservations",
+      headers: { authorization: `Bearer ${createdBody.token}` },
+      payload: { modelIds: ["m1"], durationMinutes: 2, keepaliveMinutes: 2 }
+    });
+    expect(bearerReservation.statusCode).toBe(201);
+    expect(bearerReservation.json()).toMatchObject({
+      username: "actual",
+      displayUsername: "actual ( Plugin integration )"
+    });
+
+    const bearerStatus = await app.inject({
+      method: "GET",
+      url: "/api/status",
+      headers: { authorization: `Bearer ${createdBody.token}` }
+    });
+    expect(bearerStatus.json().capacityTargets[0].activeUsers).toContain("actual ( Plugin integration )");
+
     const usedList = await app.inject({ method: "GET", url: "/api/api-keys", headers: auth });
     expect(usedList.json().apiKeys[0].lastUsedAt).toEqual(expect.any(String));
 

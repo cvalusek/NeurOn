@@ -11,6 +11,7 @@ export function reservationJson(reservation: Reservation, statuses: TargetStatus
   return {
     reservationId: reservation.id,
     username: reservation.username,
+    displayUsername: reservationDisplayUsername(reservation),
     status: reservation.status,
     expiresAt: reservation.expiresAt.toISOString(),
     keepaliveMinutes: reservation.keepaliveMinutes,
@@ -28,6 +29,10 @@ export function reservationJson(reservation: Reservation, statuses: TargetStatus
     }),
     failureMessage: reservation.failureMessage
   };
+}
+
+export function reservationDisplayUsername(reservation: Pick<Reservation, "username" | "apiKeyName">): string {
+  return reservation.apiKeyName ? `${reservation.username} ( ${reservation.apiKeyName} )` : reservation.username;
 }
 
 export function apiKeyJson(key: ApiKey) {
@@ -52,6 +57,7 @@ export function targetJson(target: CapacityTarget, status?: TargetStatus, active
     provider: target.provider,
     modelIds: target.modelIds,
     modelsMax: target.modelsMax,
+    litellmDisplayPrefix: litellmDisplayPrefix(target),
     healthCheckUrl: target.healthCheckUrl,
     runtimeApiBaseUrl: target.runtimeApiBaseUrl,
     desired: status?.desired ?? "off",
@@ -60,4 +66,9 @@ export function targetJson(target: CapacityTarget, status?: TargetStatus, active
     startupEstimate: status?.startupEstimate,
     activeUsers
   };
+}
+
+function litellmDisplayPrefix(target: CapacityTarget): string | undefined {
+  if (target.litellmDisplayPrefix !== undefined) return target.litellmDisplayPrefix;
+  return target.trafficModelPrefixes?.[0];
 }

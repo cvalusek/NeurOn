@@ -8,7 +8,7 @@ import { ModelCatalog } from "../services/ModelCatalog.js";
 import { ReservationService } from "../services/ReservationService.js";
 import { RuntimeModelDiscovery } from "../services/RuntimeModelDiscovery.js";
 import { TrafficKeepaliveService } from "../services/TrafficKeepaliveService.js";
-import { apiKeyJson, requireUser, reservationJson, sendError, targetJson } from "../utils/http.js";
+import { apiKeyJson, requireUser, reservationDisplayUsername, reservationJson, sendError, targetJson } from "../utils/http.js";
 
 export function registerApiRoutes(
   app: FastifyInstance,
@@ -136,16 +136,29 @@ export function registerApiRoutes(
     }
   });
 
-  app.post("/api/reservations/:id/extend", async (request, reply) => {
-    try {
-      const { id } = z.object({ id: z.string() }).parse(request.params);
-      const { durationMinutes } = z.object({ durationMinutes: z.number() }).parse(request.body);
-      const reservation = await reservationService.extend(id, requireUser(request), durationMinutes);
-      return reservationJson(reservation, statuses.list());
-    } catch (error) {
-      return sendError(reply, error);
+  app.post(
+    "/api/reservations/:id/extend",
+    {
+      schema: {
+        tags: ["reservations"],
+        summary: "Extend a reservation",
+        security: authSecurity(),
+        params: { type: "object", properties: { id: { type: "string" } }, required: ["id"] },
+        body: reservationExtendSchema,
+        response: { 200: reservationSchema, 400: errorSchema }
+      }
+    },
+    async (request, reply) => {
+      try {
+        const { id } = z.object({ id: z.string() }).parse(request.params);
+        const { durationMinutes, fromNow } = z.object({ durationMinutes: z.number(), fromNow: z.boolean().optional() }).parse(request.body);
+        const reservation = await reservationService.extend(id, requireUser(request), durationMinutes, { fromNow });
+        return reservationJson(reservation, statuses.list());
+      } catch (error) {
+        return sendError(reply, error);
+      }
     }
-  });
+  );
 
   app.get(
     "/api/status",
@@ -258,7 +271,7 @@ async function targetsPayload(catalog: ModelCatalog, reservations: ReservationRe
     targetJson(
       target,
       statuses.get(target.id),
-      Array.from(new Set(active.filter((reservation) => reservation.targetIds.includes(target.id)).map((reservation) => reservation.username)))
+      Array.from(new Set(active.filter((reservation) => reservation.targetIds.includes(target.id)).map(reservationDisplayUsername)))
     )
   );
 }
@@ -319,6 +332,7 @@ const reservationSchema = {
   properties: {
     reservationId: { type: "string" },
     username: { type: "string" },
+    displayUsername: { type: "string" },
     status: { type: "string", enum: ["active", "done", "expired", "failed"] },
     expiresAt: { type: "string", format: "date-time" },
     keepaliveMinutes: { type: "number" },
@@ -327,7 +341,7 @@ const reservationSchema = {
     targets: { type: "array", items: targetRefSchema },
     failureMessage: { type: "string" }
   },
-  required: ["reservationId", "username", "status", "expiresAt", "modelIds", "targets"]
+  required: ["reservationId", "username", "displayUsername", "status", "expiresAt", "modelIds", "targets"]
 } as const;
 
 const reservationCreateSchema = {
@@ -341,6 +355,15 @@ const reservationCreateSchema = {
   required: ["durationMinutes"]
 } as const;
 
+const reservationExtendSchema = {
+  type: "object",
+  properties: {
+    durationMinutes: { type: "number" },
+    fromNow: { type: "boolean" }
+  },
+  required: ["durationMinutes"]
+} as const;
+
 const targetSchema = {
   type: "object",
   properties: {
@@ -349,6 +372,7 @@ const targetSchema = {
     provider: { type: "string" },
     modelIds: { type: "array", items: { type: "string" } },
     modelsMax: { type: "number" },
+    litellmDisplayPrefix: { type: "string" },
     healthCheckUrl: { type: "string" },
     runtimeApiBaseUrl: { type: "string" },
     desired: { type: "string" },

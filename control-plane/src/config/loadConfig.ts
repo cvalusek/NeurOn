@@ -29,7 +29,17 @@ const targetSchema = z.object({
       bootstrapTimeoutSeconds: z.number().int().positive().optional()
     })
     .optional(),
+  modelWarmup: z
+    .object({
+      enabled: z.boolean().optional(),
+      apiBaseUrl: z.string().url().optional(),
+      apiKey: z.string().optional(),
+      apiKeyEnv: z.string().optional(),
+      timeoutSeconds: z.number().int().positive().optional()
+    })
+    .optional(),
   trafficModelPrefixes: z.array(z.string()).optional(),
+  litellmDisplayPrefix: z.string().optional(),
   modelsMax: z.number().int().positive().optional(),
   aws: z
     .object({
@@ -204,7 +214,15 @@ function loadTargetsFromEnv(): unknown[] {
         bootstrapOnStartup: boolEnv(`${prefix}_MODEL_DISCOVERY_BOOTSTRAP_ON_STARTUP`),
         bootstrapTimeoutSeconds: intOptionalEnv(`${prefix}_MODEL_DISCOVERY_BOOTSTRAP_TIMEOUT_SECONDS`)
       }),
+      modelWarmup: compactObject({
+        enabled: boolEnv(`${prefix}_MODEL_WARMUP_ENABLED`),
+        apiBaseUrl: env(`${prefix}_MODEL_WARMUP_API_BASE_URL`),
+        apiKey: env(`${prefix}_MODEL_WARMUP_API_KEY`),
+        apiKeyEnv: env(`${prefix}_MODEL_WARMUP_API_KEY_ENV`),
+        timeoutSeconds: intOptionalEnv(`${prefix}_MODEL_WARMUP_TIMEOUT_SECONDS`)
+      }),
       trafficModelPrefixes: listEnv(`${prefix}_TRAFFIC_MODEL_PREFIXES`),
+      litellmDisplayPrefix: displayPrefixEnv(`${prefix}_LITELLM_DISPLAY_PREFIX`),
       modelsMax: intOptionalEnv(`${prefix}_MODELS_MAX`),
       aws: provider === "aws-ecs" ? loadAwsTargetFromEnv(prefix) : undefined,
       docker: provider === "docker" ? loadDockerContainerTargetFromEnv(prefix) : undefined,
@@ -341,6 +359,14 @@ function listEnv(name: string): string[] {
     .split(",")
     .map((value) => value.trim())
     .filter(Boolean);
+}
+
+function displayPrefixEnv(name: string): string | undefined {
+  const raw = process.env[name];
+  if (raw === undefined) return undefined;
+  const value = raw.trim();
+  if (["__empty__", "__none__", "(empty)"].includes(value.toLowerCase())) return "";
+  return value || undefined;
 }
 
 function env(name: string): string | undefined {

@@ -1,0 +1,29 @@
+name: Build OpenCode plugin
+
+on:
+  pull_request:
+    paths:
+      - ".opencode/**"
+      - ".github/workflows/build-opencode-plugin.yml"
+  push:
+    branches:
+      - main
+    paths:
+      - ".opencode/**"
+      - ".github/workflows/build-opencode-plugin.yml"
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: .opencode
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - run: npm run build
+      - run: npm test
+      - run: npm run pack:check

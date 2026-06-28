@@ -39,6 +39,8 @@
         "contextLabel": "198k"
       }
     ],
+    "trafficModelPrefixes": ["prefer/"],
+    "litellmDisplayPrefix": "prefer/",
     "modelDiscovery": {
       "bootstrapOnStartup": false,
       "bootstrapTimeoutSeconds": 600

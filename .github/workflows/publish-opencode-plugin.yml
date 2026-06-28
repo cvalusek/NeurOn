@@ -1,0 +1,44 @@
+name: Publish OpenCode plugin
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version already present in .opencode/package.json"
+        required: true
+        type: string
+      dry_run:
+        description: "Run checks without publishing"
+        required: true
+        default: true
+        type: boolean
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: .opencode
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          registry-url: "https://registry.npmjs.org"
+      - name: Check requested version
+        run: |
+          PACKAGE_VERSION="$(node -p "require('./package.json').version")"
+          if [ "$PACKAGE_VERSION" != "${{ inputs.version }}" ]; then
+            echo "Requested version ${{ inputs.version }} does not match package.json version $PACKAGE_VERSION"
+            exit 1
+          fi
+      - run: npm run build
+      - run: npm test
+      - run: npm run pack:check
+      - name: Publish package
+        if: ${{ !inputs.dry_run }}
+        run: npm publish --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

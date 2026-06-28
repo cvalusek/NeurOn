@@ -8,6 +8,7 @@ import type { Reservation, ReservationStatus } from "../domain/types.js";
 interface ReservationRow {
   id: string;
   username: string;
+  api_key_name: string | null;
   model_ids: string;
   target_ids: string;
   created_at: string;
@@ -35,10 +36,10 @@ export class SqliteReservationRepository implements ReservationRepository {
     this.db
       .prepare(
         `insert into reservations (
-          id, username, model_ids, target_ids, created_at, expires_at,
+          id, username, api_key_name, model_ids, target_ids, created_at, expires_at,
           keepalive_minutes, ended_at, status, failure_message, synthetic
         ) values (
-          @id, @username, @modelIds, @targetIds, @createdAt, @expiresAt,
+          @id, @username, @apiKeyName, @modelIds, @targetIds, @createdAt, @expiresAt,
           @keepaliveMinutes, @endedAt, @status, @failureMessage, @synthetic
         )`
       )
@@ -64,6 +65,7 @@ export class SqliteReservationRepository implements ReservationRepository {
       .prepare(
         `update reservations set
           username = @username,
+          api_key_name = @apiKeyName,
           model_ids = @modelIds,
           target_ids = @targetIds,
           created_at = @createdAt,
@@ -108,6 +110,7 @@ export class SqliteReservationRepository implements ReservationRepository {
       create table if not exists reservations (
         id text primary key,
         username text not null,
+        api_key_name text,
         model_ids text not null,
         target_ids text not null,
         created_at text not null,
@@ -122,6 +125,10 @@ export class SqliteReservationRepository implements ReservationRepository {
       create index if not exists idx_reservations_status_expires_at
         on reservations(status, expires_at);
     `);
+    const columns = this.db.prepare("pragma table_info(reservations)").all() as Array<{ name: string }>;
+    if (!columns.some((column) => column.name === "api_key_name")) {
+      this.db.exec("alter table reservations add column api_key_name text");
+    }
   }
 }
 
@@ -129,6 +136,7 @@ function toSqlParams(reservation: Reservation) {
   return {
     id: reservation.id,
     username: reservation.username,
+    apiKeyName: reservation.apiKeyName ?? null,
     modelIds: JSON.stringify(reservation.modelIds),
     targetIds: JSON.stringify(reservation.targetIds),
     createdAt: reservation.createdAt.toISOString(),
@@ -145,6 +153,7 @@ function fromRow(row: ReservationRow): Reservation {
   return {
     id: row.id,
     username: row.username,
+    apiKeyName: row.api_key_name ?? undefined,
     modelIds: JSON.parse(row.model_ids) as string[],
     targetIds: JSON.parse(row.target_ids) as string[],
     createdAt: new Date(row.created_at),

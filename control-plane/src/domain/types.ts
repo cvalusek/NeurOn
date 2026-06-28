@@ -5,6 +5,7 @@ export type DesiredState = "on" | "off";
 export interface AuthenticatedUser {
   username: string;
   isAdmin: boolean;
+  apiKeyName?: string;
 }
 
 export interface ApiKey {
@@ -20,6 +21,7 @@ export interface ApiKey {
 export interface Reservation {
   id: string;
   username: string;
+  apiKeyName?: string;
   modelIds: string[];
   targetIds: string[];
   createdAt: Date;
@@ -92,6 +94,14 @@ export interface RuntimeModelDiscoveryConfig {
   bootstrapTimeoutSeconds?: number;
 }
 
+export interface ModelWarmupConfig {
+  enabled?: boolean;
+  apiBaseUrl?: string;
+  apiKey?: string;
+  apiKeyEnv?: string;
+  timeoutSeconds?: number;
+}
+
 export interface CapacityTarget {
   id: string;
   displayName: string;
@@ -99,7 +109,9 @@ export interface CapacityTarget {
   modelIds: string[];
   models?: ConfiguredModel[];
   modelDiscovery?: RuntimeModelDiscoveryConfig;
+  modelWarmup?: ModelWarmupConfig;
   trafficModelPrefixes?: string[];
+  litellmDisplayPrefix?: string;
   modelsMax?: number;
   aws?: AwsTargetConfig;
   docker?: DockerContainerTargetConfig;

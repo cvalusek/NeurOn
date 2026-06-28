@@ -3,7 +3,7 @@ import { z } from "zod";
 import type { ReservationRepository, TargetStatusRepository } from "../domain/interfaces.js";
 import { ModelCatalog } from "../services/ModelCatalog.js";
 import { ReservationService } from "../services/ReservationService.js";
-import { requireUser, reservationJson, targetJson } from "../utils/http.js";
+import { requireUser, reservationDisplayUsername, reservationJson, targetJson } from "../utils/http.js";
 
 const jsonRpcRequestSchema = z.object({
   jsonrpc: z.literal("2.0").default("2.0"),
@@ -190,7 +190,7 @@ async function targetsPayload(catalog: ModelCatalog, reservations: ReservationRe
     targetJson(
       target,
       statuses.get(target.id),
-      Array.from(new Set(active.filter((reservation) => reservation.targetIds.includes(target.id)).map((reservation) => reservation.username)))
+      Array.from(new Set(active.filter((reservation) => reservation.targetIds.includes(target.id)).map(reservationDisplayUsername)))
     )
   );
 }

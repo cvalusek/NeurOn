@@ -22,6 +22,7 @@ import { registerMcpRoutes } from "./routes/mcp.js";
 import { registerUiRoutes } from "./routes/ui.js";
 import { ApiKeyService } from "./services/ApiKeyService.js";
 import { ModelCatalog } from "./services/ModelCatalog.js";
+import { ModelWarmupService } from "./services/ModelWarmupService.js";
 import { ReservationService } from "./services/ReservationService.js";
 import { RuntimeModelDiscovery } from "./services/RuntimeModelDiscovery.js";
 import { TrafficKeepaliveService } from "./services/TrafficKeepaliveService.js";
@@ -50,6 +51,7 @@ export async function buildApp(config: AppConfig, models: ModelDefinition[]) {
   const trafficKeepalive = new TrafficKeepaliveService(reservations, statuses);
   const healthChecker = new HealthChecker(config.healthCheckTimeoutSeconds);
   const runtimeModelDiscovery = new RuntimeModelDiscovery(catalog);
+  const modelWarmup = new ModelWarmupService(catalog);
   const trafficPoller =
     config.litellmApiBaseUrl && config.litellmApiKey && config.litellmTrafficPollSeconds > 0
       ? new TrafficPoller(new LiteLlmSpendLogsTrafficSource(config.litellmApiBaseUrl, config.litellmApiKey, config.litellmTrafficLookbackSeconds), catalog, trafficKeepalive)
@@ -62,6 +64,7 @@ export async function buildApp(config: AppConfig, models: ModelDefinition[]) {
     backendConfigSync,
     healthChecker,
     runtimeModelDiscovery,
+    modelWarmup,
     trafficPoller
   );
 

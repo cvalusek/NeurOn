@@ -65,8 +65,64 @@ describe("reconciler decisions", () => {
         });
       }
     };
-    const reconciler = new Reconciler([target], repository, statuses, provider, new NoopBackendConfigSync(), undefined, undefined, trafficPoller as never);
+    const reconciler = new Reconciler([target], repository, statuses, provider, new NoopBackendConfigSync(), undefined, undefined, undefined, trafficPoller as never);
     await reconciler.reconcile(now);
     expect(provider.desired.get("t1")).toBe("on");
+  });
+
+  it("keeps a target provisioning until requested model warmup succeeds", async () => {
+    const repository = new InMemoryReservationRepository();
+    const statuses = new InMemoryTargetStatusRepository();
+    const provider = new FakeCapacityProvider();
+    provider.statuses.set("t1", { observed: "healthy", message: "Running" });
+    await repository.create({
+      username: "clint",
+      modelIds: ["m1"],
+      targetIds: ["t1"],
+      createdAt: new Date("2026-06-25T10:00:00.000Z"),
+      expiresAt: new Date("2026-06-25T11:00:00.000Z"),
+      status: "active"
+    });
+    const modelWarmup = {
+      calls: [] as string[][],
+      async warmupTargetModels(_target: CapacityTarget, modelIds: string[]) {
+        this.calls.push(modelIds);
+        throw new Error("model still loading");
+      }
+    };
+    const reconciler = new Reconciler([target], repository, statuses, provider, new NoopBackendConfigSync(), undefined, undefined, modelWarmup as never);
+
+    await reconciler.reconcile(new Date("2026-06-25T10:00:00.000Z"));
+
+    expect(modelWarmup.calls).toEqual([["m1"]]);
+    expect(statuses.get("t1")).toMatchObject({ desired: "on", observed: "provisioning", message: "model still loading" });
+    expect((await repository.list())[0].status).toBe("active");
+  });
+
+  it("marks a target healthy after requested model warmup succeeds", async () => {
+    const repository = new InMemoryReservationRepository();
+    const statuses = new InMemoryTargetStatusRepository();
+    const provider = new FakeCapacityProvider();
+    provider.statuses.set("t1", { observed: "healthy", message: "Running" });
+    await repository.create({
+      username: "clint",
+      modelIds: ["m1"],
+      targetIds: ["t1"],
+      createdAt: new Date("2026-06-25T10:00:00.000Z"),
+      expiresAt: new Date("2026-06-25T11:00:00.000Z"),
+      status: "active"
+    });
+    const modelWarmup = {
+      calls: [] as string[][],
+      async warmupTargetModels(_target: CapacityTarget, modelIds: string[]) {
+        this.calls.push(modelIds);
+      }
+    };
+    const reconciler = new Reconciler([target], repository, statuses, provider, new NoopBackendConfigSync(), undefined, undefined, modelWarmup as never);
+
+    await reconciler.reconcile(new Date("2026-06-25T10:00:00.000Z"));
+
+    expect(modelWarmup.calls).toEqual([["m1"]]);
+    expect(statuses.get("t1")).toMatchObject({ desired: "on", observed: "healthy" });
   });
 });

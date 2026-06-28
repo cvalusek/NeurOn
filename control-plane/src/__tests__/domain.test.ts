@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { FakeCapacityProvider } from "../capacity/FakeCapacityProvider.js";
 import type { CapacityTarget, ModelDefinition } from "../domain/types.js";
 import { NoopBackendConfigSync } from "../litellm/LiteLlmBackendConfigSync.js";
@@ -21,6 +21,10 @@ const models: ModelDefinition[] = [
   { id: "qwen", displayName: "Qwen", aliases: ["qwen"], targetIds: [target.id] },
   { id: "gemma", displayName: "Gemma", aliases: ["gemma"], targetIds: [target.id] }
 ];
+
+afterEach(() => {
+  vi.useRealTimers();
+});
 
 function harness() {
   const repository = new InMemoryReservationRepository();
@@ -63,6 +67,21 @@ describe("reservation behavior", () => {
     const reservation = (await repository.list())[0];
     expect(reservation.modelIds).toEqual([]);
     expect(reservation.targetIds).toEqual([target.id]);
+  });
+
+  it("can extend a reservation from now instead of stacking onto the previous expiry", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-06-28T12:00:00.000Z"));
+    const { reservations } = harness();
+    const user = { username: "clint", isAdmin: false };
+    const reservation = await reservations.createForUser(user, { modelIds: ["qwen"], durationMinutes: 30 });
+
+    vi.setSystemTime(new Date("2026-06-28T12:05:00.000Z"));
+    const additive = await reservations.extend(reservation.id, user, 2);
+    expect(additive.expiresAt).toEqual(new Date("2026-06-28T12:32:00.000Z"));
+
+    const fromNow = await reservations.extend(reservation.id, user, 2, { fromNow: true });
+    expect(fromNow.expiresAt).toEqual(new Date("2026-06-28T12:07:00.000Z"));
   });
 
   it("computes aggregate desired capacity from active reservations", async () => {

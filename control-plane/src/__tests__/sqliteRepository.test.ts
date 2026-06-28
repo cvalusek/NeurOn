@@ -21,6 +21,7 @@ describe("SqliteReservationRepository", () => {
     const first = new SqliteReservationRepository(databasePath);
     const reservation = await first.create({
       username: "clint",
+      apiKeyName: "OpenCode",
       modelIds: ["m1"],
       targetIds: ["t1"],
       createdAt: new Date("2026-06-27T12:00:00.000Z"),
@@ -34,6 +35,7 @@ describe("SqliteReservationRepository", () => {
     expect(await second.get(reservation.id)).toMatchObject({
       id: reservation.id,
       username: "clint",
+      apiKeyName: "OpenCode",
       modelIds: ["m1"],
       targetIds: ["t1"],
       status: "active"
@@ -58,7 +60,7 @@ describe("SqliteApiKeyRepository", () => {
     const keys = await second.listForUser("clint");
     second.close();
 
-    expect(authenticated).toEqual(user);
+    expect(authenticated).toEqual({ ...user, apiKeyName: "Plugin key" });
     expect(keys).toMatchObject([{ id: created.key.id, name: "Plugin key", prefix: created.key.prefix }]);
   });
 });

@@ -52,7 +52,7 @@ export async function authenticateApiKey(
   const expected = Buffer.from(key.keyHash);
   if (actual.length !== expected.length || !crypto.timingSafeEqual(actual, expected)) return undefined;
   await apiKeys.touchLastUsedAt(key.id, new Date());
-  return { username: key.username, isAdmin: isAdmin(key.username) };
+  return { username: key.username, isAdmin: isAdmin(key.username), apiKeyName: key.name };
 }
 
 function parseTokenId(token: string): string | undefined {

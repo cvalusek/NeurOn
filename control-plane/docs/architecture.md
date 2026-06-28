@@ -119,6 +119,10 @@ into AWS, Docker, LiteLLM, or a concrete repository from unrelated code.
 5. The periodic reconciler observes aggregate desired state and applies provider
    changes.
 
+API clients can also extend a reservation relative to the current request time
+with `fromNow`. This is useful for plugins that send a small keep-warm signal
+before each chat message without accumulating a long reservation tail.
+
 ## API Keys
 
 Users can create personal API keys from the UI or `/api/api-keys`. Newly

@@ -2,6 +2,7 @@ import type { BackendConfigSync, CapacityProvider, ReservationRepository, Target
 import type { CapacityTarget, DesiredState, RuntimeState, TargetStatus } from "../domain/types.js";
 import type { HealthChecker } from "./HealthChecker.js";
 import type { RuntimeModelDiscovery } from "../services/RuntimeModelDiscovery.js";
+import type { ModelWarmupService } from "../services/ModelWarmupService.js";
 import type { TrafficPoller } from "../services/TrafficPoller.js";
 
 export class Reconciler {
@@ -15,6 +16,7 @@ export class Reconciler {
     private readonly backendConfigSync: BackendConfigSync,
     private readonly healthChecker?: HealthChecker,
     private readonly runtimeModelDiscovery?: RuntimeModelDiscovery,
+    private readonly modelWarmup?: ModelWarmupService,
     private readonly trafficPoller?: TrafficPoller
   ) {}
 
@@ -23,7 +25,7 @@ export class Reconciler {
     this.running = true;
     try {
       await this.reservations.expireReservations(now);
-      const activeReservations = await this.reservations.listActive(now);
+      let activeReservations = await this.reservations.listActive(now);
       const desiredOn = new Set(activeReservations.flatMap((reservation) => reservation.targetIds));
 
       for (const target of this.targets) {
@@ -36,6 +38,7 @@ export class Reconciler {
           if (desired === "off" && previous?.desired === "on" && this.trafficPoller) {
             await this.trafficPoller.poll(now);
             const refreshedActive = await this.reservations.listActive(now);
+            activeReservations = refreshedActive;
             if (refreshedActive.some((reservation) => reservation.targetIds.includes(target.id))) desired = "on";
           }
           if (desired === "on") {
@@ -50,6 +53,17 @@ export class Reconciler {
             const health = await this.healthChecker.check(target);
             observed = health.ok ? "healthy" : "provisioning";
             message = health.message;
+          }
+          if (desired === "on" && observed === "healthy" && this.modelWarmup) {
+            const modelIds = activeReservations
+              .filter((reservation) => reservation.targetIds.includes(target.id))
+              .flatMap((reservation) => reservation.modelIds);
+            try {
+              await this.modelWarmup.warmupTargetModels(target, modelIds);
+            } catch (error) {
+              observed = "provisioning";
+              message = error instanceof Error ? error.message : String(error);
+            }
           }
           const next = targetStatus(target.id, desired, observed, message, now, previous);
           this.statuses.set(next);
