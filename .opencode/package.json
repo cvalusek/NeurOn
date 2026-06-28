@@ -1,0 +1,18 @@
+{
+  "name": "opencode-neuron",
+  "version": "0.1.0",
+  "description": "OpenCode plugin that reserves and waits for NeurOn capacity before chats.",
+  "type": "module",
+  "main": "./plugins/neuron.js",
+  "exports": {
+    ".": "./plugins/neuron.js"
+  },
+  "files": [
+    "plugins/neuron.js"
+  ],
+  "scripts": {
+    "build": "node --check plugins/neuron.js",
+    "pack:check": "npm pack --dry-run",
+    "test": "node --test test/*.test.js"
+  }
+}
