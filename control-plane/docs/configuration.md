@@ -47,7 +47,8 @@ Local compose overrides the important polling settings for faster iteration.
 
 ## Storage
 
-Reservation storage defaults to memory for direct local runs:
+Reservation and API-key storage use the same configured driver. Storage
+defaults to memory for direct local runs:
 
 ```env
 STORAGE_DRIVER=memory
@@ -68,9 +69,31 @@ DATABASE_URL=postgres://neuron:secret@postgres:5432/neuron
 ```
 
 Local Compose defaults to SQLite at `/app/data/neuron.db` and mounts the
-repository `./data` directory into `/app/data`. Target status, runtime discovery
-cache, and startup estimates remain in memory because they are observational and
-rebuilt by reconciliation.
+repository `./data` directory into `/app/data`. SQLite and Postgres persist
+active reservations and `sk-neuron-...` API keys across NeurOn restarts. Target
+status, runtime discovery cache, and startup estimates remain in memory because
+they are observational and rebuilt by reconciliation.
+
+## Auth And API Keys
+
+Interactive users sign in with a username plus the shared password. API clients
+can use Basic Auth with the same shared password:
+
+```bash
+curl -u clint:dev-password http://localhost:8090/api/models
+```
+
+Users can create personal API keys from `/api-keys`. The generated key is shown
+once, starts with `sk-neuron-...`, and is stored as a hash. API keys authenticate
+REST and MCP calls with:
+
+```http
+Authorization: Bearer sk-neuron-...
+```
+
+`ADMIN_USERS` controls admin status for Basic, cookie, and API-key auth. When
+`ADMIN_USERS` is empty, any authenticated user is treated as an admin, matching
+the existing local-development behavior.
 
 ## Env-Expanded Target Config
 

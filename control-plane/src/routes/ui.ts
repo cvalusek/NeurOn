@@ -2,9 +2,10 @@ import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import type { AppConfig } from "../domain/types.js";
 import { SharedPasswordAuthProvider } from "../auth/SharedPasswordAuthProvider.js";
+import { ApiKeyService } from "../services/ApiKeyService.js";
 import { ModelCatalog } from "../services/ModelCatalog.js";
 import { ReservationService } from "../services/ReservationService.js";
-import { adminPage, loginPage, reservationPage, startPage } from "../ui/html.js";
+import { adminPage, apiKeysPage, loginPage, reservationPage, startPage } from "../ui/html.js";
 import { requireUser } from "../utils/http.js";
 
 export function registerUiRoutes(
@@ -12,6 +13,7 @@ export function registerUiRoutes(
   config: AppConfig,
   authProvider: SharedPasswordAuthProvider,
   catalog: ModelCatalog,
+  apiKeyService: ApiKeyService,
   reservationService: ReservationService
 ) {
   app.get("/login", async (_request, reply) => reply.type("text/html").send(loginPage()));
@@ -26,6 +28,21 @@ export function registerUiRoutes(
     const query = z.object({ error: z.string().optional() }).parse(request.query);
     const targets = catalog.listTargets().map((target) => ({ target, models: catalog.listModelsForTarget(target.id) }));
     return reply.type("text/html").send(startPage(requireUser(request), targets, query.error));
+  });
+  app.get("/api-keys", async (request, reply) => {
+    const user = requireUser(request);
+    return reply.type("text/html").send(apiKeysPage(user, await apiKeyService.listForUser(user)));
+  });
+  app.post("/api-keys", async (request, reply) => {
+    const user = requireUser(request);
+    const body = z.object({ name: z.string().default("Plugin key") }).parse(request.body ?? {});
+    const created = await apiKeyService.createForUser(user, body);
+    return reply.type("text/html").send(apiKeysPage(user, await apiKeyService.listForUser(user), created.token));
+  });
+  app.post("/api-keys/:id/revoke", async (request, reply) => {
+    const { id } = z.object({ id: z.string() }).parse(request.params);
+    await apiKeyService.revokeForUser(requireUser(request), id);
+    return reply.redirect("/api-keys");
   });
   app.post("/reservations", async (request, reply) => {
     try {

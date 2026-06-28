@@ -57,8 +57,12 @@ Useful knobs:
 
 - `CONTROL_PLANE_PORT` sets the host port for the web app.
 - `SHARED_PASSWORD`, `COOKIE_SECRET`, and `ADMIN_USERS` configure v1 auth.
+- Users can create `sk-neuron-...` API keys for Bearer-auth API, OpenAPI, and
+  MCP clients.
 - `CAPACITY_TARGETS_FILE`, `CAPACITY_TARGETS_JSON`, or `CAPACITY_TARGET_KEYS`
   define the capacity targets NeurOn can control.
+- `STORAGE_DRIVER=sqlite` is the local Compose default and persists
+  reservations plus API keys in `./data/neuron.db`.
 - `USE_FAKE_PROVIDER=true` switches to the fake provider for tests/app-only
   development.
 - `LITELLM_API_BASE_URL` and `LITELLM_API_KEY` enable traffic-based keepalive
@@ -84,3 +88,15 @@ provider details, health check URL, and optional LiteLLM backend metadata.
 Start with [control-plane/examples/capacity-targets.example.json](control-plane/examples/capacity-targets.example.json)
 or the env-expanded pattern documented in
 [control-plane/docs/configuration.md](control-plane/docs/configuration.md).
+
+## Integrations
+
+NeurOn exposes:
+
+- Swagger UI at `http://localhost:8090/docs`
+- OpenAPI 3.0 at `http://localhost:8090/openapi.json`
+- MCP JSON-RPC at `http://localhost:8090/mcp`
+
+Create user API keys from `http://localhost:8090/api-keys`, then use them with
+`Authorization: Bearer sk-neuron-...`. See
+[control-plane/docs/integrations.md](control-plane/docs/integrations.md).

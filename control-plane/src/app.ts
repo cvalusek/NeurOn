@@ -18,7 +18,9 @@ import { Reconciler } from "./reconciler/Reconciler.js";
 import { InMemoryTargetStatusRepository } from "./repository/InMemoryTargetStatusRepository.js";
 import { createReservationRepository } from "./repository/createReservationRepository.js";
 import { registerApiRoutes } from "./routes/api.js";
+import { registerMcpRoutes } from "./routes/mcp.js";
 import { registerUiRoutes } from "./routes/ui.js";
+import { ApiKeyService } from "./services/ApiKeyService.js";
 import { ModelCatalog } from "./services/ModelCatalog.js";
 import { ReservationService } from "./services/ReservationService.js";
 import { RuntimeModelDiscovery } from "./services/RuntimeModelDiscovery.js";
@@ -27,9 +29,10 @@ import { TrafficPoller } from "./services/TrafficPoller.js";
 
 export async function buildApp(config: AppConfig, models: ModelDefinition[]) {
   const app = Fastify({ logger: true });
-  const authProvider = new SharedPasswordAuthProvider(config.sharedPassword, config.adminUsers, config.cookieSecret);
-  const catalog = new ModelCatalog(models, config.capacityTargets);
   const reservationRepository = await createReservationRepository(config.storage);
+  const apiKeys = reservationRepository.apiKeys;
+  const authProvider = new SharedPasswordAuthProvider(config.sharedPassword, config.adminUsers, config.cookieSecret, apiKeys);
+  const catalog = new ModelCatalog(models, config.capacityTargets);
   const reservations = reservationRepository.repository;
   const statuses = new InMemoryTargetStatusRepository();
   const capacityProvider =
@@ -43,6 +46,7 @@ export async function buildApp(config: AppConfig, models: ModelDefinition[]) {
         });
   const backendConfigSync = config.litellmApiBaseUrl && config.litellmApiKey ? new LiteLlmBackendConfigSync(config.litellmApiBaseUrl, config.litellmApiKey) : new NoopBackendConfigSync();
   const reservationService = new ReservationService(reservations, catalog);
+  const apiKeyService = new ApiKeyService(apiKeys);
   const trafficKeepalive = new TrafficKeepaliveService(reservations, statuses);
   const healthChecker = new HealthChecker(config.healthCheckTimeoutSeconds);
   const runtimeModelDiscovery = new RuntimeModelDiscovery(catalog);
@@ -63,12 +67,28 @@ export async function buildApp(config: AppConfig, models: ModelDefinition[]) {
 
   await app.register(cookie);
   await app.register(formbody);
-  await app.register(swagger, { openapi: { info: { title: "NeurOn", version: "0.1.0" } } });
+  await app.register(swagger, {
+    openapi: {
+      openapi: "3.0.3",
+      info: {
+        title: "NeurOn",
+        version: "0.1.0",
+        description: "Internal control plane API for reserving shared self-hosted LLM capacity."
+      },
+      components: {
+        securitySchemes: {
+          bearerAuth: { type: "http", scheme: "bearer", bearerFormat: "sk-neuron" },
+          basicAuth: { type: "http", scheme: "basic" }
+        }
+      }
+    }
+  });
   await app.register(swaggerUi, { routePrefix: "/docs" });
+  app.get("/openapi.json", { schema: { hide: true } }, async () => app.swagger());
   app.addHook("onClose", async () => reservationRepository.close());
 
   app.addHook("preHandler", async (request, reply) => {
-    if (request.url === "/healthz" || request.url === "/login" || request.url.startsWith("/docs")) return;
+    if (request.url === "/healthz" || request.url === "/login" || request.url === "/openapi.json" || request.url.startsWith("/docs")) return;
     const user = await authProvider.authenticate({ headers: request.headers, cookies: request.cookies });
     if (!user) {
       if (request.url.startsWith("/api/")) return reply.code(401).send({ error: "Authentication required" });
@@ -77,8 +97,9 @@ export async function buildApp(config: AppConfig, models: ModelDefinition[]) {
     request.user = user;
   });
 
-  registerApiRoutes(app, catalog, reservations, statuses, reservationService, trafficKeepalive, reconciler, capacityProvider, runtimeModelDiscovery, healthChecker);
-  registerUiRoutes(app, config, authProvider, catalog, reservationService);
+  registerApiRoutes(app, catalog, reservations, statuses, apiKeyService, reservationService, trafficKeepalive, reconciler, capacityProvider, runtimeModelDiscovery, healthChecker);
+  registerMcpRoutes(app, catalog, reservations, statuses, reservationService);
+  registerUiRoutes(app, config, authProvider, catalog, apiKeyService, reservationService);
 
   const bootstrapRuntimeModels = async () => {
     for (const target of config.capacityTargets.filter(shouldBootstrapRuntimeModels)) {

@@ -1,5 +1,5 @@
 import type { FastifyReply, FastifyRequest } from "fastify";
-import type { AuthenticatedUser, CapacityTarget, Reservation, TargetStatus } from "../domain/types.js";
+import type { ApiKey, AuthenticatedUser, CapacityTarget, Reservation, TargetStatus } from "../domain/types.js";
 
 export function requireUser(request: FastifyRequest): AuthenticatedUser {
   const user = request.user;
@@ -27,6 +27,16 @@ export function reservationJson(reservation: Reservation, statuses: TargetStatus
       };
     }),
     failureMessage: reservation.failureMessage
+  };
+}
+
+export function apiKeyJson(key: ApiKey) {
+  return {
+    id: key.id,
+    name: key.name,
+    prefix: key.prefix,
+    createdAt: key.createdAt.toISOString(),
+    lastUsedAt: key.lastUsedAt?.toISOString()
   };
 }
 

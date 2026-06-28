@@ -1,4 +1,4 @@
-import type { AppConfig, AuthenticatedUser, CapacityTarget, ModelDefinition, Reservation, TargetStatus } from "../domain/types.js";
+import type { ApiKey, AppConfig, AuthenticatedUser, CapacityTarget, ModelDefinition, Reservation, TargetStatus } from "../domain/types.js";
 
 export function layout(title: string, user: AuthenticatedUser | undefined, body: string): string {
   return `<!doctype html>
@@ -46,7 +46,7 @@ export function layout(title: string, user: AuthenticatedUser | undefined, body:
     .reservation-card { border-top: 1px solid #e2e7e1; padding-top: 10px; }
     .reservation-actions { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; }
     .chip-row { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
-    input[type="number"], input[type="text"], input[type="password"] { padding: 8px; border: 1px solid #aab4ad; border-radius: 6px; min-width: 140px; }
+    input[type="number"], input[type="text"], input[type="password"] { padding: 8px; border: 1px solid #aab4ad; border-radius: 6px; min-width: 140px; max-width: 100%; }
     button { border: 0; border-radius: 6px; padding: 9px 13px; background: #0f766e; color: white; font-weight: 650; cursor: pointer; }
     button.choice { border: 1px solid #aab4ad; background: #fbfcfb; color: #1f2933; }
     button.secondary { background: #334155; }
@@ -60,11 +60,13 @@ export function layout(title: string, user: AuthenticatedUser | undefined, body:
     th, td { text-align: left; padding: 9px; border-bottom: 1px solid #e7ebe6; vertical-align: top; }
     .muted { color: #657266; } .status { font-weight: 700; } .row { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
     .actions { display: flex; justify-content: flex-end; margin-top: 16px; }
+    .secret-box { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; padding: 12px; border: 1px solid #0f766e; border-radius: 6px; background: #f0faf7; }
+    .secret-box code { flex: 1 1 360px; overflow-wrap: anywhere; font: 13px ui-monospace, SFMono-Regular, Menlo, monospace; }
     .hidden { display: none; }
   </style>
 </head>
 <body>
-  <header><div class="topbar"><strong class="brand">NeurOn</strong><nav><a href="/">Home</a><a href="/admin">Admin</a></nav><span class="user">${user ? escapeHtml(user.username) : ""}</span></div></header>
+  <header><div class="topbar"><strong class="brand">NeurOn</strong><nav><a href="/">Home</a><a href="/api-keys">API keys</a><a href="/admin">Admin</a></nav><span class="user">${user ? escapeHtml(user.username) : ""}</span></div></header>
   <main>${body}</main>
 </body>
 </html>`;
@@ -312,6 +314,38 @@ export function reservationPage(user: AuthenticatedUser, reservation: Reservatio
   </script>`);
 }
 
+export function apiKeysPage(user: AuthenticatedUser, apiKeys: ApiKey[], createdToken = ""): string {
+  return layout("NeurOn API Keys", user, `<section class="panel">
+    <h1>API keys</h1>
+    ${createdToken ? `<div class="secret-box"><code id="created-api-key">${escapeHtml(createdToken)}</code><button type="button" data-copy="${escapeHtml(createdToken)}">Copy</button></div><p class="muted">Copy this key now. It will not be shown again.</p>` : ""}
+    <form method="post" action="/api-keys">
+      <p><label>Name<br><input name="name" type="text" maxlength="80" value="Plugin key" required></label></p>
+      <button type="submit">Generate key</button>
+    </form>
+  </section>
+  <section class="panel">
+    <h2>Your keys</h2>
+    ${
+      apiKeys.length
+        ? `<table><thead><tr><th>Name</th><th>Key</th><th>Created</th><th>Last used</th><th></th></tr></thead><tbody>${apiKeys.map(apiKeyRow).join("")}</tbody></table>`
+        : `<p class="muted">No API keys yet.</p>`
+    }
+  </section>
+  <script type="module">
+    document.addEventListener('click', async (event) => {
+      const button = event.target.closest('[data-copy]');
+      if (!button) return;
+      event.preventDefault();
+      const value = button.dataset.copy;
+      if (!value) return;
+      await navigator.clipboard?.writeText(value);
+      const previous = button.textContent;
+      button.textContent = 'Copied';
+      setTimeout(() => { button.textContent = previous; }, 900);
+    });
+  </script>`);
+}
+
 export function adminPage(user: AuthenticatedUser, config: AppConfig): string {
   return layout("NeurOn Admin", user, `<section class="panel">
     <h1>Admin</h1>
@@ -352,6 +386,14 @@ export function adminPage(user: AuthenticatedUser, config: AppConfig): string {
     refresh();
     setInterval(refresh, ${config.adminStatusPollSeconds * 1000});
   </script>`);
+}
+
+function apiKeyRow(key: ApiKey): string {
+  return `<tr><td>${escapeHtml(key.name)}</td><td><code>${escapeHtml(key.prefix)}...</code></td><td>${formatDate(key.createdAt)}</td><td>${key.lastUsedAt ? formatDate(key.lastUsedAt) : "Never"}</td><td><form method="post" action="/api-keys/${escapeHtml(key.id)}/revoke"><button class="danger" type="submit">Revoke</button></form></td></tr>`;
+}
+
+function formatDate(value: Date): string {
+  return new Intl.DateTimeFormat("en-US", { dateStyle: "medium", timeStyle: "short" }).format(value);
 }
 
 export function statusRows(statuses: TargetStatus[]): string {

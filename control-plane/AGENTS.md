@@ -29,10 +29,12 @@ configuration or in the external runtime project.
   adapters.
 - Prefer the existing interfaces before adding new abstractions:
   `CapacityProvider`, `BackendConfigSync`, `ReservationRepository`,
-  `AuthProvider`, `TrafficSource`, and `TargetStatusRepository`.
-- Reservation storage can be memory, SQLite, or Postgres behind
-  `ReservationRepository`. Keep target status and startup estimates
-  observational and in-memory unless a task is explicitly about persisting them.
+  `ApiKeyRepository`, `AuthProvider`, `TrafficSource`, and
+  `TargetStatusRepository`.
+- Reservation and API-key storage can be memory, SQLite, or Postgres behind
+  repository interfaces. Keep target status, runtime discovery cache, and
+  startup estimates observational and in-memory unless a task is explicitly
+  about persisting them.
 - Use explicit service classes and typed interfaces over framework magic.
 
 ## Configuration Rules
@@ -47,6 +49,22 @@ configuration or in the external runtime project.
 - Model choices are owned by NeurOn target configuration. Do not infer the
   production catalog from external preset files.
 
+## Integration Rules
+
+- Users can create personal `sk-neuron-...` API keys from `/api-keys`. The full
+  key is shown once and stored only as a hash.
+- API keys authenticate REST and MCP calls with `Authorization: Bearer <key>`.
+- OpenAPI 3.0 is available at `/openapi.json`; Swagger UI is available at
+  `/docs`.
+- MCP is exposed at `/mcp` with JSON-RPC methods `initialize`, `tools/list`,
+  and `tools/call`. Current tools list models, targets, and status, and create
+  or end reservations.
+- MCP `end_reservation` must remain scoped to reservations owned by the API-key
+  user. Do not loosen this to admin-wide cancellation without an explicit task
+  and careful safety review.
+- The Codex stdio bridge lives at `scripts/neuron-mcp-stdio.js` and forwards
+  stdio-framed MCP messages to NeurOn's HTTP `/mcp` endpoint.
+
 ## UI Rules
 
 - Server-rendered HTML plus small browser JavaScript only.
@@ -54,6 +72,8 @@ configuration or in the external runtime project.
 - Main page status should stay grouped by capacity target.
 - Model cards should preserve copy chips for aliases/IDs and context pills.
 - Keep copy interactions usable without making the whole card ambiguous.
+- Keep the API keys page on the same server-rendered UI pattern. Generated
+  keys should be copyable once, and later lists must show metadata/prefix only.
 
 ## Reconciler Rules
 
@@ -79,5 +99,5 @@ or Docker for ordinary unit tests.
 ## Documentation
 
 Update `docs/` when changing design rationale, config shape, provider behavior,
-or reconciler semantics. The docs are part of the product surface for future
-operators and agents.
+API/auth/integration surfaces, or reconciler semantics. The docs are part of
+the product surface for future operators and agents.

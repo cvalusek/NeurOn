@@ -9,8 +9,9 @@ It is intentionally small:
 
 - Fastify + TypeScript
 - server-rendered HTML, not a SPA
-- OpenAPI-compatible REST endpoints
-- durable reservation storage with memory, SQLite, or Postgres options
+- OpenAPI-compatible REST endpoints, Swagger UI, and MCP
+- durable reservation and API-key storage with memory, SQLite, or Postgres
+  options
 - provider adapters for Docker containers, Docker Compose, and AWS ECS/ASG
 - LiteLLM request-log polling for traffic-based keepalive
 
@@ -25,11 +26,13 @@ SHARED_PASSWORD=dev-password USE_FAKE_PROVIDER=true CAPACITY_TARGETS_FILE=exampl
 ```
 
 Open `http://localhost:8090`, sign in with any username and `dev-password`, or
-use Basic Auth for API calls.
+use Basic Auth for API calls. Users can create API keys from `/api-keys` for
+Bearer-auth plugin and MCP integrations.
 
 From the repository root, Docker Compose runs NeurOn with the Docker provider
 and the default PreFer container target. Local Compose stores reservations in
-`./data/neuron.db` so restarting NeurOn does not forget active demand:
+`./data/neuron.db` so restarting NeurOn does not forget active demand or API
+keys:
 
 ```bash
 docker compose up --build control-plane
@@ -95,7 +98,7 @@ Environment variables:
 | `SHARED_PASSWORD` | required in production | Basic/cookie auth password |
 | `COOKIE_SECRET` | unset | Enables login cookie auth |
 | `ADMIN_USERS` | any authenticated user | Comma-separated admin usernames |
-| `STORAGE_DRIVER` | `memory` | `memory`, `sqlite`, or `postgres` reservation storage |
+| `STORAGE_DRIVER` | `memory` | `memory`, `sqlite`, or `postgres` reservation and API-key storage |
 | `SQLITE_PATH` | `data/neuron.db` | SQLite database path when `STORAGE_DRIVER=sqlite` |
 | `DATABASE_URL` | unset | Postgres connection string when `STORAGE_DRIVER=postgres` |
 | `CAPACITY_TARGETS_JSON` | unset | JSON array of targets |
@@ -137,6 +140,12 @@ Full configuration details live in [docs/configuration.md](docs/configuration.md
 curl -u clint:dev-password http://localhost:8090/api/models
 ```
 
+Generate API keys from `/api-keys`, then call the API with Bearer auth:
+
+```bash
+curl -H "Authorization: Bearer sk-neuron-..." http://localhost:8090/api/models
+```
+
 ```bash
 curl -u clint:dev-password -H 'content-type: application/json' \
   -d '{"modelIds":["qwen"],"durationMinutes":15}' \
@@ -148,7 +157,12 @@ curl -u clint:dev-password http://localhost:8090/api/status
 curl -u clint:dev-password -X POST http://localhost:8090/api/reservations/<id>/done
 ```
 
-OpenAPI UI is available at `/docs`.
+OpenAPI UI is available at `/docs`, and the OpenAPI 3.0 document is available
+at `/openapi.json`.
+
+MCP is available at `/mcp` for authenticated JSON-RPC clients. It exposes tools
+for listing models/targets/status and creating or ending the key user's own
+reservations. See [docs/integrations.md](docs/integrations.md).
 
 ## Traffic Keepalive
 
@@ -174,7 +188,8 @@ service. It scales the configured LLM ECS service and Auto Scaling Group; it
 should not run on the same capacity that it turns off.
 
 The app is intended for internal/Tailscale access. v1 auth is shared-password
-Basic Auth plus optional signed HTTP-only login cookie. `AuthProvider` is
+Basic Auth plus optional signed HTTP-only login cookie. Users can generate
+hashed `sk-neuron-...` API keys for Bearer-auth integrations. `AuthProvider` is
 isolated so GitHub/AuthentiK/Okta/Tailscale identity can replace it later.
 
 ## IAM
@@ -198,7 +213,7 @@ npm run lint
 docker build -t neuron-control-plane .
 ```
 
-Reservation storage defaults to memory for direct local runs. Set
+Reservation and API-key storage defaults to memory for direct local runs. Set
 `STORAGE_DRIVER=sqlite` for a single-file durable database or
 `STORAGE_DRIVER=postgres` with `DATABASE_URL` for Postgres. The local Compose
 file defaults to SQLite at `/app/data/neuron.db` and mounts the repository

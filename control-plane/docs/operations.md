@@ -18,19 +18,23 @@ that it scales down.
 
 NeurOn is designed for internal/Tailscale-style access. v1 authentication is
 shared password via Basic Auth and optional signed HTTP-only login cookie.
+Users can also create personal `sk-neuron-...` API keys for Bearer-auth REST,
+OpenAPI, and MCP integrations. API keys should be treated as secrets and
+rotated by revoking old keys from `/api-keys`.
 
 ## Persistence
 
-Reservation storage is configurable:
+Reservation and API-key storage are configurable:
 
-- `STORAGE_DRIVER=memory` keeps all reservations in process memory
-- `STORAGE_DRIVER=sqlite` stores reservations in `SQLITE_PATH`
-- `STORAGE_DRIVER=postgres` stores reservations in `DATABASE_URL`
+- `STORAGE_DRIVER=memory` keeps reservations and API keys in process memory
+- `STORAGE_DRIVER=sqlite` stores reservations and API keys in `SQLITE_PATH`
+- `STORAGE_DRIVER=postgres` stores reservations and API keys in `DATABASE_URL`
 
 SQLite is the local Compose default and uses `/app/data/neuron.db`, mounted from
 the repository `./data` directory. Durable reservations allow NeurOn to restart
 without forgetting active demand, so the reconciler continues to desire matching
-targets on after the process comes back.
+targets on after the process comes back. Durable API keys allow plugin and MCP
+clients to survive control-plane restarts.
 
 Target startup estimates, runtime model IDs discovered from healthy targets,
 and target status remain in memory. They are observational state and are rebuilt
@@ -74,6 +78,30 @@ If a provider operation fails:
 - the app process keeps running
 
 Traffic keepalive cannot resurrect a failed target by itself.
+
+## Integration Checks
+
+After deployment, low-risk read-only checks are:
+
+```bash
+curl http://localhost:8090/healthz
+curl http://localhost:8090/openapi.json
+curl -H "Authorization: Bearer sk-neuron-..." http://localhost:8090/api/models
+```
+
+MCP clients can verify tool discovery with:
+
+```bash
+curl -H "Authorization: Bearer sk-neuron-..." \
+  -H "content-type: application/json" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' \
+  http://localhost:8090/mcp
+```
+
+When testing MCP mutations in a shared environment, create and end only the
+reservation IDs returned by your own test call. Do not end another user's
+reservation. NeurOn's MCP `end_reservation` tool enforces ownership, but
+operators should still keep test intent narrow.
 
 ## Local Development
 

@@ -7,6 +7,16 @@ export interface AuthenticatedUser {
   isAdmin: boolean;
 }
 
+export interface ApiKey {
+  id: string;
+  username: string;
+  name: string;
+  prefix: string;
+  keyHash: string;
+  createdAt: Date;
+  lastUsedAt?: Date;
+}
+
 export interface Reservation {
   id: string;
   username: string;

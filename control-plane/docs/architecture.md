@@ -79,6 +79,7 @@ The core interfaces keep replaceable parts isolated:
 - `CapacityProvider`
 - `BackendConfigSync`
 - `ReservationRepository`
+- `ApiKeyRepository`
 - `AuthProvider`
 - `TrafficSource`
 - `TargetStatusRepository`
@@ -90,6 +91,8 @@ into AWS, Docker, LiteLLM, or a concrete repository from unrelated code.
 
 - `ReservationService`: validates user input, canonicalizes model IDs, creates,
   extends, and ends reservations.
+- `ApiKeyService`: generates personal API keys, stores only hashed key
+  material, lists key metadata, and revokes keys.
 - `ModelCatalog`: maps selectable model IDs, aliases, backend IDs, and runtime
   IDs to model definitions and targets.
 - `Reconciler`: computes desired target state from aggregate reservations and
@@ -116,12 +119,39 @@ into AWS, Docker, LiteLLM, or a concrete repository from unrelated code.
 5. The periodic reconciler observes aggregate desired state and applies provider
    changes.
 
+## API Keys
+
+Users can create personal API keys from the UI or `/api/api-keys`. Newly
+generated keys use the `sk-neuron-...` format and are returned only in the
+creation response. NeurOn stores a SHA-256 hash plus a display prefix, so later
+list responses can show which key exists without revealing the secret again.
+
+API keys authenticate REST calls with `Authorization: Bearer <key>` and resolve
+to the same username and admin status as the user that created them. Revoking a
+key removes it immediately from the configured API key repository.
+
+## Integration Surfaces
+
+NeurOn exposes an OpenAPI 3.0 document at `/openapi.json` and Swagger UI at
+`/docs`. The OpenAPI document includes Basic and Bearer authentication schemes,
+with `sk-neuron-...` API keys intended for plugin integrations.
+
+NeurOn also exposes a lightweight authenticated MCP JSON-RPC endpoint at
+`/mcp`. It supports `initialize`, `tools/list`, and `tools/call` for these
+tools:
+
+- `list_models`
+- `list_targets`
+- `get_status`
+- `create_reservation`
+- `end_reservation`
+
 ## State
 
-Reservations can use memory, SQLite, or Postgres storage behind
-`ReservationRepository`. Durable reservation storage lets NeurOn restart without
-forgetting active demand, so reconciliation continues to keep matching targets
-on after the process comes back.
+Reservations and API keys can use memory, SQLite, or Postgres storage behind
+their repository interfaces. Durable storage lets NeurOn restart without
+forgetting active demand or invalidating plugin keys, so reconciliation
+continues to keep matching targets on after the process comes back.
 
 Target status, startup estimates, and runtime model discovery cache remain
 in-memory observational state. Provider state is still observed on the next

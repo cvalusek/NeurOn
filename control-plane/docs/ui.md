@@ -30,6 +30,22 @@ The main page contains:
 - per-target status cards
 - reservations grouped under each target status card
 
+## API Keys Page
+
+Route:
+
+```text
+GET /api-keys
+```
+
+Users can generate personal API keys for plugin, REST, OpenAPI, and MCP
+integrations. A generated key is displayed once with a copy button, then only
+its name, prefix, creation time, and last-used time remain visible. Users can
+revoke their own keys from the same page.
+
+API keys are intentionally separate from model copy chips. Model chips copy
+runtime/model identifiers; API keys authenticate clients.
+
 ## Target-First Model
 
 The product is honest about the expensive unit: a shared runtime target.

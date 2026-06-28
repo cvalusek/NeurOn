@@ -6,6 +6,7 @@
 * [Architecture](architecture.md) - Domain objects, services, and request flow.
 * [Reconciler](reconciler.md) - Desired-state loop and lifecycle decisions.
 * [Configuration](configuration.md) - JSON, file, and env-expanded config.
+* [Integrations](integrations.md) - API keys, OpenAPI, Swagger UI, and MCP.
 * [Providers](providers.md) - Docker Compose, AWS ECS/ASG, and LiteLLM.
 * [UI](ui.md) - Target-first interaction model and server-rendered pages.
 * [Operations](operations.md) - Deployment, IAM, runtime behavior, and limits.
