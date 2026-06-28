@@ -1,6 +1,6 @@
 {
   "name": "opencode-neuron",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "OpenCode plugin that reserves and waits for NeurOn capacity before chats.",
   "license": "AGPL-3.0-only",
   "type": "module",
