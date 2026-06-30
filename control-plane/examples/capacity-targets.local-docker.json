@@ -71,7 +71,7 @@
       "profiles": ["PreFer"],
       "serviceName": "llm-runtime"
     },
-    "healthCheckUrl": "http://llm-runtime:8080/health",
+    "healthUrl": "http://llm-runtime:8080/health",
     "litellm": {
       "backendName": "local-runtime",
       "apiBaseUrl": "http://llm-runtime:8080/v1"

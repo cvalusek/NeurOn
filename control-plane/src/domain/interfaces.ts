@@ -1,7 +1,7 @@
-import type { ApiKey, AuthenticatedUser, CapacityProviderStatus, CapacityTarget, Reservation, TargetStatus } from "./types.js";
+import type { ApiKey, AuthenticatedUser, CapacityProviderDefinition, CapacityProviderStatus, CapacityTarget, Reservation, TargetModelDiscoveryRecord, TargetProvisioningJob, TargetStatus } from "./types.js";
 
 export interface CapacityProvider {
-  installTarget(target: CapacityTarget): Promise<void>;
+  provisionTarget(target: CapacityTarget): Promise<Partial<CapacityTarget> | void>;
   ensureTargetOn(target: CapacityTarget): Promise<void>;
   ensureTargetOff(target: CapacityTarget): Promise<void>;
   getTargetStatus(target: CapacityTarget): Promise<CapacityProviderStatus>;
@@ -28,6 +28,37 @@ export interface ApiKeyRepository {
   listForUser(username: string): Promise<ApiKey[]>;
   deleteForUser(id: string, username: string): Promise<boolean>;
   touchLastUsedAt(id: string, lastUsedAt: Date): Promise<void>;
+}
+
+export interface CapacityProviderRepository {
+  create(input: CapacityProviderDefinition): Promise<CapacityProviderDefinition>;
+  get(id: string): Promise<CapacityProviderDefinition | undefined>;
+  list(): Promise<CapacityProviderDefinition[]>;
+  update(id: string, input: CapacityProviderDefinition): Promise<CapacityProviderDefinition>;
+  delete(id: string): Promise<boolean>;
+}
+
+export interface CapacityTargetRepository {
+  create(input: CapacityTarget): Promise<CapacityTarget>;
+  get(id: string): Promise<CapacityTarget | undefined>;
+  list(): Promise<CapacityTarget[]>;
+  update(id: string, input: CapacityTarget): Promise<CapacityTarget>;
+  delete(id: string): Promise<boolean>;
+}
+
+export interface TargetProvisioningJobRepository {
+  create(input: TargetProvisioningJob): Promise<TargetProvisioningJob>;
+  get(id: string): Promise<TargetProvisioningJob | undefined>;
+  getForTarget(targetId: string): Promise<TargetProvisioningJob | undefined>;
+  list(): Promise<TargetProvisioningJob[]>;
+  update(id: string, patch: Partial<TargetProvisioningJob>): Promise<TargetProvisioningJob>;
+}
+
+export interface TargetModelDiscoveryRepository {
+  record(input: TargetModelDiscoveryRecord): Promise<TargetModelDiscoveryRecord>;
+  get(targetId: string): Promise<TargetModelDiscoveryRecord | undefined>;
+  list(): Promise<TargetModelDiscoveryRecord[]>;
+  delete(targetId: string): Promise<boolean>;
 }
 
 export interface AuthProvider {

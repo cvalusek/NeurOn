@@ -12,7 +12,7 @@ const target: CapacityTarget = {
   displayName: "Local Runtime",
   provider: "docker-compose",
   modelIds: ["qwen-3.6-35b-a3b"],
-  healthCheckUrl: "http://example.test/health",
+  healthUrl: "http://example.test/health",
   trafficModelPrefixes: ["prefer/"]
 };
 

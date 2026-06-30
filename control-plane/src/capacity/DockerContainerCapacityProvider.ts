@@ -6,18 +6,18 @@ import type { CapacityProviderStatus, CapacityTarget, DockerContainerTargetConfi
 const execFileAsync = promisify(execFile);
 
 export class DockerContainerCapacityProvider implements CapacityProvider {
-  async installTarget(target: CapacityTarget): Promise<void> {
+  async provisionTarget(target: CapacityTarget): Promise<void> {
     const docker = requireDocker(target);
     if (await this.containerExists(docker.containerName)) return;
     if (!docker.image) throw new Error(`Target ${target.id} container ${docker.containerName} is missing and docker.image is not configured`);
     await this.docker(["pull", docker.image]);
-    await this.docker(["create", ...runArgs(docker), "--name", docker.containerName, docker.image, ...(docker.command ?? [])]);
+    await this.docker(["create", ...dockerRunArgs(docker), "--name", docker.containerName, docker.image, ...(docker.command ?? [])]);
   }
 
   async ensureTargetOn(target: CapacityTarget): Promise<void> {
     const docker = requireDocker(target);
     if (!(await this.containerExists(docker.containerName))) {
-      await this.installTarget(target);
+      throw new Error(`Target ${target.id} container ${docker.containerName} is missing; provision the resource explicitly first`);
     }
     await this.docker(["start", docker.containerName]);
   }
@@ -31,13 +31,13 @@ export class DockerContainerCapacityProvider implements CapacityProvider {
   async getTargetStatus(target: CapacityTarget): Promise<CapacityProviderStatus> {
     const docker = requireDocker(target);
     const inspect = await this.inspectContainer(docker.containerName);
-    if (!inspect) return { observed: "stopped", message: "Container is not installed" };
+    if (!inspect) return { observed: "stopped", message: "Container is not provisioned" };
     const state = inspect.State ?? {};
     if (state.Running) return { observed: "healthy", message: "Container is running", details: { state, image: inspect.Config?.Image } };
     if (state.Status === "exited" || state.Status === "created" || state.Status === "dead") {
       return { observed: "stopped", message: `Container is ${state.Status}`, details: { state, image: inspect.Config?.Image } };
     }
-    return { observed: "provisioning", message: `Container is ${state.Status ?? "unknown"}`, details: { state, image: inspect.Config?.Image } };
+    return { observed: "starting", message: `Container is ${state.Status ?? "unknown"}`, details: { state, image: inspect.Config?.Image } };
   }
 
   async forceStopTarget(target: CapacityTarget): Promise<void> {
@@ -83,12 +83,13 @@ function requireDocker(target: CapacityTarget): DockerContainerTargetConfig {
   return target.docker;
 }
 
-function runArgs(config: DockerContainerTargetConfig): string[] {
+export function dockerRunArgs(config: DockerContainerTargetConfig): string[] {
   return [
     ...(config.ports ?? []).flatMap((port) => ["-p", port]),
     ...(config.volumes ?? []).flatMap((volume) => ["-v", volume]),
     ...Object.entries(config.environment ?? {}).flatMap(([key, value]) => ["-e", `${key}=${value}`]),
-    ...(config.gpus ? ["--gpus", config.gpus] : []),
+    "--gpus",
+    config.gpus ?? "all",
     ...(config.restart ? ["--restart", config.restart] : []),
     ...(config.network ? ["--network", config.network] : []),
     ...(config.extraArgs ?? [])

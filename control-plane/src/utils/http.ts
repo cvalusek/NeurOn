@@ -55,17 +55,25 @@ export function targetJson(target: CapacityTarget, status?: TargetStatus, active
     id: target.id,
     displayName: target.displayName,
     provider: target.provider,
+    providerId: target.providerId,
     modelIds: target.modelIds,
     modelsMax: target.modelsMax,
     litellmDisplayPrefix: litellmDisplayPrefix(target),
-    healthCheckUrl: target.healthCheckUrl,
-    runtimeApiBaseUrl: target.runtimeApiBaseUrl,
+    healthUrl: target.healthUrl,
+    apiUrl: target.apiUrl,
+    needsProvisioning: needsProvisioning(target, status),
     desired: status?.desired ?? "off",
     observed: status?.observed ?? "stopped",
     message: status?.message ?? "Not checked",
     startupEstimate: status?.startupEstimate,
     activeUsers
   };
+}
+
+function needsProvisioning(target: CapacityTarget, status?: TargetStatus): boolean {
+  if (target.provider === "runpod") return !target.runpod?.podId && Boolean(target.runpod?.create);
+  if (target.provider === "docker") return Boolean(target.docker?.image) && (!status || status.message.toLowerCase().includes("not provisioned"));
+  return false;
 }
 
 function litellmDisplayPrefix(target: CapacityTarget): string | undefined {

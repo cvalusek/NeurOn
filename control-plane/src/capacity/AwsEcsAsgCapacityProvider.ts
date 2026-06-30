@@ -12,8 +12,8 @@ export class AwsEcsAsgCapacityProvider implements CapacityProvider {
     this.asg = new AutoScalingClient({ region });
   }
 
-  async installTarget(_target: CapacityTarget): Promise<void> {
-    throw new Error("AWS ECS/ASG target installation is not implemented");
+  async provisionTarget(_target: CapacityTarget): Promise<void> {
+    throw new Error("AWS ECS/ASG resource provisioning is not implemented");
   }
 
   async ensureTargetOn(target: CapacityTarget): Promise<void> {
@@ -43,7 +43,7 @@ export class AwsEcsAsgCapacityProvider implements CapacityProvider {
     const inServiceInstances = group.Instances?.filter((instance) => instance.LifecycleState === "InService").length ?? 0;
     if (desiredCount === 0 && asgDesired === 0 && runningCount === 0) return { observed: "stopped", message: "Stopped", details: { desiredCount, runningCount, asgDesired } };
     if (desiredCount > 0 && runningCount > 0 && inServiceInstances > 0) return { observed: "healthy", message: "ECS service running", details: { desiredCount, runningCount, asgDesired, inServiceInstances } };
-    return { observed: desiredCount > 0 || asgDesired > 0 ? "provisioning" : "stopping", message: "Waiting for ECS/ASG convergence", details: { desiredCount, runningCount, asgDesired, inServiceInstances } };
+    return { observed: desiredCount > 0 || asgDesired > 0 ? "starting" : "stopping", message: "Waiting for ECS/ASG convergence", details: { desiredCount, runningCount, asgDesired, inServiceInstances } };
   }
 
   async forceStopTarget(target: CapacityTarget): Promise<void> {

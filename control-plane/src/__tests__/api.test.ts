@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { buildApp, shouldBootstrapRuntimeModels } from "../app.js";
+import { buildApp } from "../app.js";
 import type { AppConfig, ModelDefinition } from "../domain/types.js";
+import { shouldBootstrapRuntimeModels } from "../services/RuntimeModelDiscovery.js";
 
 const config: AppConfig = {
   port: 0,
@@ -9,7 +10,13 @@ const config: AppConfig = {
   awsRegion: "us-east-1",
   litellmTrafficPollSeconds: 0,
   litellmTrafficLookbackSeconds: 300,
-  capacityTargets: [{ id: "t1", displayName: "T1", provider: "aws-ecs", modelIds: ["m1"], healthCheckUrl: "http://example.test" }],
+  runtimeProfiles: [{ id: "prefer", name: "PreFer", type: "docker", image: "ghcr.io/cvalusek/prefer:latest", volumes: { "/models": "prefer-model-cache" } }],
+  capacityProviders: [
+    { id: "aws-ecs", displayName: "AWS ECS", type: "aws-ecs", config: {} },
+    { id: "runpod", displayName: "RunPod", type: "runpod", config: {} },
+    { id: "docker", displayName: "Docker", type: "docker", config: {} }
+  ],
+  capacityTargets: [{ id: "t1", displayName: "T1", provider: "aws-ecs", modelIds: ["m1"], healthUrl: "http://example.test" }],
   reconcilerIntervalSeconds: 15,
   reservationStatusPollSeconds: 5,
   adminStatusPollSeconds: 10,
@@ -171,6 +178,207 @@ describe("API authentication context", () => {
 
     expect(modelCall.statusCode).toBe(200);
     expect(modelCall.json().result.structuredContent.models).toHaveLength(1);
+  });
+
+  it("serves admin provider management and creates persisted providers", async () => {
+    process.env.USE_FAKE_PROVIDER = "true";
+    const { app } = await buildApp(config, models);
+    const auth = { authorization: `Basic ${Buffer.from("actual:secret").toString("base64")}` };
+
+    const page = await app.inject({ method: "GET", url: "/admin/providers", headers: auth });
+    expect(page.statusCode).toBe(200);
+    expect(page.body).toContain("AWS ECS");
+    expect(page.body).toContain("Targets");
+    expect(page.body).toContain("1 targets");
+    expect(page.body).toContain("CAPACITY_PROVIDERS_JSON");
+
+    const created = await app.inject({
+      method: "POST",
+      url: "/admin/providers",
+      headers: { ...auth, "content-type": "application/x-www-form-urlencoded" },
+      payload: new URLSearchParams({
+        id: "runpod-main",
+        displayName: "RunPod Main",
+        type: "runpod"
+      }).toString()
+    });
+    expect(created.statusCode).toBe(302);
+
+    const updated = await app.inject({
+      method: "POST",
+      url: "/admin/providers/runpod-main/update",
+      headers: { ...auth, "content-type": "application/x-www-form-urlencoded" },
+      payload: new URLSearchParams({
+        id: "runpod-shared",
+        displayName: "RunPod Shared",
+        type: "runpod",
+        provisioningEnabled: "on"
+      }).toString()
+    });
+    expect(updated.statusCode).toBe(302);
+
+    const refreshed = await app.inject({ method: "GET", url: "/admin/providers", headers: auth });
+    await app.close();
+    expect(refreshed.body).toContain("RunPod Shared");
+    expect(refreshed.body).toContain("runpod-shared");
+    expect(refreshed.body).toContain("Save provider");
+  });
+
+  it("copies declarative providers into persisted storage from the admin UI", async () => {
+    process.env.USE_FAKE_PROVIDER = "true";
+    const { app } = await buildApp(config, models);
+    const auth = { authorization: `Basic ${Buffer.from("actual:secret").toString("base64")}` };
+
+    const copied = await app.inject({ method: "POST", url: "/admin/providers/aws-ecs/copy-to-db", headers: auth });
+    expect(copied.statusCode).toBe(302);
+
+    const page = await app.inject({ method: "GET", url: "/admin/providers", headers: auth });
+
+    expect(page.body).toContain("JSON");
+    expect(page.body).toContain("CAPACITY_PROVIDERS_JSON");
+    expect(page.body.match(/aws-ecs/g)?.length).toBeGreaterThan(1);
+    expect(page.body).toContain("persisted");
+    expect(page.body).toContain("1 targets");
+
+    const updated = await app.inject({
+      method: "POST",
+      url: "/admin/providers/aws-ecs/update",
+      headers: { ...auth, "content-type": "application/x-www-form-urlencoded" },
+      payload: new URLSearchParams({
+        id: "aws-ecs",
+        displayName: "AWS ECS Stored",
+        type: "aws-ecs"
+      }).toString()
+    });
+    expect(updated.statusCode).toBe(302);
+    await app.close();
+  });
+
+  it("serves admin target management and creates persisted targets", async () => {
+    process.env.USE_FAKE_PROVIDER = "true";
+    const { app } = await buildApp(config, models);
+    const auth = { authorization: `Basic ${Buffer.from("actual:secret").toString("base64")}` };
+
+    const page = await app.inject({ method: "GET", url: "/admin/targets", headers: auth });
+    expect(page.statusCode).toBe(200);
+    expect(page.body).toContain("T1");
+    expect(page.body).toContain("CAPACITY_TARGET_KEYS=T1");
+
+    const created = await app.inject({
+      method: "POST",
+      url: "/admin/targets",
+      headers: { ...auth, "content-type": "application/x-www-form-urlencoded" },
+      payload: new URLSearchParams({
+        id: "runpod-qwen",
+        displayName: "RunPod Qwen",
+        providerId: "runpod",
+        modelIds: "qwen",
+        runpodPodId: "pod-qwen",
+        runpodRuntimePort: "8080"
+      }).toString()
+    });
+    expect(created.statusCode).toBe(302);
+
+    const updated = await app.inject({
+      method: "POST",
+      url: "/admin/targets/runpod-qwen/update",
+      headers: { ...auth, "content-type": "application/x-www-form-urlencoded" },
+      payload: new URLSearchParams({
+        id: "runpod-prefer",
+        displayName: "RunPod PreFer",
+        providerId: "runpod",
+        modelIds: "qwen,gemma",
+        runpodPodId: "pod-prefer",
+        runpodRuntimePort: "8081"
+      }).toString()
+    });
+    expect(updated.statusCode).toBe(302);
+
+    const targets = await app.inject({ method: "GET", url: "/api/admin/targets", headers: auth });
+    const refreshed = await app.inject({ method: "GET", url: "/admin/targets", headers: auth });
+    await app.close();
+
+    expect(targets.json().capacityTargets.map((target: { id: string }) => target.id)).toContain("runpod-prefer");
+    expect(refreshed.body).toContain("RunPod PreFer");
+    expect(refreshed.body).toContain("pod-prefer");
+    expect(refreshed.body).toContain("Save target");
+  });
+
+  it("creates PreFer Docker targets with model volume and discovery URLs", async () => {
+    process.env.USE_FAKE_PROVIDER = "true";
+    const { app } = await buildApp(config, models);
+    const auth = { authorization: `Basic ${Buffer.from("actual:secret").toString("base64")}` };
+
+    const created = await app.inject({
+      method: "POST",
+      url: "/admin/targets",
+      headers: { ...auth, "content-type": "application/x-www-form-urlencoded" },
+      payload: new URLSearchParams({
+        id: "prefer-local",
+        displayName: "PreFer Local",
+        providerId: "docker",
+        runtimeProfileId: "prefer",
+        dockerContainerName: "prefer"
+      }).toString()
+    });
+    expect(created.statusCode).toBe(302);
+
+    const page = await app.inject({ method: "GET", url: "/admin/targets", headers: auth });
+    await app.close();
+
+    expect(page.body).toContain("prefer-model-cache");
+    expect(page.body).toContain("http://host.docker.internal:8080/health");
+    expect(page.body).toContain("http://host.docker.internal:8080/v1");
+  });
+
+  it("copies declarative targets into persisted storage from the admin UI", async () => {
+    process.env.USE_FAKE_PROVIDER = "true";
+    const { app } = await buildApp(config, models);
+    const auth = { authorization: `Basic ${Buffer.from("actual:secret").toString("base64")}` };
+
+    const copied = await app.inject({ method: "POST", url: "/admin/targets/t1/copy-to-db", headers: auth });
+    expect(copied.statusCode).toBe(302);
+
+    const page = await app.inject({ method: "GET", url: "/admin/targets", headers: auth });
+
+    expect(page.body).toContain("JSON");
+    expect(page.body).toContain("CAPACITY_TARGET_KEYS=T1");
+    expect(page.body.match(/t1/g)?.length).toBeGreaterThan(1);
+    expect(page.body).toContain("persisted");
+    expect(page.body).toContain("Save target");
+
+    const updated = await app.inject({
+      method: "POST",
+      url: "/admin/targets/t1/update",
+      headers: { ...auth, "content-type": "application/x-www-form-urlencoded" },
+      payload: new URLSearchParams({
+        id: "t1",
+        displayName: "T1 Stored",
+        providerId: "aws-ecs",
+        modelIds: "m1,m2",
+        awsCluster: "cluster",
+        awsService: "service",
+        awsAsgName: "asg"
+      }).toString()
+    });
+    expect(updated.statusCode).toBe(302);
+
+    const afterUpdate = await app.inject({ method: "GET", url: "/admin/targets", headers: auth });
+    expect(afterUpdate.body).toContain("T1 Stored");
+    expect(afterUpdate.body).not.toContain(">T1</strong>");
+
+    const deleted = await app.inject({
+      method: "POST",
+      url: "/admin/targets/t1/delete",
+      headers: { ...auth, "content-type": "application/x-www-form-urlencoded" },
+      payload: new URLSearchParams({ confirmName: "t1" }).toString()
+    });
+    expect(deleted.statusCode).toBe(302);
+
+    const afterDelete = await app.inject({ method: "GET", url: "/admin/targets", headers: auth });
+    expect(afterDelete.body).toContain(">T1</strong>");
+    expect(afterDelete.body).toContain("config");
+    await app.close();
   });
 });
 

@@ -51,7 +51,7 @@
       "service": "llama-cpp-gpu-pool-96gb",
       "autoScalingGroupName": "llm-gpu-pool-96gb-asg"
     },
-    "healthCheckUrl": "http://llm-96gb.internal:8080/health",
+    "healthUrl": "http://llm-96gb.internal:8080/health",
     "litellm": {
       "backendName": "ecs-llama-96gb",
       "apiBaseUrl": "http://llm-96gb.internal:8080/v1"

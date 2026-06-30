@@ -1,4 +1,6 @@
-import type { ApiKey, AppConfig, AuthenticatedUser, CapacityTarget, ModelDefinition, Reservation, TargetStatus } from "../domain/types.js";
+import type { ApiKey, AppConfig, AuthenticatedUser, CapacityTarget, ModelDefinition, Reservation, RuntimeProfile, TargetStatus } from "../domain/types.js";
+import type { ProviderView } from "../services/ProviderService.js";
+import type { TargetView } from "../services/TargetService.js";
 
 export function layout(title: string, user: AuthenticatedUser | undefined, body: string): string {
   return `<!doctype html>
@@ -30,7 +32,7 @@ export function layout(title: string, user: AuthenticatedUser | undefined, body:
     .pill { border-radius: 999px; padding: 2px 8px; background: #eef2f0; color: #334155; font-size: 12px; font-weight: 750; white-space: nowrap; }
     .pill.on, .pill.healthy { background: #dff7ed; color: #05603a; }
     .pill.off, .pill.stopped { background: #e8edf3; color: #334155; }
-    .pill.provisioning, .pill.stopping { background: #fff4d6; color: #854a0e; }
+    .pill.starting, .pill.stopping { background: #fff4d6; color: #854a0e; }
     .pill.failed { background: #fee4e2; color: #912018; }
     .copy-row { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
     .copy-chip { border: 1px solid #c8d0c9; border-radius: 999px; padding: 3px 8px; background: white; color: #334155; font: 12px ui-monospace, SFMono-Regular, Menlo, monospace; max-width: 100%; overflow-wrap: anywhere; }
@@ -46,7 +48,8 @@ export function layout(title: string, user: AuthenticatedUser | undefined, body:
     .reservation-card { border-top: 1px solid #e2e7e1; padding-top: 10px; }
     .reservation-actions { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; }
     .chip-row { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
-    input[type="number"], input[type="text"], input[type="password"] { padding: 8px; border: 1px solid #aab4ad; border-radius: 6px; min-width: 140px; max-width: 100%; }
+    input[type="number"], input[type="text"], input[type="password"], select, textarea { padding: 8px; border: 1px solid #aab4ad; border-radius: 6px; min-width: 140px; max-width: 100%; }
+    textarea { width: min(100%, 720px); min-height: 92px; font: 13px ui-monospace, SFMono-Regular, Menlo, monospace; }
     button { border: 0; border-radius: 6px; padding: 9px 13px; background: #0f766e; color: white; font-weight: 650; cursor: pointer; }
     button.choice { border: 1px solid #aab4ad; background: #fbfcfb; color: #1f2933; }
     button.secondary { background: #334155; }
@@ -62,11 +65,24 @@ export function layout(title: string, user: AuthenticatedUser | undefined, body:
     .actions { display: flex; justify-content: flex-end; margin-top: 16px; }
     .secret-box { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; padding: 12px; border: 1px solid #0f766e; border-radius: 6px; background: #f0faf7; }
     .secret-box code { flex: 1 1 360px; overflow-wrap: anywhere; font: 13px ui-monospace, SFMono-Regular, Menlo, monospace; }
+    .inline-actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+    pre { white-space: pre-wrap; overflow-wrap: anywhere; background: #f7f8f6; border: 1px solid #d8ddd7; border-radius: 6px; padding: 10px; font-size: 12px; }
+    .summary-list { display: grid; gap: 10px; }
+    .drilldown { border: 1px solid #d8ddd7; border-radius: 8px; background: #fbfcfb; }
+    .drilldown > summary { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 12px; align-items: center; padding: 13px 14px; cursor: pointer; }
+    .drilldown-body { border-top: 1px solid #e2e7e1; padding: 14px; }
+    .tabbar { display: flex; gap: 8px; flex-wrap: wrap; border-bottom: 1px solid #d8ddd7; margin-bottom: 12px; }
+    .tabbar button { background: transparent; color: #334155; border-radius: 0; border-bottom: 2px solid transparent; }
+    .tabbar button[aria-selected="true"] { color: #0f766e; border-bottom-color: #0f766e; }
+    .tab-panel[hidden], .modal[hidden] { display: none; }
+    .modal { position: fixed; inset: 0; background: rgba(23, 32, 42, 0.45); display: grid; place-items: center; padding: 20px; z-index: 10; }
+    .modal-dialog { width: min(720px, 100%); max-height: calc(100vh - 40px); overflow: auto; background: white; border-radius: 8px; border: 1px solid #d8ddd7; padding: 18px; box-shadow: 0 16px 48px rgba(23, 32, 42, 0.22); }
+    .field-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
     .hidden { display: none; }
   </style>
 </head>
 <body>
-  <header><div class="topbar"><strong class="brand">NeurOn</strong><nav><a href="/">Home</a><a href="/api-keys">API keys</a><a href="/admin">Admin</a></nav><span class="user">${user ? escapeHtml(user.username) : ""}</span></div></header>
+  <header><div class="topbar"><strong class="brand">NeurOn</strong><nav><a href="/">Home</a><a href="/api-keys">API keys</a><a href="/admin">Admin</a><a href="/admin/providers">Providers</a><a href="/admin/targets">Targets</a></nav><span class="user">${user ? escapeHtml(user.username) : ""}</span></div></header>
   <main>${body}</main>
 </body>
 </html>`;
@@ -351,12 +367,26 @@ export function apiKeysPage(user: AuthenticatedUser, apiKeys: ApiKey[], createdT
       button.textContent = 'Copied';
       setTimeout(() => { button.textContent = previous; }, 900);
     });
+    document.addEventListener('click', async (event) => {
+      const button = event.target.closest('[data-provision-target]');
+      if (!button) return;
+      event.preventDefault();
+      const targetId = button.dataset.provisionTarget;
+      button.disabled = true;
+      const previous = button.textContent;
+      button.textContent = 'Provisioning...';
+      const response = await fetch('/api/admin/targets/' + encodeURIComponent(targetId) + '/provision', { method: 'POST' });
+      button.textContent = response.ok ? 'Provisioned' : 'Provision failed';
+      await refreshTargetStatus();
+      setTimeout(() => { button.disabled = false; button.textContent = previous; }, 1400);
+    });
   </script>`);
 }
 
 export function adminPage(user: AuthenticatedUser, config: AppConfig): string {
   return layout("NeurOn Admin", user, `<section class="panel">
     <h1>Admin</h1>
+    <p><a href="/admin/providers">Manage providers</a> | <a href="/admin/targets">Manage targets</a></p>
     <div id="admin-status"></div>
   </section>
   <script type="module">
@@ -379,7 +409,7 @@ export function adminPage(user: AuthenticatedUser, config: AppConfig): string {
       return reservation.status + ' at ' + formatDateTime(reservation.expiresAt);
     };
     async function post(url) { await fetch(url, { method: 'POST' }); refresh(); }
-    window.installTarget = (id) => post('/api/admin/targets/' + id + '/install');
+    window.provisionTarget = (id) => post('/api/admin/targets/' + id + '/provision');
     window.discoverTarget = (id) => post('/api/admin/targets/' + id + '/discover');
     window.forceStop = (id) => post('/api/admin/targets/' + id + '/force-stop');
     window.reconcileTarget = (id) => post('/api/admin/targets/' + id + '/reconcile');
@@ -387,13 +417,598 @@ export function adminPage(user: AuthenticatedUser, config: AppConfig): string {
       const res = await fetch('/api/admin/status');
       if (!res.ok) return;
       const data = await res.json();
-      const targets = data.capacityTargets.map(t => '<tr><td>' + t.id + '</td><td>' + t.desired + '</td><td>' + t.observed + '</td><td>' + t.message + '</td><td>' + t.activeUsers.join(', ') + '</td><td><button onclick="installTarget(\\'' + t.id + '\\')">Install</button> <button onclick="discoverTarget(\\'' + t.id + '\\')">Discover</button> <button onclick="reconcileTarget(\\'' + t.id + '\\')">Reconcile</button> <button class="danger" onclick="forceStop(\\'' + t.id + '\\')">Force stop</button></td></tr>').join('');
+      const targets = data.capacityTargets.map(t => {
+        const provision = t.needsProvisioning ? '<button onclick="provisionTarget(\\'' + t.id + '\\')">Provision</button> ' : '';
+        return '<tr><td>' + t.id + '</td><td>' + t.desired + '</td><td>' + t.observed + '</td><td>' + t.message + '</td><td>' + t.activeUsers.join(', ') + '</td><td>' + provision + '<button onclick="discoverTarget(\\'' + t.id + '\\')">Discover</button> <button onclick="reconcileTarget(\\'' + t.id + '\\')">Reconcile</button> <button class="danger" onclick="forceStop(\\'' + t.id + '\\')">Force stop</button></td></tr>';
+      }).join('');
       const reservations = data.reservations.map(r => '<tr><td>' + r.reservationId + '</td><td>' + (r.displayUsername ?? r.username) + '</td><td>' + statusBadge(r.status) + '</td><td>' + reservationTime(r) + '</td><td>' + r.modelIds.join(', ') + '</td></tr>').join('');
       document.querySelector('#admin-status').innerHTML = '<h2>Targets</h2><table><thead><tr><th>Target</th><th>Desired</th><th>Observed</th><th>Message</th><th>Users</th><th></th></tr></thead><tbody>' + targets + '</tbody></table><h2>Reservations</h2><table><thead><tr><th>ID</th><th>User</th><th>Status</th><th>Expires</th><th>Models</th></tr></thead><tbody>' + reservations + '</tbody></table>';
     }
     refresh();
     setInterval(refresh, ${config.adminStatusPollSeconds * 1000});
   </script>`);
+}
+
+export function targetAdminPage(user: AuthenticatedUser, targets: TargetView[], providers: ProviderView[], runtimeProfiles: RuntimeProfile[] = [], error = "", createdTargetId = ""): string {
+  const rows = targets.length
+    ? targets.map((target) => targetRow(target, providers, runtimeProfiles)).join("")
+    : `<p class="muted">No targets configured</p>`;
+  const addTarget = providers.length > 0
+    ? `<button type="button" data-open-modal="target-modal">Add target</button>`
+    : `<a href="/admin/providers">Add a provider first</a>`;
+  const modal = providers.length > 0 ? targetCreateModal(providers, runtimeProfiles) : "";
+  return layout("NeurOn Targets", user, `<section class="panel">
+    <div class="target-status-head"><h1>Targets</h1>${addTarget}</div>
+    ${error ? `<p class="status">${escapeHtml(error)}</p>` : ""}
+    ${createdTargetId ? `<div class="secret-box"><span>Target <code>${escapeHtml(createdTargetId)}</code> was created.</span><button type="button" data-provision-target="${escapeHtml(createdTargetId)}">Provision target</button></div>` : ""}
+    <div class="summary-list">${rows}</div>
+  </section>
+  ${modal}
+  <script type="module">
+    ${targetAdminScript(providers, runtimeProfiles)}
+  </script>`);
+}
+
+function targetCreateModal(providers: ProviderView[], runtimeProfiles: RuntimeProfile[]): string {
+  return `<div id="target-modal" class="modal" hidden>
+    <div class="modal-dialog">
+    <div class="target-status-head"><h2>Add target</h2><button class="secondary" type="button" data-close-modal>Close</button></div>
+    <form method="post" action="/admin/targets">
+      <p><label>Provider<br>${targetProviderSelect(providers)}</label></p>
+      <p><label>Profile<br>${runtimeProfileSelect(runtimeProfiles)}</label></p>
+      <p id="target-runtime-profile-note" class="muted"></p>
+      <div class="field-grid">
+        <p><label>ID<br><input name="id" type="text" placeholder="target-id" required></label></p>
+        <p><label>Display name<br><input name="displayName" type="text" placeholder="Target name"></label></p>
+      </div>
+      <div id="runpod-target-fields">
+        <p><label>RunPod Pod ID<br><input name="runpodPodId" type="text" placeholder="pod-id"></label></p>
+        <p><label>RunPod runtime port<br><input name="runpodRuntimePort" type="number" min="1" placeholder="8080"></label></p>
+      </div>
+      <div id="aws-target-fields">
+        <p><label>AWS cluster<br><input name="awsCluster" type="text" placeholder="llm-cluster"></label></p>
+        <p><label>AWS service<br><input name="awsService" type="text" placeholder="llama-cpp-gpu-pool"></label></p>
+        <p><label>AWS ASG name<br><input name="awsAsgName" type="text" placeholder="llm-gpu-pool-asg"></label></p>
+      </div>
+      <div id="docker-target-fields">
+        <p><label>Docker container name<br><input name="dockerContainerName" type="text" placeholder="prefer"></label></p>
+        <p><label>Model volume<br><input name="dockerModelVolume" type="text" placeholder="prefer-model-cache"></label></p>
+        <p class="muted">The profile supplies the container path.</p>
+      </div>
+      <div id="neuron-target-fields">
+        <p><label>Remote NeurOn target ID<br><input name="neuronTargetId" type="text" placeholder="gpu-pool-west"></label></p>
+        <p class="muted">Later we can pull these from the remote NeurOn API once that provider is wired.</p>
+      </div>
+      <details>
+        <summary>Overrides</summary>
+        <p><label>API URL override<br><input name="apiUrl" type="text" placeholder="http://runtime.internal:8080/v1"></label></p>
+        <p><label>Health URL override<br><input name="healthUrl" type="text" placeholder="http://runtime.internal:8080/health"></label></p>
+        <p><label>Configured model IDs<br><input name="modelIds" type="text" placeholder="qwen-3.6,gemma-4"></label></p>
+        <p class="muted">Leave models empty to rely on runtime discovery.</p>
+      </details>
+      <div class="actions"><button type="submit">Add target</button></div>
+    </form>
+    </div>
+  </div>`;
+}
+
+function targetAdminScript(providers: ProviderView[], runtimeProfiles: RuntimeProfile[]): string {
+  return `
+    document.addEventListener('click', async (event) => {
+      const button = event.target.closest('[data-copy]');
+      if (!button) return;
+      event.preventDefault();
+      const value = button.dataset.copy;
+      if (!value) return;
+      await navigator.clipboard?.writeText(value);
+      const previous = button.textContent;
+      button.textContent = 'Copied';
+      setTimeout(() => { button.textContent = previous; }, 900);
+    });
+    document.addEventListener('click', (event) => {
+      const opener = event.target.closest('[data-open-modal]');
+      if (opener) document.getElementById(opener.dataset.openModal).hidden = false;
+      if (event.target.closest('[data-close-modal]')) event.target.closest('.modal').hidden = true;
+      if (event.target.classList?.contains('modal')) event.target.hidden = true;
+      const tab = event.target.closest('[data-tab]');
+      if (!tab) return;
+      const group = tab.closest('[data-tabs]');
+      group.querySelectorAll('[data-tab]').forEach(candidate => candidate.setAttribute('aria-selected', String(candidate === tab)));
+      group.querySelectorAll('[data-tab-panel]').forEach(panel => { panel.hidden = panel.dataset.tabPanel !== tab.dataset.tab; });
+    });
+    const providers = ${safeJson(Object.fromEntries(providers.map((provider) => [provider.id, provider.type])))};
+    const runtimeProfiles = ${safeJson(Object.fromEntries(runtimeProfiles.map((profile) => [profile.id, profile])))};
+    const provider = document.querySelector('#target-modal select[name="providerId"]');
+    const runtimeProfile = document.querySelector('#target-modal select[name="runtimeProfileId"]');
+    const runtimeNote = document.querySelector('#target-runtime-profile-note');
+    const dockerModelVolumeInput = document.querySelector('#target-modal input[name="dockerModelVolume"]');
+    dockerModelVolumeInput?.addEventListener('input', () => { dockerModelVolumeInput.dataset.touched = 'true'; });
+    const runpod = document.querySelector('#runpod-target-fields');
+    const aws = document.querySelector('#aws-target-fields');
+    const docker = document.querySelector('#docker-target-fields');
+    const neuron = document.querySelector('#neuron-target-fields');
+    const sync = () => {
+      if (!provider) return;
+      const type = providers[provider.value];
+      runpod.hidden = type !== 'runpod';
+      aws.hidden = type !== 'aws-ecs' && type !== 'aws-ecs-asg';
+      docker.hidden = type !== 'docker';
+      neuron.hidden = type !== 'neuron';
+      const profile = runtimeProfile ? runtimeProfiles[runtimeProfile.value] : undefined;
+      const port = profile?.port ?? 8080;
+      const discovery = profile ? profile.discovery ?? true : false;
+      const profileVolumes = Object.entries(profile?.volumes ?? {});
+      const modelVolume = profileVolumes[0];
+      runtimeNote.textContent = profile ? [profile.type, profile.image, 'port ' + port, modelVolume ? 'volume ' + modelVolume[1] + ' -> ' + modelVolume[0] : '', discovery ? 'discovery on' : 'discovery off'].filter(Boolean).join(' | ') : '';
+      if (dockerModelVolumeInput && !dockerModelVolumeInput.dataset.touched) dockerModelVolumeInput.value = modelVolume?.[1] ?? '';
+    };
+    provider?.addEventListener('change', sync);
+    runtimeProfile?.addEventListener('change', sync);
+    sync();
+    document.querySelectorAll('form[data-target-edit-form]').forEach(form => {
+      const providerSelect = form.querySelector('select[name="providerId"]');
+      const sections = [...form.querySelectorAll('[data-edit-provider-fields]')];
+      const editSync = () => {
+        const selectedOption = providerSelect.selectedOptions[0];
+        const type = providers[providerSelect.value] ?? selectedOption?.dataset.providerType ?? '';
+        sections.forEach(section => {
+          const names = section.dataset.editProviderFields.split(',');
+          section.hidden = !names.includes(type);
+        });
+      };
+      providerSelect.addEventListener('change', editSync);
+      editSync();
+    });
+    const statusPill = (value) => '<span class="pill ' + String(value ?? '').replace(/[^a-z0-9_-]/gi, '') + '">' + escapeText(value) + '</span>';
+    const statusCard = (target) => '<div class="target-status-meta">' + statusPill(target.desired) + statusPill(target.observed) + '<span class="muted">' + escapeText(target.message) + '</span>' + (target.activeUsers?.length ? '<span class="muted">Users: ' + escapeText(target.activeUsers.join(', ')) + '</span>' : '') + '</div>';
+    async function refreshTargetStatus() {
+      const response = await fetch('/api/admin/targets');
+      if (!response.ok) return;
+      const data = await response.json();
+      const targets = Object.fromEntries(data.capacityTargets.map(target => [target.id, target]));
+      document.querySelectorAll('[data-target-status]').forEach(panel => {
+        const target = targets[panel.dataset.targetStatus];
+        panel.innerHTML = target ? statusCard(target) : '<p class="muted">Status unavailable</p>';
+      });
+    }
+    const escapeText = (value) => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' }[char]));
+    refreshTargetStatus();
+  `;
+}
+
+function targetRow(target: TargetView, providers: ProviderView[], runtimeProfiles: RuntimeProfile[]): string {
+  const details = targetDetails(target);
+  const editAction = target.editable
+    ? targetEditPanel(target, providers, runtimeProfiles)
+    : `<form method="post" action="/admin/targets/${escapeHtml(target.id)}/copy-to-db"><button class="secondary" type="submit">Copy to DB</button></form>`;
+  const deleteAction = target.editable ? targetDeletePanel(target) : `<p class="muted">This target is loaded from declarative config. Remove it from configuration or copy it to the database before deleting it here.</p>`;
+  const users = target.modelIds.length > 0 ? `${target.modelIds.length} configured models` : "Discovery";
+  return `<details class="drilldown"><summary><div><strong>${escapeHtml(target.displayName)}</strong><div class="target-status-meta"><span class="pill off">${escapeHtml(target.provider)}</span><span class="muted"><code>${escapeHtml(target.id)}</code></span><span class="muted">${escapeHtml(users)}</span></div></div><span class="badge ${target.source === "persisted" ? "active" : "done"}">${escapeHtml(target.source)}</span></summary><div class="drilldown-body" data-tabs><div class="tabbar"><button type="button" data-tab="view" aria-selected="true">View</button><button type="button" data-tab="status" aria-selected="false">Status</button><button type="button" data-tab="json" aria-selected="false">JSON</button><button type="button" data-tab="env" aria-selected="false">ENV</button><button type="button" data-tab="edit" aria-selected="false">Edit</button><button type="button" data-tab="delete" aria-selected="false">Delete</button></div>${details}<section class="tab-panel" data-tab-panel="edit" hidden><p class="muted">${target.editable ? "This target is stored in the database." : "This target is loaded from declarative config."}</p>${editAction}</section><section class="tab-panel" data-tab-panel="delete" hidden>${deleteAction}</section></div></details>`;
+}
+
+function targetEditPanel(target: TargetView, providers: ProviderView[], runtimeProfiles: RuntimeProfile[]): string {
+  const providerSelection = target.providerId ?? target.provider;
+  const runtimeProfileId = runtimeProfileForTarget(target, runtimeProfiles);
+  return `<form method="post" action="/admin/targets/${escapeHtml(target.id)}/update" data-target-edit-form>
+    <p><label>Provider<br>${targetProviderSelect(providers, false, providerSelection, target.provider)}</label></p>
+    <p><label>Profile<br>${runtimeProfileSelect(runtimeProfiles, runtimeProfileId)}</label></p>
+    <div class="field-grid">
+      <p><label>ID<br><input name="id" type="text" value="${escapeHtml(target.id)}" required></label></p>
+      <p><label>Display name<br><input name="displayName" type="text" value="${escapeHtml(target.displayName)}"></label></p>
+    </div>
+    <div data-edit-provider-fields="runpod">
+      <p><label>RunPod Pod ID<br><input name="runpodPodId" type="text" value="${escapeHtml(target.runpod?.podId ?? "")}"></label></p>
+      <p><label>RunPod runtime port<br><input name="runpodRuntimePort" type="number" min="1" value="${escapeHtml(String(target.runpod?.runtimePort ?? ""))}"></label></p>
+    </div>
+    <div data-edit-provider-fields="aws-ecs,aws-ecs-asg">
+      <p><label>AWS cluster<br><input name="awsCluster" type="text" value="${escapeHtml(target.aws?.cluster ?? target.aws?.clusterName ?? "")}"></label></p>
+      <p><label>AWS service<br><input name="awsService" type="text" value="${escapeHtml(target.aws?.service ?? target.aws?.serviceName ?? "")}"></label></p>
+      <p><label>AWS ASG name<br><input name="awsAsgName" type="text" value="${escapeHtml(target.aws?.autoScalingGroupName ?? "")}"></label></p>
+    </div>
+    <div data-edit-provider-fields="docker">
+      <p><label>Docker container name<br><input name="dockerContainerName" type="text" value="${escapeHtml(target.docker?.containerName ?? "")}"></label></p>
+      <p><label>Model volume<br><input name="dockerModelVolume" type="text" value="${escapeHtml(dockerModelVolumeForTarget(target))}"></label></p>
+      <p class="muted">The profile supplies the container path.</p>
+    </div>
+    <div data-edit-provider-fields="neuron">
+      <p><label>Remote NeurOn target ID<br><input name="neuronTargetId" type="text" value="${escapeHtml(target.neuron?.targetId ?? "")}"></label></p>
+    </div>
+    <details>
+      <summary>Overrides</summary>
+      <p><label>API URL override<br><input name="apiUrl" type="text" value="${escapeHtml(target.apiUrl ?? "")}"></label></p>
+      <p><label>Health URL override<br><input name="healthUrl" type="text" value="${escapeHtml(target.healthUrl ?? "")}"></label></p>
+      <p><label>Configured model IDs<br><input name="modelIds" type="text" value="${escapeHtml(target.modelIds.join(","))}"></label></p>
+      <p class="muted">Leave models empty to rely on runtime discovery.</p>
+    </details>
+    <div class="actions"><button type="submit">Save target</button></div>
+  </form>`;
+}
+
+function targetDeletePanel(target: TargetView): string {
+  return `<p class="muted">Type <code>${escapeHtml(target.id)}</code> to delete this target.</p>
+  <form method="post" action="/admin/targets/${escapeHtml(target.id)}/delete">
+    <p><label>Target ID<br><input name="confirmName" type="text" autocomplete="off" required></label></p>
+    <button class="danger" type="submit">Delete target</button>
+  </form>`;
+}
+
+function targetDetails(target: CapacityTarget): string {
+  const declarative = declarativeTargetJson(target);
+  const env = declarativeTargetEnv(target);
+  const viewRows = [
+    ["Provider", target.providerId ?? target.provider],
+    ["Provider type", target.provider],
+    ["Models", target.modelIds.length ? target.modelIds.join(", ") : "Discovery"],
+    ["API URL", target.apiUrl],
+    ["Health URL", target.healthUrl],
+    ["Traffic prefixes", target.trafficModelPrefixes?.join(", ")],
+    ["Docker container", target.docker?.containerName],
+    ["Docker image", target.docker?.image],
+    ["Docker volumes", target.docker?.volumes?.join(", ")],
+    ["RunPod Pod", target.runpod?.podId],
+    ["AWS cluster", target.aws?.cluster ?? target.aws?.clusterName],
+    ["AWS service", target.aws?.service ?? target.aws?.serviceName],
+    ["AWS ASG", target.aws?.autoScalingGroupName],
+    ["Remote NeurOn target", target.neuron?.targetId]
+  ].filter((entry): entry is [string, string] => entry[1] !== undefined && entry[1] !== "");
+  const view = `<table><tbody>${viewRows.map(([label, value]) => `<tr><th>${escapeHtml(label)}</th><td>${escapeHtml(String(value))}</td></tr>`).join("")}</tbody></table>`;
+  return `<section class="tab-panel" data-tab-panel="view">${view}</section><section class="tab-panel" data-tab-panel="status" hidden><div data-target-status="${escapeHtml(target.id)}"><p class="muted">Loading status...</p></div></section><section class="tab-panel" data-tab-panel="json" hidden><div class="inline-actions"><button type="button" data-copy="${escapeHtml(declarative)}">Copy JSON</button></div><pre>${escapeHtml(declarative)}</pre></section><section class="tab-panel" data-tab-panel="env" hidden><p class="muted">Profiles are create-time templates; ENV shows the expanded target config.</p><div class="inline-actions"><button type="button" data-copy="${escapeHtml(env)}">Copy ENV</button></div><pre>${escapeHtml(env)}</pre></section>`;
+}
+
+function targetProviderSelect(providers: ProviderView[], _includeDirectTypes = false, selected = "", selectedType = ""): string {
+  const hasSelectedProvider = providers.some((provider) => provider.id === selected);
+  const options = [
+    ...providers.map((provider) => `<option value="${escapeHtml(provider.id)}" ${provider.id === selected ? "selected" : ""}>${escapeHtml(provider.displayName)} (${escapeHtml(provider.type)})</option>`),
+    !hasSelectedProvider && selected ? `<option value="${escapeHtml(selected)}" selected data-provider-type="${escapeHtml(selectedType)}">${escapeHtml(selected)} (${escapeHtml(selectedType || "missing provider")})</option>` : ""
+  ].join("");
+  return `<select name="providerId" required>${options}</select>`;
+}
+
+function runtimeProfileForTarget(target: CapacityTarget, runtimeProfiles: RuntimeProfile[]): string {
+  const byImage = runtimeProfiles.find((profile) => profile.image && profile.image === target.docker?.image);
+  return byImage?.id ?? runtimeProfiles[0]?.id ?? "";
+}
+
+function dockerModelVolumeForTarget(target: CapacityTarget): string {
+  const volume = target.docker?.volumes?.[0];
+  if (!volume) return "";
+  return volume.split(":")[0] ?? "";
+}
+
+function declarativeTargetJson(target: CapacityTarget): string {
+  return JSON.stringify(stripUndefined({
+    id: target.id,
+    displayName: target.displayName,
+    provider: target.providerId ? undefined : target.provider,
+    providerId: target.providerId,
+    modelIds: target.modelIds,
+    models: target.models,
+    modelDiscovery: target.modelDiscovery,
+    modelWarmup: target.modelWarmup,
+    trafficModelPrefixes: target.trafficModelPrefixes,
+    litellmDisplayPrefix: target.litellmDisplayPrefix,
+    modelsMax: target.modelsMax,
+    aws: target.aws,
+    docker: target.docker,
+    dockerCompose: target.dockerCompose,
+    runpod: target.runpod,
+    neuron: target.neuron,
+    healthUrl: target.healthUrl,
+    apiUrl: target.apiUrl,
+    litellm: target.litellm
+  }), null, 2);
+}
+
+function declarativeTargetEnv(target: CapacityTarget): string {
+  const key = envKey(target.id);
+  const prefix = `CAPACITY_TARGET_${key}`;
+  const json = envLine("CAPACITY_TARGETS_JSON", JSON.stringify([JSON.parse(declarativeTargetJson(target)) as Record<string, unknown>]));
+  const lines = [
+    "# JSON form",
+    json,
+    "",
+    "# Expanded form",
+    envLine("CAPACITY_TARGET_KEYS", key),
+    envLine(`${prefix}_ID`, target.id),
+    envLine(`${prefix}_DISPLAY_NAME`, target.displayName),
+    target.providerId ? envLine(`${prefix}_PROVIDER_ID`, target.providerId) : envLine(`${prefix}_PROVIDER`, target.provider),
+    target.modelIds.length > 0 ? `# ${envLine(`${prefix}_MODEL_IDS`, target.modelIds.join(","))} # optional; omit to use runtime discovery` : "",
+    target.healthUrl ? envLine(`${prefix}_HEALTH_URL`, target.healthUrl) : "",
+    target.apiUrl ? envLine(`${prefix}_API_URL`, target.apiUrl) : "",
+    target.trafficModelPrefixes?.length ? envLine(`${prefix}_TRAFFIC_MODEL_PREFIXES`, target.trafficModelPrefixes.join(",")) : "",
+    target.litellmDisplayPrefix !== undefined ? envLine(`${prefix}_LITELLM_DISPLAY_PREFIX`, target.litellmDisplayPrefix || "__empty__") : "",
+    target.modelsMax ? envLine(`${prefix}_MODELS_MAX`, String(target.modelsMax)) : "",
+    target.aws?.cluster ? envLine(`${prefix}_AWS_CLUSTER`, target.aws.cluster) : "",
+    target.aws?.service ? envLine(`${prefix}_AWS_SERVICE`, target.aws.service) : "",
+    target.aws?.clusterName ? envLine(`${prefix}_AWS_CLUSTER_NAME`, target.aws.clusterName) : "",
+    target.aws?.serviceName ? envLine(`${prefix}_AWS_SERVICE_NAME`, target.aws.serviceName) : "",
+    target.aws?.autoScalingGroupName ? envLine(`${prefix}_AWS_ASG_NAME`, target.aws.autoScalingGroupName) : "",
+    target.runpod?.podId ? envLine(`${prefix}_RUNPOD_POD_ID`, target.runpod.podId) : "",
+    target.runpod?.apiKeyEnv ? envLine(`${prefix}_RUNPOD_API_KEY_ENV`, target.runpod.apiKeyEnv) : "",
+    target.runpod?.apiBaseUrl ? envLine(`${prefix}_RUNPOD_API_BASE_URL`, target.runpod.apiBaseUrl) : "",
+    target.runpod?.runtimePort ? envLine(`${prefix}_RUNPOD_RUNTIME_PORT`, String(target.runpod.runtimePort)) : "",
+    target.runpod?.create ? envLine(`${prefix}_RUNPOD_CREATE_JSON`, JSON.stringify(target.runpod.create)) : "",
+    target.neuron?.targetId ? envLine(`${prefix}_NEURON_TARGET_ID`, target.neuron.targetId) : "",
+    target.docker?.containerName ? envLine(`${prefix}_DOCKER_CONTAINER_NAME`, target.docker.containerName) : "",
+    target.docker?.image ? envLine(`${prefix}_DOCKER_IMAGE`, target.docker.image) : "",
+    target.docker?.ports?.length ? envLine(`${prefix}_DOCKER_PORTS`, target.docker.ports.join(",")) : "",
+    target.docker?.volumes?.length ? envLine(`${prefix}_DOCKER_VOLUMES`, target.docker.volumes.join(",")) : "",
+    target.docker?.gpus ? envLine(`${prefix}_DOCKER_GPUS`, target.docker.gpus) : "",
+    target.docker?.restart ? envLine(`${prefix}_DOCKER_RESTART`, target.docker.restart) : "",
+    target.docker?.network ? envLine(`${prefix}_DOCKER_NETWORK`, target.docker.network) : "",
+    target.docker?.command?.length ? envLine(`${prefix}_DOCKER_COMMAND`, target.docker.command.join(",")) : "",
+    target.docker?.extraArgs?.length ? envLine(`${prefix}_DOCKER_EXTRA_ARGS`, target.docker.extraArgs.join(",")) : "",
+    target.dockerCompose?.projectDirectory ? envLine(`${prefix}_DOCKER_PROJECT_DIRECTORY`, target.dockerCompose.projectDirectory) : "",
+    target.dockerCompose?.projectName ? envLine(`${prefix}_DOCKER_PROJECT_NAME`, target.dockerCompose.projectName) : "",
+    target.dockerCompose?.composeFile ? envLine(`${prefix}_DOCKER_COMPOSE_FILE`, target.dockerCompose.composeFile) : "",
+    target.dockerCompose?.composeFiles?.length ? envLine(`${prefix}_DOCKER_COMPOSE_FILES`, target.dockerCompose.composeFiles.join(",")) : "",
+    target.dockerCompose?.profiles?.length ? envLine(`${prefix}_DOCKER_PROFILES`, target.dockerCompose.profiles.join(",")) : "",
+    target.dockerCompose?.serviceName ? envLine(`${prefix}_DOCKER_SERVICE_NAME`, target.dockerCompose.serviceName) : "",
+    target.litellm?.backendName ? envLine(`${prefix}_LITELLM_BACKEND_NAME`, target.litellm.backendName) : "",
+    target.litellm?.apiBaseUrl ? envLine(`${prefix}_LITELLM_API_BASE_URL`, target.litellm.apiBaseUrl) : ""
+  ].filter(Boolean);
+  if (target.models?.length || target.modelDiscovery || target.modelWarmup || target.docker?.environment) {
+    lines.push(`# Some fields are only represented in JSON: ${JSON.stringify(stripUndefined({ models: target.models, modelDiscovery: target.modelDiscovery, modelWarmup: target.modelWarmup, dockerEnvironment: target.docker?.environment }))}`);
+  }
+  return lines.join("\n");
+}
+
+export function providerAdminPage(user: AuthenticatedUser, providers: ProviderView[], targets: TargetView[] = [], runtimeProfiles: RuntimeProfile[] = [], error = ""): string {
+  const rows = providers.length
+    ? providers.map((provider) => providerRow(provider, targets)).join("")
+    : `<p class="muted">No providers configured</p>`;
+  return layout("NeurOn Providers", user, `<section class="panel">
+    <div class="target-status-head"><h1>Providers</h1><button type="button" data-open-modal="provider-modal">Add provider</button></div>
+    ${error ? `<p class="status">${escapeHtml(error)}</p>` : ""}
+    <div class="summary-list">${rows}</div>
+  </section>
+  <div id="provider-modal" class="modal" hidden>
+    <div class="modal-dialog">
+    <div class="target-status-head"><h2>Add provider</h2><button class="secondary" type="button" data-close-modal>Close</button></div>
+    <form method="post" action="/admin/providers">
+      <p><label>Type<br>${providerTypeSelect()}</label></p>
+      <div class="field-grid">
+        <p><label>ID<br><input name="id" type="text" placeholder="runpod-main" required></label></p>
+        <p><label>Display name<br><input name="displayName" type="text" placeholder="RunPod Main"></label></p>
+      </div>
+      <p><label><input name="provisioningEnabled" type="checkbox"> Allow this provider to provision resources</label></p>
+      <p id="provider-type-note" class="muted"></p>
+      <div class="actions"><button type="submit">Add provider</button></div>
+    </form>
+    </div>
+  </div>
+  ${createTargetFromProviderModal(providers, runtimeProfiles)}
+  <script type="module">
+    document.addEventListener('click', async (event) => {
+      const button = event.target.closest('[data-copy]');
+      if (!button) return;
+      event.preventDefault();
+      const value = button.dataset.copy;
+      if (!value) return;
+      await navigator.clipboard?.writeText(value);
+      const previous = button.textContent;
+      button.textContent = 'Copied';
+      setTimeout(() => { button.textContent = previous; }, 900);
+    });
+    document.addEventListener('click', (event) => {
+      const opener = event.target.closest('[data-open-modal]');
+      if (opener) {
+        const modal = document.getElementById(opener.dataset.openModal);
+        modal.hidden = false;
+        if (opener.dataset.providerId) {
+          modal.querySelector('select[name="providerId"]').value = opener.dataset.providerId;
+          modal.querySelector('select[name="providerId"]').dispatchEvent(new Event('change'));
+        }
+      }
+      if (event.target.closest('[data-close-modal]')) event.target.closest('.modal').hidden = true;
+      if (event.target.classList?.contains('modal')) event.target.hidden = true;
+      const tab = event.target.closest('[data-tab]');
+      if (!tab) return;
+      const group = tab.closest('[data-tabs]');
+      group.querySelectorAll('[data-tab]').forEach(candidate => candidate.setAttribute('aria-selected', String(candidate === tab)));
+      group.querySelectorAll('[data-tab-panel]').forEach(panel => { panel.hidden = panel.dataset.tabPanel !== tab.dataset.tab; });
+    });
+    const type = document.querySelector('#provider-modal select[name="type"]');
+    const note = document.querySelector('#provider-type-note');
+    const notes = {
+      runpod: 'RunPod account access will come from the runtime environment or a future credentials record.',
+      neuron: 'External NeurOn providers will need a NeurOn API key once credentials are modeled.',
+      'aws-ecs-asg': 'AWS uses the NeurOn runtime role for ordinary lifecycle operations.',
+      docker: 'Docker providers use the local Docker daemon available to NeurOn.',
+      'docker-compose': 'Docker Compose providers use target-level project and service settings.'
+    };
+    const sync = () => { note.textContent = notes[type.value] ?? ''; };
+    type?.addEventListener('change', sync);
+    sync();
+    const targetProviders = ${safeJson(Object.fromEntries(providers.map((provider) => [provider.id, provider.type])))};
+    const runtimeProfiles = ${safeJson(Object.fromEntries(runtimeProfiles.map((profile) => [profile.id, profile])))};
+    const targetProvider = document.querySelector('#provider-target-modal select[name="providerId"]');
+    const runtimeProfile = document.querySelector('#provider-target-modal select[name="runtimeProfileId"]');
+    const runpodTarget = document.querySelector('#provider-target-modal [data-provider-fields="runpod"]');
+    const dockerTarget = document.querySelector('#provider-target-modal [data-provider-fields="docker"]');
+    const awsTarget = document.querySelector('#provider-target-modal [data-provider-fields="aws"]');
+    const neuronTarget = document.querySelector('#provider-target-modal [data-provider-fields="neuron"]');
+    const runtimeNote = document.querySelector('#runtime-profile-note');
+    const dockerModelVolumeInput = document.querySelector('#provider-target-modal input[name="dockerModelVolume"]');
+    dockerModelVolumeInput?.addEventListener('input', () => { dockerModelVolumeInput.dataset.touched = 'true'; });
+    const syncTargetCreate = () => {
+      const targetType = targetProviders[targetProvider.value] ?? '';
+      runpodTarget.hidden = targetType !== 'runpod';
+      dockerTarget.hidden = targetType !== 'docker';
+      awsTarget.hidden = targetType !== 'aws-ecs' && targetType !== 'aws-ecs-asg';
+      neuronTarget.hidden = targetType !== 'neuron';
+      const profile = runtimeProfiles[runtimeProfile.value];
+      const port = profile?.port ?? 8080;
+      const discovery = profile ? profile.discovery ?? true : false;
+      const profileVolumes = Object.entries(profile?.volumes ?? {});
+      const modelVolume = profileVolumes[0];
+      runtimeNote.textContent = profile ? [profile.type, profile.image, 'port ' + port, modelVolume ? 'volume ' + modelVolume[1] + ' -> ' + modelVolume[0] : '', discovery ? 'discovery on' : 'discovery off'].filter(Boolean).join(' | ') : '';
+      if (dockerModelVolumeInput && !dockerModelVolumeInput.dataset.touched) dockerModelVolumeInput.value = modelVolume?.[1] ?? '';
+    };
+    targetProvider?.addEventListener('change', syncTargetCreate);
+    runtimeProfile?.addEventListener('change', syncTargetCreate);
+    syncTargetCreate();
+  </script>`);
+}
+
+function providerRow(provider: ProviderView, targets: TargetView[]): string {
+  const declarative = declarativeProviderJson(provider);
+  const env = declarativeProviderEnv(provider);
+  const providerTargets = targetsForProvider(provider, targets);
+  const editAction = provider.editable
+    ? providerEditPanel(provider)
+    : `<form method="post" action="/admin/providers/${escapeHtml(provider.id)}/copy-to-db"><button class="secondary" type="submit">Copy config provider to DB</button></form>`;
+  const deleteAction = provider.editable ? providerDeletePanel(provider) : `<p class="muted">This provider is loaded from declarative config. Remove it from configuration or copy it to the database before deleting it here.</p>`;
+  const viewConfig = `<p><strong>Resource creation:</strong> ${provider.provisioning?.enabled ? "enabled" : "disabled"}</p>${provider.config ? `<pre>${escapeHtml(JSON.stringify(provider.config, null, 2))}</pre>` : `<p class="muted">No provider-level config.</p>`}`;
+  return `<details class="drilldown"><summary><div><strong>${escapeHtml(provider.displayName)}</strong><div class="muted"><code>${escapeHtml(provider.id)}</code> | ${escapeHtml(provider.type)} | ${providerTargets.length} targets</div></div><span class="badge ${provider.source === "persisted" ? "active" : "done"}">${escapeHtml(provider.source)}</span></summary><div class="drilldown-body" data-tabs><div class="tabbar"><button type="button" data-tab="view" aria-selected="true">View</button><button type="button" data-tab="targets" aria-selected="false">Targets</button><button type="button" data-tab="json" aria-selected="false">JSON</button><button type="button" data-tab="env" aria-selected="false">ENV</button><button type="button" data-tab="edit" aria-selected="false">Edit</button><button type="button" data-tab="delete" aria-selected="false">Delete</button></div><section class="tab-panel" data-tab-panel="view">${viewConfig}</section><section class="tab-panel" data-tab-panel="targets" hidden>${providerTargetsPanel(provider, providerTargets)}</section><section class="tab-panel" data-tab-panel="json" hidden><div class="inline-actions"><button type="button" data-copy="${escapeHtml(declarative)}">Copy JSON</button></div><pre>${escapeHtml(declarative)}</pre></section><section class="tab-panel" data-tab-panel="env" hidden><div class="inline-actions"><button type="button" data-copy="${escapeHtml(env)}">Copy ENV</button></div><pre>${escapeHtml(env)}</pre></section><section class="tab-panel" data-tab-panel="edit" hidden><p class="muted">${provider.editable ? "This provider is stored in the database." : "This provider is loaded from declarative config."}</p>${editAction}</section><section class="tab-panel" data-tab-panel="delete" hidden>${deleteAction}</section></div></details>`;
+}
+
+function providerEditPanel(provider: ProviderView): string {
+  return `<form method="post" action="/admin/providers/${escapeHtml(provider.id)}/update">
+    <p><label>Type<br>${providerTypeSelect(provider.type)}</label></p>
+    <div class="field-grid">
+      <p><label>ID<br><input name="id" type="text" value="${escapeHtml(provider.id)}" required></label></p>
+      <p><label>Display name<br><input name="displayName" type="text" value="${escapeHtml(provider.displayName)}"></label></p>
+    </div>
+    <p><label><input name="provisioningEnabled" type="checkbox" ${provider.provisioning?.enabled ? "checked" : ""}> Allow this provider to provision resources</label></p>
+    <div class="actions"><button type="submit">Save provider</button></div>
+  </form>`;
+}
+
+function providerDeletePanel(provider: ProviderView): string {
+  return `<p class="muted">Type <code>${escapeHtml(provider.id)}</code> to delete this provider.</p>
+  <form method="post" action="/admin/providers/${escapeHtml(provider.id)}/delete">
+    <p><label>Provider ID<br><input name="confirmName" type="text" autocomplete="off" required></label></p>
+    <button class="danger" type="submit">Delete provider</button>
+  </form>`;
+}
+
+function targetsForProvider(provider: ProviderView, targets: TargetView[]): TargetView[] {
+  return targets.filter((target) => (target.providerId ?? target.provider) === provider.id || (!target.providerId && target.provider === provider.type));
+}
+
+function providerTargetsPanel(provider: ProviderView, targets: TargetView[]): string {
+  const list = targets.length === 0 ? `<p class="muted">No targets use this provider.</p>` : `<div class="summary-list">${targets.map(providerTargetRow).join("")}</div>`;
+  return `<div class="target-status-head"><h3>Targets</h3><button type="button" data-open-modal="provider-target-modal" data-provider-id="${escapeHtml(provider.id)}">Create target</button></div>${list}`;
+}
+
+function providerTargetRow(target: TargetView): string {
+  const modelHint = target.modelIds.length > 0 ? `${target.modelIds.length} configured models` : "Discovery";
+  return `<div class="target-status-card"><div class="target-status-head"><div><strong>${escapeHtml(target.displayName)}</strong><div class="target-status-meta"><span class="pill off">${escapeHtml(target.provider)}</span><span class="muted"><code>${escapeHtml(target.id)}</code></span><span class="muted">${escapeHtml(modelHint)}</span></div></div><span class="badge ${target.source === "persisted" ? "active" : "done"}">${escapeHtml(target.source)}</span></div></div>`;
+}
+
+function createTargetFromProviderModal(providers: ProviderView[], runtimeProfiles: RuntimeProfile[]): string {
+  return `<div id="provider-target-modal" class="modal" hidden>
+    <div class="modal-dialog">
+      <div class="target-status-head"><h2>Create target</h2><button class="secondary" type="button" data-close-modal>Close</button></div>
+      <form method="post" action="/admin/targets">
+        <p><label>Provider<br>${targetProviderSelect(providers)}</label></p>
+        <p><label>Profile<br>${runtimeProfileSelect(runtimeProfiles)}</label></p>
+        <p id="runtime-profile-note" class="muted"></p>
+        <div class="field-grid">
+          <p><label>ID<br><input name="id" type="text" placeholder="target-id" required></label></p>
+          <p><label>Display name<br><input name="displayName" type="text" placeholder="Target name"></label></p>
+        </div>
+        <div data-provider-fields="runpod">
+          <p><label>RunPod Pod ID<br><input name="runpodPodId" type="text" placeholder="leave empty to provision a new Pod"></label></p>
+          <p><label>RunPod runtime port<br><input name="runpodRuntimePort" type="number" min="1" placeholder="8080"></label></p>
+        </div>
+        <div data-provider-fields="docker">
+          <p><label>Docker container name<br><input name="dockerContainerName" type="text" placeholder="prefer"></label></p>
+          <p><label>Model volume<br><input name="dockerModelVolume" type="text" placeholder="prefer-model-cache"></label></p>
+          <p class="muted">The profile supplies the container path.</p>
+        </div>
+        <div data-provider-fields="aws">
+          <p><label>AWS cluster<br><input name="awsCluster" type="text" placeholder="llm-cluster"></label></p>
+          <p><label>AWS service<br><input name="awsService" type="text" placeholder="llama-cpp-gpu-pool"></label></p>
+          <p><label>AWS ASG name<br><input name="awsAsgName" type="text" placeholder="llm-gpu-pool-asg"></label></p>
+        </div>
+        <div data-provider-fields="neuron">
+          <p><label>Remote NeurOn target ID<br><input name="neuronTargetId" type="text" placeholder="gpu-pool-west"></label></p>
+          <p class="muted">Later we can populate this from the remote NeurOn API.</p>
+        </div>
+        <details>
+          <summary>Overrides</summary>
+          <p><label>API URL override<br><input name="apiUrl" type="text" placeholder="http://runtime.internal:8080/v1"></label></p>
+          <p><label>Health URL override<br><input name="healthUrl" type="text" placeholder="http://runtime.internal:8080/health"></label></p>
+          <p><label>Configured model IDs<br><input name="modelIds" type="text" placeholder="qwen-3.6,gemma-4"></label></p>
+          <p class="muted">Leave models empty to use runtime discovery.</p>
+        </details>
+        <div class="actions"><button type="submit">Create target</button></div>
+      </form>
+    </div>
+  </div>`;
+}
+
+function runtimeProfileSelect(runtimeProfiles: RuntimeProfile[], selected = ""): string {
+  const options = runtimeProfiles.map((profile) => `<option value="${escapeHtml(profile.id)}" ${profile.id === selected ? "selected" : ""}>${escapeHtml(profile.name)}</option>`).join("");
+  return `<select name="runtimeProfileId">${options}</select>`;
+}
+
+function providerTypeSelect(selected = "runpod"): string {
+  const types = ["runpod", "aws-ecs-asg", "docker", "docker-compose", "neuron"];
+  return `<select name="type">${types.map((type) => `<option value="${escapeHtml(type)}" ${type === selected ? "selected" : ""}>${escapeHtml(type)}</option>`).join("")}</select>`;
+}
+
+function declarativeProviderJson(provider: ProviderView): string {
+  return JSON.stringify(stripUndefined({
+    id: provider.id,
+    displayName: provider.displayName,
+    type: provider.type,
+    provisioning: provider.provisioning,
+    config: provider.config,
+    credentialId: provider.credentialId
+  }), null, 2);
+}
+
+function declarativeProviderEnv(provider: ProviderView): string {
+  const json = envLine("CAPACITY_PROVIDERS_JSON", JSON.stringify([stripUndefined({
+    id: provider.id,
+    displayName: provider.displayName,
+    type: provider.type,
+    provisioning: provider.provisioning,
+    config: provider.config,
+    credentialId: provider.credentialId
+  })]));
+  const key = envKey(provider.id);
+  const prefix = `CAPACITY_PROVIDER_${key}`;
+  const lines = [
+    "# JSON form",
+    json,
+    "",
+    "# Expanded form",
+    envLine("CAPACITY_PROVIDER_KEYS", key),
+    envLine(`${prefix}_ID`, provider.id),
+    provider.displayName && provider.displayName !== provider.id ? envLine(`${prefix}_DISPLAY_NAME`, provider.displayName) : `# ${prefix}_DISPLAY_NAME=${envValue(provider.displayName)}`,
+    envLine(`${prefix}_TYPE`, provider.type),
+    provider.provisioning?.enabled ? envLine(`${prefix}_PROVISIONING_ENABLED`, "true") : `# ${prefix}_PROVISIONING_ENABLED=false`,
+    provider.credentialId ? envLine(`${prefix}_CREDENTIAL_ID`, provider.credentialId) : "",
+    provider.config?.runpod && typeof provider.config.runpod === "object" && "apiKeyEnv" in provider.config.runpod ? envLine(`${prefix}_RUNPOD_API_KEY_ENV`, String(provider.config.runpod.apiKeyEnv)) : "",
+    provider.config?.runpod && typeof provider.config.runpod === "object" && "apiBaseUrl" in provider.config.runpod ? envLine(`${prefix}_RUNPOD_API_BASE_URL`, String(provider.config.runpod.apiBaseUrl)) : "",
+    provider.config?.neuron && typeof provider.config.neuron === "object" && "apiBaseUrl" in provider.config.neuron ? envLine(`${prefix}_NEURON_API_BASE_URL`, String(provider.config.neuron.apiBaseUrl)) : "",
+    provider.config?.neuron && typeof provider.config.neuron === "object" && "apiKeyEnv" in provider.config.neuron ? envLine(`${prefix}_NEURON_API_KEY_ENV`, String(provider.config.neuron.apiKeyEnv)) : ""
+  ].filter((line) => line !== "");
+  return lines.join("\n");
+}
+
+function stripUndefined<T extends Record<string, unknown>>(value: T): Partial<T> {
+  return Object.fromEntries(Object.entries(value).filter(([, entry]) => entry !== undefined)) as Partial<T>;
+}
+
+function envKey(value: string): string {
+  return value
+    .trim()
+    .replace(/[^a-zA-Z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .toUpperCase();
+}
+
+function envLine(name: string, value: string): string {
+  return `${name}=${envValue(value)}`;
+}
+
+function envValue(value: string): string {
+  return /^[A-Za-z0-9_./:@-]*$/.test(value) ? value : JSON.stringify(value);
 }
 
 function apiKeyRow(key: ApiKey): string {

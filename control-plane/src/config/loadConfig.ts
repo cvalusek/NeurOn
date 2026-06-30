@@ -1,12 +1,13 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { z } from "zod";
-import type { AppConfig, CapacityTarget, ModelDefinition, StorageConfig } from "../domain/types.js";
+import type { AppConfig, CapacityProviderDefinition, CapacityTarget, ModelDefinition, RuntimeProfile, StorageConfig } from "../domain/types.js";
 
 const targetSchema = z.object({
   id: z.string().min(1),
   displayName: z.string().min(1),
-  provider: z.string().default("aws-ecs"),
+  provider: z.string().optional(),
+  providerId: z.string().optional(),
   modelIds: z.array(z.string()).default([]),
   models: z
     .array(
@@ -86,8 +87,13 @@ const targetSchema = z.object({
       create: z.record(z.unknown()).optional()
     })
     .optional(),
-  healthCheckUrl: z.string().url().optional(),
-  runtimeApiBaseUrl: z.string().url().optional(),
+  neuron: z
+    .object({
+      targetId: z.string()
+    })
+    .optional(),
+  healthUrl: z.string().url().optional(),
+  apiUrl: z.string().url().optional(),
   litellm: z
     .object({
       backendName: z.string(),
@@ -96,8 +102,56 @@ const targetSchema = z.object({
     .optional()
 });
 
+const providerSchema = z.object({
+  id: z.string().min(1),
+  displayName: z.string().min(1).optional(),
+  type: z.string().min(1),
+  provisioning: z.object({ enabled: z.boolean().optional() }).optional(),
+  config: z
+    .object({
+      runpod: z
+        .object({
+          apiKey: z.string().optional(),
+          apiKeyEnv: z.string().optional(),
+          apiBaseUrl: z.string().url().optional()
+        })
+        .optional()
+    })
+    .catchall(z.unknown())
+    .optional(),
+  credentialId: z.string().optional()
+});
+
+const runtimeProfileSchema = z
+  .object({
+    id: z.string().min(1),
+    name: z.string().min(1),
+    type: z.string().min(1).default("docker"),
+    image: z.string().optional(),
+    port: z.number().int().positive().optional(),
+    health: z.string().optional(),
+    api: z.string().optional(),
+    volumes: z.record(z.string()).optional(),
+    env: z.record(z.string()).optional(),
+    discovery: z.boolean().optional()
+  })
+  .transform((profile): RuntimeProfile => ({
+    id: profile.id,
+    name: profile.name,
+    type: profile.type,
+    image: profile.image,
+    port: profile.port,
+    health: profile.health,
+    api: profile.api,
+    volumes: profile.volumes,
+    env: profile.env,
+    discovery: profile.discovery
+  }));
+
 export async function loadConfig(): Promise<{ config: AppConfig; models: ModelDefinition[] }> {
-  const capacityTargets = await loadCapacityTargets();
+  const configuredProviders = await loadCapacityProviders();
+  const runtimeProfiles = loadRuntimeProfiles();
+  const capacityTargets = await loadCapacityTargets(configuredProviders);
   const modelsById = new Map<string, ModelDefinition>();
 
   for (const target of capacityTargets) {
@@ -145,6 +199,8 @@ export async function loadConfig(): Promise<{ config: AppConfig; models: ModelDe
       litellmApiKey: process.env.LITELLM_API_KEY,
       litellmTrafficPollSeconds: intEnv("LITELLM_TRAFFIC_POLL_SECONDS", 60),
       litellmTrafficLookbackSeconds: intEnv("LITELLM_TRAFFIC_LOOKBACK_SECONDS", 300),
+      runtimeProfiles,
+      capacityProviders: configuredProviders,
       capacityTargets,
       reconcilerIntervalSeconds: intEnv("RECONCILER_INTERVAL_SECONDS", 60),
       reservationStatusPollSeconds: intEnv("RESERVATION_STATUS_POLL_SECONDS", 10),
@@ -194,19 +250,101 @@ function inferModelFamily(value: string): string | undefined {
   return value.split(/[-\s]/).slice(0, 2).join(" ");
 }
 
-async function loadCapacityTargets(): Promise<CapacityTarget[]> {
-  const raw = env("CAPACITY_TARGETS_JSON") ?? (env("CAPACITY_TARGET_KEYS") ? JSON.stringify(loadTargetsFromEnv()) : await readTargetsFile());
-  const parsed = z.array(targetSchema).parse(JSON.parse(raw));
-  return parsed.map((target) => ({ ...target, provider: normalizeProvider(target.provider) }));
+async function loadCapacityProviders(): Promise<CapacityProviderDefinition[]> {
+  const raw = env("CAPACITY_PROVIDERS_JSON") ?? (env("CAPACITY_PROVIDER_KEYS") ? JSON.stringify(loadProvidersFromEnv()) : undefined);
+  if (!raw) return [];
+  const parsed = z.array(providerSchema).parse(JSON.parse(raw));
+  return parsed.map((provider) => ({
+    ...provider,
+    displayName: provider.displayName ?? provider.id,
+    type: normalizeProviderType(provider.type)
+  }));
 }
 
-function loadTargetsFromEnv(): unknown[] {
+function loadRuntimeProfiles(): RuntimeProfile[] {
+  const raw = env("RUNTIME_PROFILES_JSON");
+  const parsed = raw ? z.array(runtimeProfileSchema).parse(JSON.parse(raw)) : [];
+  return mergeRuntimeProfiles(parsed);
+}
+
+function mergeRuntimeProfiles(configured: RuntimeProfile[]): RuntimeProfile[] {
+  const profiles = new Map<string, RuntimeProfile>();
+  for (const profile of builtInRuntimeProfiles()) profiles.set(profile.id, profile);
+  for (const profile of configured) profiles.set(profile.id, profile);
+  return Array.from(profiles.values()).sort((left, right) => left.name.localeCompare(right.name) || left.id.localeCompare(right.id));
+}
+
+function builtInRuntimeProfiles(): RuntimeProfile[] {
+  return [
+    {
+      id: "prefer",
+      name: "PreFer",
+      type: "docker",
+      image: "ghcr.io/cvalusek/prefer:latest",
+      volumes: { "/models": "prefer-model-cache" }
+    }
+  ];
+}
+
+function loadProvidersFromEnv(): unknown[] {
+  return listEnv("CAPACITY_PROVIDER_KEYS").map((providerKey) => {
+    const prefix = `CAPACITY_PROVIDER_${envKey(providerKey)}`;
+    const type = normalizeProviderType(requiredScopedEnv(`${prefix}_TYPE`));
+    return compactObject({
+      id: env(`${prefix}_ID`) ?? providerKey.toLowerCase().replace(/_/g, "-"),
+      displayName: env(`${prefix}_DISPLAY_NAME`),
+      type,
+      provisioning: compactObject({
+        enabled: boolEnv(`${prefix}_PROVISIONING_ENABLED`)
+      }),
+      config: loadProviderConfigFromEnv(prefix, type),
+      credentialId: env(`${prefix}_CREDENTIAL_ID`)
+    });
+  });
+}
+
+function loadProviderConfigFromEnv(prefix: string, type: string): Record<string, unknown> | undefined {
+  if (type === "runpod") {
+    return compactObject({
+      runpod: compactObject({
+        apiKeyEnv: env(`${prefix}_RUNPOD_API_KEY_ENV`),
+        apiBaseUrl: env(`${prefix}_RUNPOD_API_BASE_URL`)
+      })
+    });
+  }
+  if (type === "neuron") {
+    return compactObject({
+      neuron: compactObject({
+        apiBaseUrl: env(`${prefix}_NEURON_API_BASE_URL`),
+        apiKeyEnv: env(`${prefix}_NEURON_API_KEY_ENV`)
+      })
+    });
+  }
+  return undefined;
+}
+
+async function loadCapacityTargets(providers: CapacityProviderDefinition[]): Promise<CapacityTarget[]> {
+  const raw = env("CAPACITY_TARGETS_JSON") ?? (env("CAPACITY_TARGET_KEYS") ? JSON.stringify(loadTargetsFromEnv(providers)) : await readTargetsFile());
+  if (!raw) return [];
+  const parsed = z.array(targetSchema).parse(JSON.parse(raw));
+  const providerById = new Map(providers.map((provider) => [provider.id, provider]));
+  return parsed.map((target) => {
+    const providerId = target.providerId;
+    const provider = normalizeProvider(target.provider ?? providerById.get(providerId ?? "")?.type ?? "aws-ecs");
+    return { ...target, provider, providerId: providerId ?? provider };
+  });
+}
+
+function loadTargetsFromEnv(providers: CapacityProviderDefinition[]): unknown[] {
+  const providerById = new Map(providers.map((provider) => [provider.id, provider]));
   return listEnv("CAPACITY_TARGET_KEYS").map((targetKey) => {
     const prefix = `CAPACITY_TARGET_${envKey(targetKey)}`;
-    const provider = normalizeProvider(env(`${prefix}_PROVIDER`) ?? "aws-ecs");
+    const providerId = env(`${prefix}_PROVIDER_ID`);
+    const provider = normalizeProvider(env(`${prefix}_PROVIDER`) ?? providerById.get(providerId ?? "")?.type ?? "aws-ecs");
     return compactObject({
       id: env(`${prefix}_ID`) ?? targetKey.toLowerCase().replace(/_/g, "-"),
       displayName: requiredScopedEnv(`${prefix}_DISPLAY_NAME`),
+      providerId,
       provider,
       modelIds: listEnv(`${prefix}_MODEL_IDS`),
       models: loadModelsFromEnv(prefix),
@@ -228,8 +366,9 @@ function loadTargetsFromEnv(): unknown[] {
       docker: provider === "docker" ? loadDockerContainerTargetFromEnv(prefix) : undefined,
       dockerCompose: provider === "docker-compose" ? loadDockerTargetFromEnv(prefix) : undefined,
       runpod: provider === "runpod" ? loadRunPodTargetFromEnv(prefix) : undefined,
-      healthCheckUrl: env(`${prefix}_HEALTH_CHECK_URL`),
-      runtimeApiBaseUrl: env(`${prefix}_RUNTIME_API_BASE_URL`),
+      neuron: provider === "neuron" ? loadNeuronTargetFromEnv(prefix) : undefined,
+      healthUrl: env(`${prefix}_HEALTH_URL`),
+      apiUrl: env(`${prefix}_API_URL`),
       litellm: env(`${prefix}_LITELLM_BACKEND_NAME`) || env(`${prefix}_LITELLM_API_BASE_URL`)
         ? {
             backendName: requiredScopedEnv(`${prefix}_LITELLM_BACKEND_NAME`),
@@ -315,6 +454,16 @@ function normalizeProvider(provider: string): CapacityTarget["provider"] {
   return provider === "compose" ? "docker-compose" : (provider as CapacityTarget["provider"]);
 }
 
+function loadNeuronTargetFromEnv(prefix: string): unknown {
+  return compactObject({
+    targetId: requiredScopedEnv(`${prefix}_NEURON_TARGET_ID`)
+  });
+}
+
+function normalizeProviderType(provider: string): CapacityProviderDefinition["type"] {
+  return normalizeProvider(provider);
+}
+
 function loadStorageConfig(): StorageConfig {
   const driver = (env("STORAGE_DRIVER") ?? "memory").toLowerCase();
   if (driver === "memory") return { driver: "memory" };
@@ -323,9 +472,9 @@ function loadStorageConfig(): StorageConfig {
   throw new Error(`Unsupported STORAGE_DRIVER: ${driver}`);
 }
 
-async function readTargetsFile(): Promise<string> {
-  const configPath = env("CAPACITY_TARGETS_FILE") ?? path.resolve(process.cwd(), "examples", "capacity-targets.prefer-docker.json");
-  return readFile(configPath, "utf8");
+async function readTargetsFile(): Promise<string | undefined> {
+  const configPath = env("CAPACITY_TARGETS_FILE");
+  return configPath ? readFile(configPath, "utf8") : undefined;
 }
 
 function intEnv(name: string, fallback: number): number {

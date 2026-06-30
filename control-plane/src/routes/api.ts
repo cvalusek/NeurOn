@@ -1,12 +1,16 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import type { CapacityProvider, ReservationRepository, TargetStatusRepository } from "../domain/interfaces.js";
+import type { CapacityTarget } from "../domain/types.js";
 import { HealthChecker } from "../reconciler/HealthChecker.js";
 import { Reconciler } from "../reconciler/Reconciler.js";
 import { ApiKeyService } from "../services/ApiKeyService.js";
 import { ModelCatalog } from "../services/ModelCatalog.js";
 import { ReservationService } from "../services/ReservationService.js";
 import { RuntimeModelDiscovery } from "../services/RuntimeModelDiscovery.js";
+import { shouldBootstrapRuntimeModels } from "../services/RuntimeModelDiscovery.js";
+import { TargetProvisioningService } from "../services/TargetProvisioningService.js";
+import { TargetService } from "../services/TargetService.js";
 import { TrafficKeepaliveService } from "../services/TrafficKeepaliveService.js";
 import { apiKeyJson, requireUser, reservationDisplayUsername, reservationJson, sendError, targetJson } from "../utils/http.js";
 
@@ -21,7 +25,9 @@ export function registerApiRoutes(
   reconciler: Reconciler,
   capacityProvider: CapacityProvider,
   runtimeModelDiscovery: RuntimeModelDiscovery,
-  healthChecker: HealthChecker
+  healthChecker: HealthChecker,
+  targetService: TargetService,
+  targetProvisioningService: TargetProvisioningService
 ) {
   app.get("/healthz", async () => ({ ok: true }));
   app.get(
@@ -186,16 +192,24 @@ export function registerApiRoutes(
     }
   });
 
-  app.post("/api/admin/targets/:id/install", async (request, reply) => {
+  app.post("/api/admin/targets/:id/provision", async (request, reply) => {
     try {
       const { id } = z.object({ id: z.string() }).parse(request.params);
       const target = catalog.getTarget(id);
       if (!target) throw new Error("Target not found");
-      await capacityProvider.installTarget(target);
-      const providerStatus = await capacityProvider.getTargetStatus(target);
+      await targetProvisioningService.beginProvision(target);
+      const patch = await capacityProvider.provisionTarget(target);
+      const updatedTarget = await targetService.applyProvisioningPatch(id, patch) ?? target;
+      await targetProvisioningService.completeProvision(updatedTarget, patch);
+      const providerStatus = await capacityProvider.getTargetStatus(updatedTarget);
       statuses.set({ targetId: id, desired: "off", observed: providerStatus.observed, message: providerStatus.message, lastCheckedAt: new Date() });
+      if (shouldBootstrapRuntimeModels(updatedTarget)) {
+        runDiscoveryBootstrapInBackground(updatedTarget, capacityProvider, runtimeModelDiscovery, healthChecker, statuses);
+      }
       return { ok: true };
     } catch (error) {
+      const id = z.object({ id: z.string().optional() }).safeParse(request.params).data?.id;
+      if (id) await targetProvisioningService.failProvision(id, error).catch(() => undefined);
       return sendError(reply, error);
     }
   });
@@ -211,6 +225,7 @@ export function registerApiRoutes(
         await runtimeModelDiscovery.refreshTarget(target);
         statuses.set({ targetId: id, desired: previous?.desired ?? "on", observed: "healthy", message: "Runtime model discovery refreshed", lastCheckedAt: new Date(), lastHealthyAt: new Date() });
       } else {
+        statuses.set({ targetId: id, desired: "on", observed: "starting", message: "Runtime model discovery starting", lastCheckedAt: new Date() });
         await runtimeModelDiscovery.bootstrapTarget(target, capacityProvider, healthChecker);
         statuses.set({ targetId: id, desired: "off", observed: "stopped", message: "Runtime model discovery complete", lastCheckedAt: new Date() });
       }
@@ -243,6 +258,25 @@ export function registerApiRoutes(
       return sendError(reply, error);
     }
   });
+}
+
+function runDiscoveryBootstrapInBackground(
+  target: CapacityTarget,
+  capacityProvider: CapacityProvider,
+  runtimeModelDiscovery: RuntimeModelDiscovery,
+  healthChecker: HealthChecker,
+  statuses: TargetStatusRepository
+): void {
+  statuses.set({ targetId: target.id, desired: "on", observed: "starting", message: "Runtime model discovery starting", lastCheckedAt: new Date() });
+  void runtimeModelDiscovery
+    .bootstrapTarget(target, capacityProvider, healthChecker)
+    .then(() => {
+      statuses.set({ targetId: target.id, desired: "off", observed: "stopped", message: "Runtime model discovery complete", lastCheckedAt: new Date() });
+    })
+    .catch((error) => {
+      const message = error instanceof Error ? error.message : String(error);
+      statuses.set({ targetId: target.id, desired: "off", observed: "failed", message: `Runtime model discovery failed: ${message}`, lastCheckedAt: new Date() });
+    });
 }
 
 async function reservationEndpoint(request: { params: unknown }, reply: { code: (code: number) => { send: (body: unknown) => unknown } }, service: ReservationService, statuses: TargetStatusRepository) {
@@ -370,11 +404,12 @@ const targetSchema = {
     id: { type: "string" },
     displayName: { type: "string" },
     provider: { type: "string" },
+    providerId: { type: "string" },
     modelIds: { type: "array", items: { type: "string" } },
     modelsMax: { type: "number" },
     litellmDisplayPrefix: { type: "string" },
-    healthCheckUrl: { type: "string" },
-    runtimeApiBaseUrl: { type: "string" },
+    healthUrl: { type: "string" },
+    apiUrl: { type: "string" },
     desired: { type: "string" },
     observed: { type: "string" },
     message: { type: "string" },

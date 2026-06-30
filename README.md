@@ -7,11 +7,11 @@ lets developers reserve the runtime targets and models they expect to use,
 keeps matching capacity on while reservations or recent traffic need it, and
 scales the target back down when demand is gone.
 
-NeurOn does not ship an inference image, but the default local setup points at
-the published PreFer container image. Bring another OpenAI-compatible runtime
-by describing it as a capacity target in configuration. Provider adapters
-currently support Docker containers, Docker Compose projects, and AWS
-ECS/Auto Scaling Group targets.
+NeurOn does not ship an inference image or create default capacity. Bring an
+OpenAI-compatible runtime by adding a provider and target in the UI or by
+supplying declarative configuration. Provider adapters currently support Docker
+containers, Docker Compose projects, RunPod, and AWS ECS/Auto Scaling Group
+targets.
 
 ## Layout
 
@@ -38,9 +38,8 @@ docker compose up --build control-plane
 ```
 
 Open `http://localhost:8090`, sign in with any username and the configured
-shared password, then use Admin to install/discover the configured PreFer
-container target. The Docker socket is mounted so NeurOn can pull, create,
-start, and stop the local PreFer container.
+shared password, then add providers and targets from Admin. The Docker socket is
+mounted so NeurOn can manage Docker targets when you configure a Docker provider.
 
 For app development without Docker:
 
@@ -83,7 +82,7 @@ Certificate files under `docker/certs/` are ignored by git.
 ## Configuration
 
 Targets are configuration-first. Each target lists the models users can reserve,
-provider details, health check URL, and optional LiteLLM backend metadata.
+provider details, Health URL, and optional LiteLLM backend metadata.
 
 Start with [control-plane/examples/capacity-targets.example.json](control-plane/examples/capacity-targets.example.json)
 or the env-expanded pattern documented in

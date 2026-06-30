@@ -5,13 +5,13 @@ export class FakeCapacityProvider implements CapacityProvider {
   readonly desired = new Map<string, "on" | "off">();
   readonly statuses = new Map<string, CapacityProviderStatus>();
 
-  async installTarget(target: CapacityTarget): Promise<void> {
-    if (!this.statuses.has(target.id)) this.statuses.set(target.id, { observed: "stopped", message: "Installed fake target" });
+  async provisionTarget(target: CapacityTarget): Promise<void> {
+    if (!this.statuses.has(target.id)) this.statuses.set(target.id, { observed: "stopped", message: "Provisioned fake target" });
   }
 
   async ensureTargetOn(target: CapacityTarget): Promise<void> {
     this.desired.set(target.id, "on");
-    if (!this.statuses.has(target.id)) this.statuses.set(target.id, { observed: "provisioning", message: "Provisioning" });
+    if (!this.statuses.has(target.id)) this.statuses.set(target.id, { observed: "starting", message: "starting" });
   }
 
   async ensureTargetOff(target: CapacityTarget): Promise<void> {
@@ -20,7 +20,7 @@ export class FakeCapacityProvider implements CapacityProvider {
   }
 
   async getTargetStatus(target: CapacityTarget): Promise<CapacityProviderStatus> {
-    return this.statuses.get(target.id) ?? { observed: this.desired.get(target.id) === "on" ? "provisioning" : "stopped", message: "Local fake status" };
+    return this.statuses.get(target.id) ?? { observed: this.desired.get(target.id) === "on" ? "starting" : "stopped", message: "Local fake status" };
   }
 
   async forceStopTarget(target: CapacityTarget): Promise<void> {

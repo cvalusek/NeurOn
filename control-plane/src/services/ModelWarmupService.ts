@@ -31,14 +31,14 @@ function warmupModelIdFor(model: ModelDefinition | undefined, fallback: string):
 function warmupApiBaseUrl(target: CapacityTarget): string | undefined {
   const configured = target.modelWarmup?.apiBaseUrl;
   if (configured) return configured.replace(/\/$/, "");
-  if (target.runtimeApiBaseUrl) return target.runtimeApiBaseUrl.replace(/\/$/, "");
+  if (target.apiUrl) return target.apiUrl.replace(/\/$/, "");
   if (target.litellm?.apiBaseUrl) return target.litellm.apiBaseUrl.replace(/\/$/, "");
   if (target.provider === "runpod" && target.runpod?.podId) {
     return `https://${target.runpod.podId}-${target.runpod.runtimePort ?? 8080}.proxy.runpod.net/v1`;
   }
-  if (!target.healthCheckUrl) return undefined;
+  if (!target.healthUrl) return undefined;
   try {
-    const health = new URL(target.healthCheckUrl);
+    const health = new URL(target.healthUrl);
     return `${health.origin}/v1`;
   } catch {
     return undefined;

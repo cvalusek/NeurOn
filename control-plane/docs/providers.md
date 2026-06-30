@@ -10,12 +10,35 @@ timestamp: 2026-06-25T00:00:00Z
 
 Providers translate target desired state into concrete runtime operations.
 Provider-specific names should stay inside provider config and adapters.
+Targets reference providers by `providerId`; `provider` remains the provider
+type used to choose the lifecycle adapter. This lets one configured provider,
+such as a RunPod account or local Docker daemon, own multiple targets.
+Explicit provider records are optional. A target with `provider: docker` still
+runs through the Docker adapter even when no provider row exists.
+
+A provider record can come from declarative config or persisted storage:
+
+```ts
+interface CapacityProviderDefinition {
+  id: string;
+  displayName: string;
+  type: string;
+  provisioning?: { enabled?: boolean };
+  config?: Record<string, unknown>;
+  credentialId?: string;
+}
+```
+
+Provider config should hold shared endpoint or credential-reference data. Target
+config should hold resource-specific data such as a RunPod Pod ID, Docker
+container name, or ECS service names.
 
 ## CapacityProvider
 
 The capacity provider interface is:
 
 ```ts
+provisionTarget(target)
 ensureTargetOn(target)
 ensureTargetOff(target)
 getTargetStatus(target)
@@ -24,6 +47,14 @@ forceStopTarget(target)
 
 Implementations must surface errors through status messages and exceptions that
 the reconciler can catch. They should not crash the app process.
+
+Provisioning is not part of normal lifecycle reconciliation. Providers only
+create resources when an admin explicitly runs provisioning and the provider has
+resource creation enabled. Start/stop/status operate known resources.
+
+Credentials are not a separate first-class record yet. Until that exists,
+providers should prefer environment-variable references such as `apiKeyEnv`
+rather than storing secret material directly.
 
 ## AWS ECS/ASG
 
@@ -66,13 +97,13 @@ The task role needs, at a high level:
 ## RunPod
 
 The RunPod provider uses the RunPod REST API. It can start and stop an existing
-Pod by ID, read Pod status, and create a Pod from a configured create request
-body during install.
+Pod by ID, read Pod status, and provision a Pod from a configured create
+request body when resource creation is enabled on the provider.
 Health checks are optional for RunPod targets. NeurOn can use RunPod Pod status
-as the capacity signal. Discovery uses `runtimeApiBaseUrl` when configured, or
+as the capacity signal. Discovery uses `apiUrl` when configured, or
 infers RunPod's proxy URL from Pod ID and runtime port.
 
-Install:
+Provision:
 
 ```bash
 POST /v1/pods
@@ -104,7 +135,7 @@ to start, stop, inspect, and discover models from that container.
 When NeurOn runs inside Docker, this provider needs access to the host Docker
 daemon, typically by mounting `/var/run/docker.sock`.
 
-Install:
+Provision:
 
 ```bash
 docker pull <image>
@@ -123,9 +154,9 @@ Off:
 docker stop <container>
 ```
 
-If a reservation starts a missing container, the provider installs it first.
-Install requires `docker.image`; otherwise a missing container is reported as a
-configuration error.
+If a reservation starts a missing container, the provider reports an error.
+Provisioning a missing container requires `docker.image` and an explicit admin
+provision action.
 The admin Discover action uses the same lifecycle to start a target briefly,
 read `/v1/models`, record discovered models, and stop it again.
 

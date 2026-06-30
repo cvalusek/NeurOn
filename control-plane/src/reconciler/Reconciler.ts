@@ -49,9 +49,9 @@ export class Reconciler {
           const providerStatus = await this.capacityProvider.getTargetStatus(target);
           let observed = desired === "off" && providerStatus.observed === "healthy" ? "stopping" : providerStatus.observed;
           let message = providerStatus.message;
-          if (desired === "on" && providerStatus.observed === "healthy" && this.healthChecker && target.healthCheckUrl) {
+          if (desired === "on" && providerStatus.observed === "healthy" && this.healthChecker && target.healthUrl) {
             const health = await this.healthChecker.check(target);
-            observed = health.ok ? "healthy" : "provisioning";
+            observed = health.ok ? "healthy" : "starting";
             message = health.message;
           }
           if (desired === "on" && observed === "healthy" && this.modelWarmup) {
@@ -61,7 +61,7 @@ export class Reconciler {
             try {
               await this.modelWarmup.warmupTargetModels(target, modelIds);
             } catch (error) {
-              observed = "provisioning";
+              observed = "starting";
               message = error instanceof Error ? error.message : String(error);
             }
           }
@@ -122,16 +122,16 @@ function targetStatus(
   previous?: TargetStatus
 ): TargetStatus {
   const startupDurationsSeconds = [...(previous?.startupDurationsSeconds ?? [])];
-  let provisioningStartedAt = previous?.provisioningStartedAt;
-  if (desired === "on" && observed === "provisioning" && !provisioningStartedAt) {
-    provisioningStartedAt = now;
+  let startingStartedAt = previous?.startingStartedAt;
+  if (desired === "on" && observed === "starting" && !startingStartedAt) {
+    startingStartedAt = now;
   }
-  if (observed === "healthy" && previous?.observed !== "healthy" && provisioningStartedAt) {
-    startupDurationsSeconds.push(Math.max(1, Math.round((now.getTime() - provisioningStartedAt.getTime()) / 1000)));
-    provisioningStartedAt = undefined;
+  if (observed === "healthy" && previous?.observed !== "healthy" && startingStartedAt) {
+    startupDurationsSeconds.push(Math.max(1, Math.round((now.getTime() - startingStartedAt.getTime()) / 1000)));
+    startingStartedAt = undefined;
   }
   if (desired === "off" || observed === "stopped" || observed === "failed") {
-    provisioningStartedAt = undefined;
+    startingStartedAt = undefined;
   }
   return {
     targetId,
@@ -140,7 +140,7 @@ function targetStatus(
     message,
     lastCheckedAt: now,
     lastHealthyAt: observed === "healthy" ? now : previous?.lastHealthyAt,
-    provisioningStartedAt,
+    startingStartedAt,
     startupDurationsSeconds: startupDurationsSeconds.slice(-20),
     startupEstimate: startupEstimate(startupDurationsSeconds)
   };

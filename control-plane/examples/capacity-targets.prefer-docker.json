@@ -5,8 +5,12 @@
     "provider": "docker",
     "trafficModelPrefixes": ["prefer/"],
     "docker": {
-      "containerName": "prefer"
+      "containerName": "prefer",
+      "image": "ghcr.io/cvalusek/prefer:latest",
+      "ports": ["8080:8080"],
+      "volumes": ["prefer-model-cache:/models"]
     },
-    "healthCheckUrl": "http://host.docker.internal:8080/health"
+    "healthUrl": "http://host.docker.internal:8080/health",
+    "apiUrl": "http://host.docker.internal:8080/v1"
   }
 ]

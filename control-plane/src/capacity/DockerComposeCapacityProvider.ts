@@ -6,7 +6,7 @@ import type { CapacityProviderStatus, CapacityTarget } from "../domain/types.js"
 const execFileAsync = promisify(execFile);
 
 export class DockerComposeCapacityProvider implements CapacityProvider {
-  async installTarget(target: CapacityTarget): Promise<void> {
+  async provisionTarget(target: CapacityTarget): Promise<void> {
     const docker = requireDockerCompose(target);
     await this.compose(target, ["pull", docker.serviceName]);
     await this.compose(target, ["create", "--no-start", docker.serviceName], false);
@@ -34,7 +34,7 @@ export class DockerComposeCapacityProvider implements CapacityProvider {
     if (service.State === "exited" || service.State === "stopped") {
       return { observed: "stopped", message: "Compose service is stopped", details: service };
     }
-    return { observed: "provisioning", message: `Compose service state: ${service.State ?? "unknown"}`, details: service };
+    return { observed: "starting", message: `Compose service state: ${service.State ?? "unknown"}`, details: service };
   }
 
   async forceStopTarget(target: CapacityTarget): Promise<void> {

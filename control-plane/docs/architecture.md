@@ -40,6 +40,10 @@ expiration is in the future.
 
 A capacity target represents a shared runtime/backend. It can serve one or more
 models and is handled by a provider such as Docker Compose or AWS ECS/ASG.
+Today the `provider` field is a provider adapter key. The persisted provider
+and target management model separates provider type, provider instance, optional
+credentials, and target-specific runtime config so one configured provider can
+own multiple targets. See [Providers](providers.md) and [Targets](targets.md).
 
 Important fields:
 
@@ -49,7 +53,7 @@ Important fields:
 - `models`
 - `modelsMax`
 - provider-specific config
-- `healthCheckUrl`
+- `healthUrl`
 - optional LiteLLM backend config
 - optional runtime model discovery config
 
@@ -80,6 +84,7 @@ The core interfaces keep replaceable parts isolated:
 - `BackendConfigSync`
 - `ReservationRepository`
 - `ApiKeyRepository`
+- `TargetModelDiscoveryRepository`
 - `AuthProvider`
 - `TrafficSource`
 - `TargetStatusRepository`
@@ -105,8 +110,10 @@ into AWS, Docker, LiteLLM, or a concrete repository from unrelated code.
 - `RuntimeModelDiscovery`: reads OpenAI-compatible `/v1/models` from healthy
   targets, records runtime IDs, trusts API-provided aliases, and uses runtime
   metadata such as context size, parameter count, vocabulary size, and model
-  size when it is provided. A later discovery pass can enrich an already
-  discovered model after the runtime has loaded it.
+  size when it is provided. Discovery results are persisted per target with a
+  discovery timestamp and hydrated into the catalog on startup. A later
+  discovery pass can enrich an already discovered model after the runtime has
+  loaded it.
 
 ## Request Flow
 
@@ -157,7 +164,8 @@ their repository interfaces. Durable storage lets NeurOn restart without
 forgetting active demand or invalidating plugin keys, so reconciliation
 continues to keep matching targets on after the process comes back.
 
-Target status, startup estimates, and runtime model discovery cache remain
-in-memory observational state. Provider state is still observed on the next
-reconciliation loop, and startup estimates are not used for scheduling
-decisions.
+Runtime model discovery results persist with the configured storage driver so
+NeurOn can restart without waking discovery-only targets just to recover their
+model list. Target status and startup estimates remain in-memory observational
+state. Provider state is still observed on the next reconciliation loop, and
+startup estimates are not used for scheduling decisions.

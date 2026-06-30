@@ -14,8 +14,70 @@ NeurOn can run without a mounted config file. Configuration precedence is:
 2. `CAPACITY_TARGET_KEYS` and scoped environment variables
 3. `CAPACITY_TARGETS_FILE`
 
+If none of those target sources is supplied, NeurOn starts with no capacity
+targets. Providers are also empty unless supplied with config or created in the
+admin UI.
+
 Use JSON when that is convenient, but prefer env-expanded config for container
 deployments where mounting a file is awkward.
+
+Reusable provider definitions can be supplied with `CAPACITY_PROVIDERS_JSON`.
+Existing target config does not require this; a target can still specify a
+provider type such as `aws-ecs`, `docker`, or `runpod` directly. The provider
+management screen only shows explicitly configured or persisted providers.
+Providers can also use env-expanded config:
+
+```env
+CAPACITY_PROVIDER_KEYS=RUNPOD_MAIN
+CAPACITY_PROVIDER_RUNPOD_MAIN_ID=runpod-main
+CAPACITY_PROVIDER_RUNPOD_MAIN_DISPLAY_NAME=RunPod Main
+CAPACITY_PROVIDER_RUNPOD_MAIN_TYPE=runpod
+# Default is false. Enable only when NeurOn should create provider resources.
+CAPACITY_PROVIDER_RUNPOD_MAIN_PROVISIONING_ENABLED=false
+```
+
+Admins can also add persisted providers from `/admin/providers`. Providers from
+configuration are shown there as read-only; providers created in the UI are
+stored with the configured storage driver.
+Admins can add persisted targets from `/admin/targets`. Targets from
+configuration are shown there as read-only; targets created in the UI are stored
+with the configured storage driver and become available to reservations and the
+reconciler immediately.
+Both screens show copyable declarative JSON and environment-variable forms for
+each provider or target. Config-backed rows also include a `Copy to DB` action
+for migrating declarative setups into the configured storage driver.
+
+## Runtime Profiles
+
+Runtime profiles describe provisionable runtime defaults in provider-neutral
+terms. The built-in profile is:
+
+```json
+{
+  "id": "prefer",
+  "name": "PreFer",
+  "type": "docker",
+  "image": "ghcr.io/cvalusek/prefer:latest",
+  "volumes": {
+    "/models": "prefer-model-cache"
+  }
+}
+```
+
+For Docker-style runtimes, `port` defaults to `8080`, `health` defaults to
+`/health`, `api` defaults to `/v1`, and `discovery` defaults to `true`.
+Providers translate those generic profile fields into their own provisioning
+requests. For example, RunPod derives its Pod image from the profile `image`
+rather than requiring RunPod-specific profile config.
+The PreFer profile also declares that `/models` is backed by the
+`prefer-model-cache` volume. Docker provisioning currently creates containers
+with all GPUs available by default.
+
+Additional profiles can be supplied with `RUNTIME_PROFILES_JSON`:
+
+```env
+RUNTIME_PROFILES_JSON=[{"id":"prefer-nightly","name":"PreFer Nightly","type":"docker","image":"ghcr.io/cvalusek/prefer:nightly","port":8080}]
+```
 
 ## Core Environment
 
@@ -29,6 +91,7 @@ deployments where mounting a file is awkward.
 - `AWS_REGION`
 - `LITELLM_API_BASE_URL`
 - `LITELLM_API_KEY`
+- `CAPACITY_PROVIDERS_JSON`
 - `RECONCILER_INTERVAL_SECONDS`
 - `RESERVATION_STATUS_POLL_SECONDS`
 - `ADMIN_STATUS_POLL_SECONDS`
@@ -70,8 +133,9 @@ DATABASE_URL=postgres://neuron:secret@postgres:5432/neuron
 
 Local Compose defaults to SQLite at `/app/data/neuron.db` and mounts the
 repository `./data` directory into `/app/data`. SQLite and Postgres persist
-active reservations and `sk-neuron-...` API keys across NeurOn restarts. Target
-status, runtime discovery cache, and startup estimates remain in memory because
+active reservations, `sk-neuron-...` API keys, configured providers, persisted
+targets, target provisioning jobs, and target model discovery results across
+NeurOn restarts. Target status and startup estimates remain in memory because
 they are observational and rebuilt by reconciliation.
 
 ## Auth And API Keys
@@ -109,8 +173,20 @@ Then define scoped variables:
 CAPACITY_TARGET_MULTIPLE_MOE_96GB_ID=gpu-pool-96gb
 CAPACITY_TARGET_MULTIPLE_MOE_96GB_DISPLAY_NAME=GPU Pool 96GB
 CAPACITY_TARGET_MULTIPLE_MOE_96GB_PROVIDER=aws-ecs
-CAPACITY_TARGET_MULTIPLE_MOE_96GB_HEALTH_CHECK_URL=http://llm-96gb.internal:8080/health
+CAPACITY_TARGET_MULTIPLE_MOE_96GB_HEALTH_URL=http://llm-96gb.internal:8080/health
 ```
+
+Use `PROVIDER_ID` when the target should reference a reusable provider
+definition:
+
+```env
+CAPACITY_TARGET_RUNPOD_QWEN_PROVIDER_ID=runpod-main
+```
+
+When a target uses JSON config, `providerId` works the same way. If `provider`
+is omitted and `providerId` references a declared provider, NeurOn derives the
+target provider type from that provider definition. Set `PROVIDER` explicitly
+when no reusable provider definition exists.
 
 Model keys are nested under a target:
 
@@ -151,21 +227,37 @@ CAPACITY_TARGET_RUNPOD_RUNPOD_RUNTIME_PORT=8080
 CAPACITY_TARGET_RUNPOD_TRAFFIC_MODEL_PREFIXES=prefer/
 ```
 
-`HEALTH_CHECK_URL` is optional for RunPod targets. Without it, NeurOn trusts
+For multiple RunPod targets that share one account/API key, put shared API
+settings in `CAPACITY_PROVIDERS_JSON` and reference the provider from each
+target:
+
+```env
+CAPACITY_PROVIDERS_JSON=[{"id":"runpod-main","displayName":"RunPod Main","type":"runpod","provisioning":{"enabled":false},"config":{"runpod":{"apiKeyEnv":"RUNPOD_API_KEY"}}}]
+CAPACITY_TARGET_RUNPOD_QWEN_PROVIDER_ID=runpod-main
+CAPACITY_TARGET_RUNPOD_QWEN_RUNPOD_POD_ID=pod-qwen
+```
+
+Target-level RunPod fields override provider-level RunPod fields. This lets
+one provider define shared access while each target keeps its Pod ID and
+runtime port.
+
+`HEALTH_URL` is optional for RunPod targets. Without it, NeurOn trusts
 RunPod Pod status for capacity readiness. For model discovery, NeurOn infers
 RunPod's proxy URL as `https://<pod-id>-<port>.proxy.runpod.net/v1` from
-`RUNPOD_POD_ID` and `RUNPOD_RUNTIME_PORT`. Set `RUNTIME_API_BASE_URL` only when
+`RUNPOD_POD_ID` and `RUNPOD_RUNTIME_PORT`. Set `API_URL` only when
 that inferred URL is not right for your runtime.
 
-For installable targets, provide the RunPod create Pod request body as JSON:
+For explicitly provisioned RunPod targets, a create Pod request body can be
+supplied as JSON:
 
 ```env
 CAPACITY_TARGET_RUNPOD_RUNPOD_CREATE_JSON={"name":"prefer","imageName":"ghcr.io/cvalusek/prefer:latest"}
 ```
 
-Created Pod IDs are held in memory for v1. For durable deployments, prefer
-configuring an existing `podId` until persistent target installation state
-exists.
+Targets created through the provider UI use runtime profiles instead. The
+provisioning job is persisted so creation can be resumed or inspected after
+restart. Providers do not create resources during ordinary target start unless
+that behavior is added later as an explicit policy.
 
 `LITELLM_BACKEND_NAME` and target-level `LITELLM_API_BASE_URL` are optional.
 They are only for syncing a LiteLLM backend entry when a target becomes healthy;
@@ -195,9 +287,14 @@ CAPACITY_TARGET_LOCAL_TRAFFIC_MODEL_PREFIXES=prefer/
 ```
 
 Set `DOCKER_IMAGE` and optional Docker run fields only when NeurOn should
-install a missing container. If the container already exists, NeurOn can start,
-stop, inspect, and discover models from it with just the container name and a
-runtime URL such as `HEALTH_CHECK_URL`.
+provision a missing container through an explicit admin action. If the
+container already exists, NeurOn can start, stop, inspect, and discover models
+from it with just the container name and a runtime URL such as
+`HEALTH_URL`.
+When creating a PreFer Docker target through the admin UI, enter only the model
+volume name, for example `prefer-model-cache`; the runtime profile supplies the
+container path. The lower-level `DOCKER_VOLUMES` setting is still available for
+raw Docker overrides.
 
 Set `TRAFFIC_MODEL_PREFIXES` when LiteLLM logs model names with a route prefix,
 for example `prefer/gemma-4b-e2b`. Traffic whose model starts with one of those
@@ -233,9 +330,10 @@ behind one or more Compose profiles.
 
 Explicit model config is the normal source of truth. Runtime discovery enriches
 models with IDs reported by the backend. It should not be treated as a solver.
-When a target has no configured models, NeurOn bootstraps discovery on startup
-by starting the target, waiting for health, reading `/v1/models`, and stopping
-the target again. Set `bootstrapOnStartup=false` to opt out.
+When a target has no configured or cached models, NeurOn bootstraps discovery
+on startup by starting the target, waiting for health, reading `/v1/models`,
+persisting the discovered models with a discovery timestamp, and stopping the
+target again. Set `bootstrapOnStartup=false` to opt out.
 
 Optional bootstrap:
 
@@ -245,7 +343,8 @@ CAPACITY_TARGET_MULTIPLE_MOE_96GB_MODEL_DISCOVERY_BOOTSTRAP_TIMEOUT_SECONDS=600
 ```
 
 When enabled, NeurOn starts the target once before accepting requests, waits for
-health, reads `/v1/models`, records runtime IDs, and stops the target again.
+health, reads `/v1/models`, records runtime IDs, persists the discovery result,
+and stops the target again.
 
 ## Model Warmup
 
@@ -256,8 +355,8 @@ waiting until the runtime has loaded the model, not merely until the process is
 up.
 
 Warmup uses `MODEL_WARMUP_API_BASE_URL` when configured. Otherwise it falls back
-to `RUNTIME_API_BASE_URL`, target-level LiteLLM `apiBaseUrl`, an inferred RunPod
-proxy URL, or the `/v1` origin derived from `HEALTH_CHECK_URL`.
+to `API_URL`, target-level LiteLLM `apiBaseUrl`, an inferred RunPod
+proxy URL, or the `/v1` origin derived from `HEALTH_URL`.
 
 Env-expanded target settings:
 

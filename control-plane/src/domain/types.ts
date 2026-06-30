@@ -1,5 +1,5 @@
 export type ReservationStatus = "active" | "done" | "expired" | "failed";
-export type RuntimeState = "stopped" | "provisioning" | "healthy" | "stopping" | "failed";
+export type RuntimeState = "stopped" | "starting" | "healthy" | "stopping" | "failed";
 export type DesiredState = "on" | "off";
 
 export interface AuthenticatedUser {
@@ -77,6 +77,60 @@ export interface RunPodTargetConfig {
   create?: Record<string, unknown>;
 }
 
+export interface NeuronTargetConfig {
+  targetId: string;
+}
+
+export interface RuntimeProfile {
+  id: string;
+  name: string;
+  type: "docker" | string;
+  image?: string;
+  port?: number;
+  health?: string;
+  api?: string;
+  volumes?: Record<string, string>;
+  env?: Record<string, string>;
+  discovery?: boolean;
+}
+
+export type TargetProvisioningJobStatus = "draft" | "running" | "completed" | "failed" | "aborting" | "aborted";
+
+export interface TargetProvisioningResource {
+  providerType: string;
+  resourceType: string;
+  resourceId: string;
+  cleanupState: "pending" | "deleted" | "unknown";
+}
+
+export interface TargetProvisioningJob {
+  id: string;
+  status: TargetProvisioningJobStatus;
+  providerId: string;
+  providerType: string;
+  runtimeProfileId?: string;
+  targetId: string;
+  targetDraft: CapacityTarget;
+  createdResources: TargetProvisioningResource[];
+  errorMessage?: string;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface CapacityProviderDefinition {
+  id: string;
+  displayName: string;
+  type: "aws-ecs" | "aws-ecs-asg" | string;
+  provisioning?: {
+    enabled?: boolean;
+  };
+  config?: {
+    runpod?: Pick<RunPodTargetConfig, "apiKey" | "apiKeyEnv" | "apiBaseUrl">;
+    [key: string]: unknown;
+  };
+  credentialId?: string;
+}
+
 export interface ConfiguredModel {
   id: string;
   displayName?: string;
@@ -106,6 +160,7 @@ export interface CapacityTarget {
   id: string;
   displayName: string;
   provider: "aws-ecs" | string;
+  providerId?: string;
   modelIds: string[];
   models?: ConfiguredModel[];
   modelDiscovery?: RuntimeModelDiscoveryConfig;
@@ -117,8 +172,9 @@ export interface CapacityTarget {
   docker?: DockerContainerTargetConfig;
   dockerCompose?: DockerComposeTargetConfig;
   runpod?: RunPodTargetConfig;
-  healthCheckUrl?: string;
-  runtimeApiBaseUrl?: string;
+  neuron?: NeuronTargetConfig;
+  healthUrl?: string;
+  apiUrl?: string;
   litellm?: LiteLlmTargetConfig;
 }
 
@@ -152,6 +208,19 @@ export interface RuntimeModelMeta {
   size?: number;
 }
 
+export interface RuntimeDiscoveredModel {
+  id?: string;
+  aliases?: string[];
+  tags?: Array<string | { label?: string; title?: string }>;
+  meta?: RuntimeModelMeta | null;
+}
+
+export interface TargetModelDiscoveryRecord {
+  targetId: string;
+  models: RuntimeDiscoveredModel[];
+  discoveredAt: Date;
+}
+
 export interface TargetStatus {
   targetId: string;
   desired: DesiredState;
@@ -159,7 +228,7 @@ export interface TargetStatus {
   message: string;
   lastCheckedAt?: Date;
   lastHealthyAt?: Date;
-  provisioningStartedAt?: Date;
+  startingStartedAt?: Date;
   startupDurationsSeconds?: number[];
   startupEstimate?: {
     minSeconds: number;
@@ -185,6 +254,8 @@ export interface AppConfig {
   litellmApiKey?: string;
   litellmTrafficPollSeconds: number;
   litellmTrafficLookbackSeconds: number;
+  runtimeProfiles: RuntimeProfile[];
+  capacityProviders: CapacityProviderDefinition[];
   capacityTargets: CapacityTarget[];
   reconcilerIntervalSeconds: number;
   reservationStatusPollSeconds: number;

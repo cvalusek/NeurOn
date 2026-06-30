@@ -7,7 +7,7 @@ const target: CapacityTarget = {
   displayName: "RunPod Test",
   provider: "runpod",
   modelIds: [],
-  healthCheckUrl: "https://example.test/health",
+  healthUrl: "https://example.test/health",
   runpod: {
     podId: "pod-123",
     apiKey: "secret"
@@ -46,7 +46,7 @@ describe("RunPodCapacityProvider", () => {
     expect(status.observed).toBe("healthy");
   });
 
-  it("creates a Pod when installing an uninstalled target", async () => {
+  it("creates a Pod when provisioning a target", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async () => ({
@@ -54,7 +54,7 @@ describe("RunPodCapacityProvider", () => {
         text: async () => JSON.stringify({ id: "created-pod" })
       }))
     );
-    const installTarget: CapacityTarget = {
+    const provisionTarget: CapacityTarget = {
       ...target,
       runpod: {
         apiKey: "secret",
@@ -65,8 +65,8 @@ describe("RunPodCapacityProvider", () => {
       }
     };
 
-    await new RunPodCapacityProvider().installTarget(installTarget);
+    await new RunPodCapacityProvider().provisionTarget(provisionTarget);
 
-    expect(installTarget.runpod?.podId).toBe("created-pod");
+    expect(provisionTarget.runpod?.podId).toBe("created-pod");
   });
 });

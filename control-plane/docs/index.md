@@ -8,6 +8,9 @@
 * [Configuration](configuration.md) - JSON, file, and env-expanded config.
 * [Integrations](integrations.md) - API keys, OpenAPI, Swagger UI, and MCP.
 * [Providers](providers.md) - Docker Compose, AWS ECS/ASG, and LiteLLM.
+* [Targets](targets.md) - Target config, provider relationships, and runtime profiles.
+* [Provisioning](provisioning.md) - Explicit resource creation and persisted jobs.
+* [Discovery](discovery.md) - Runtime model discovery and bootstrap behavior.
 * [UI](ui.md) - Target-first interaction model and server-rendered pages.
 * [Operations](operations.md) - Deployment, IAM, runtime behavior, and limits.
 

@@ -23,8 +23,12 @@ import { registerUiRoutes } from "./routes/ui.js";
 import { ApiKeyService } from "./services/ApiKeyService.js";
 import { ModelCatalog } from "./services/ModelCatalog.js";
 import { ModelWarmupService } from "./services/ModelWarmupService.js";
+import { ProviderCatalog } from "./services/ProviderCatalog.js";
+import { ProviderService } from "./services/ProviderService.js";
 import { ReservationService } from "./services/ReservationService.js";
-import { RuntimeModelDiscovery } from "./services/RuntimeModelDiscovery.js";
+import { RuntimeModelDiscovery, shouldBootstrapRuntimeModels } from "./services/RuntimeModelDiscovery.js";
+import { TargetProvisioningService } from "./services/TargetProvisioningService.js";
+import { TargetService } from "./services/TargetService.js";
 import { TrafficKeepaliveService } from "./services/TrafficKeepaliveService.js";
 import { TrafficPoller } from "./services/TrafficPoller.js";
 
@@ -32,8 +36,14 @@ export async function buildApp(config: AppConfig, models: ModelDefinition[]) {
   const app = Fastify({ logger: true });
   const reservationRepository = await createReservationRepository(config.storage);
   const apiKeys = reservationRepository.apiKeys;
+  const providerCatalog = new ProviderCatalog(config.capacityProviders);
+  const providerService = new ProviderService(config.capacityProviders, reservationRepository.capacityProviders, providerCatalog);
+  await providerService.initialize();
   const authProvider = new SharedPasswordAuthProvider(config.sharedPassword, config.adminUsers, config.cookieSecret, apiKeys);
   const catalog = new ModelCatalog(models, config.capacityTargets);
+  const targetService = new TargetService([...config.capacityTargets], reservationRepository.capacityTargets, catalog, config.capacityTargets, reservationRepository.targetModelDiscoveries);
+  await targetService.initialize();
+  const targetProvisioningService = new TargetProvisioningService(reservationRepository.targetProvisioningJobs);
   const reservations = reservationRepository.repository;
   const statuses = new InMemoryTargetStatusRepository();
   const capacityProvider =
@@ -44,13 +54,14 @@ export async function buildApp(config: AppConfig, models: ModelDefinition[]) {
           docker: new DockerContainerCapacityProvider(),
           "docker-compose": new DockerComposeCapacityProvider(),
           runpod: new RunPodCapacityProvider()
-        });
+        }, providerCatalog);
   const backendConfigSync = config.litellmApiBaseUrl && config.litellmApiKey ? new LiteLlmBackendConfigSync(config.litellmApiBaseUrl, config.litellmApiKey) : new NoopBackendConfigSync();
   const reservationService = new ReservationService(reservations, catalog);
   const apiKeyService = new ApiKeyService(apiKeys);
   const trafficKeepalive = new TrafficKeepaliveService(reservations, statuses);
   const healthChecker = new HealthChecker(config.healthCheckTimeoutSeconds);
-  const runtimeModelDiscovery = new RuntimeModelDiscovery(catalog);
+  const runtimeModelDiscovery = new RuntimeModelDiscovery(catalog, reservationRepository.targetModelDiscoveries);
+  await runtimeModelDiscovery.hydrateCachedTargets();
   const modelWarmup = new ModelWarmupService(catalog);
   const trafficPoller =
     config.litellmApiBaseUrl && config.litellmApiKey && config.litellmTrafficPollSeconds > 0
@@ -100,14 +111,14 @@ export async function buildApp(config: AppConfig, models: ModelDefinition[]) {
     request.user = user;
   });
 
-  registerApiRoutes(app, catalog, reservations, statuses, apiKeyService, reservationService, trafficKeepalive, reconciler, capacityProvider, runtimeModelDiscovery, healthChecker);
+  registerApiRoutes(app, catalog, reservations, statuses, apiKeyService, reservationService, trafficKeepalive, reconciler, capacityProvider, runtimeModelDiscovery, healthChecker, targetService, targetProvisioningService);
   registerMcpRoutes(app, catalog, reservations, statuses, reservationService);
-  registerUiRoutes(app, config, authProvider, catalog, apiKeyService, reservationService);
+  registerUiRoutes(app, config, authProvider, catalog, apiKeyService, reservationService, providerService, targetService, targetProvisioningService);
 
   const bootstrapRuntimeModels = async () => {
-    for (const target of config.capacityTargets.filter(shouldBootstrapRuntimeModels)) {
+    for (const target of catalog.listTargets().filter(shouldBootstrapRuntimeModels)) {
       try {
-        statuses.set({ targetId: target.id, desired: "on", observed: "provisioning", message: "Runtime model discovery bootstrap starting", lastCheckedAt: new Date() });
+        statuses.set({ targetId: target.id, desired: "on", observed: "starting", message: "Runtime model discovery bootstrap starting", lastCheckedAt: new Date() });
         await runtimeModelDiscovery.bootstrapTarget(target, capacityProvider, healthChecker);
         statuses.set({ targetId: target.id, desired: "off", observed: "stopped", message: "Runtime model discovery bootstrap complete", lastCheckedAt: new Date() });
         app.log.info({ targetId: target.id }, "runtime model discovery bootstrap complete");
@@ -125,10 +136,4 @@ export async function buildApp(config: AppConfig, models: ModelDefinition[]) {
 function errorForLog(error: unknown): { message: string; name?: string; stack?: string } {
   if (error instanceof Error) return { name: error.name, message: error.message, stack: error.stack };
   return { message: String(error) };
-}
-
-export function shouldBootstrapRuntimeModels(target: { modelIds: string[]; models?: unknown[]; modelDiscovery?: { bootstrapOnStartup?: boolean } }): boolean {
-  if (target.modelDiscovery?.bootstrapOnStartup === false) return false;
-  if (target.modelDiscovery?.bootstrapOnStartup === true) return true;
-  return target.modelIds.length === 0 && (target.models?.length ?? 0) === 0;
 }

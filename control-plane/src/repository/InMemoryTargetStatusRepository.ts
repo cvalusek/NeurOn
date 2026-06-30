@@ -23,7 +23,7 @@ function cloneStatus(status: TargetStatus): TargetStatus {
     ...status,
     lastCheckedAt: status.lastCheckedAt ? new Date(status.lastCheckedAt) : undefined,
     lastHealthyAt: status.lastHealthyAt ? new Date(status.lastHealthyAt) : undefined,
-    provisioningStartedAt: status.provisioningStartedAt ? new Date(status.provisioningStartedAt) : undefined,
+    startingStartedAt: status.startingStartedAt ? new Date(status.startingStartedAt) : undefined,
     startupDurationsSeconds: status.startupDurationsSeconds ? [...status.startupDurationsSeconds] : undefined,
     startupEstimate: status.startupEstimate ? { ...status.startupEstimate } : undefined
   };

@@ -29,21 +29,20 @@ Open `http://localhost:8090`, sign in with any username and `dev-password`, or
 use Basic Auth for API calls. Users can create API keys from `/api-keys` for
 Bearer-auth plugin and MCP integrations.
 
-From the repository root, Docker Compose runs NeurOn with the Docker provider
-and the default PreFer container target. Local Compose stores reservations in
-`./data/neuron.db` so restarting NeurOn does not forget active demand or API
-keys:
+From the repository root, Docker Compose runs NeurOn without starter providers
+or targets. Local Compose stores reservations in `./data/neuron.db` so
+restarting NeurOn does not forget active demand, configured providers/targets,
+or API keys:
 
 ```bash
 docker compose up --build control-plane
 ```
 
-For app-only development, set `USE_FAKE_PROVIDER=true` and
+For app-only development, set `USE_FAKE_PROVIDER=true` and optionally
 `CAPACITY_TARGETS_FILE=examples/capacity-targets.local-fake.json`.
 
-Without `CAPACITY_TARGETS_FILE`, local development defaults to the normal PreFer
-Docker target in `examples/capacity-targets.prefer-docker.json`, which expects a
-container named `prefer`.
+Without target configuration, NeurOn starts with no providers or targets. Add
+them from Admin or supply declarative config.
 
 ## Runtime Targets
 
@@ -57,16 +56,17 @@ control with one of:
 The examples directory includes:
 
 - `capacity-targets.local-fake.json` for local UI/API development
-- `capacity-targets.prefer-docker.json` as the default local PreFer container
-  example
+- `capacity-targets.prefer-docker.json` as a local PreFer container example
 - `capacity-targets.local-docker.json` as a bring-your-own Docker Compose
   runtime example
 - `capacity-targets.runpod.example.json` as a RunPod Pod example
 - `capacity-targets.example.json` as an AWS ECS/ASG example
 
 For Docker targets, NeurOn starts and stops the configured container. If an
-image is configured and the container is missing, NeurOn installs it by pulling
-the image and creating the named container.
+image is configured and the container is missing, an admin can explicitly
+provision it by pulling the image and creating the named container when the
+provider allows resource creation. The default PreFer profile mounts
+the `prefer-model-cache` volume at `/models` for local model files.
 Use the admin Discover action to temporarily start the runtime, read
 `/v1/models`, add those runtime models as selectable choices, and stop the
 target again.
@@ -103,7 +103,7 @@ Environment variables:
 | `DATABASE_URL` | unset | Postgres connection string when `STORAGE_DRIVER=postgres` |
 | `CAPACITY_TARGETS_JSON` | unset | JSON array of targets |
 | `CAPACITY_TARGET_KEYS` | unset | Comma-separated target keys for env-expanded config |
-| `CAPACITY_TARGETS_FILE` | `examples/capacity-targets.prefer-docker.json` | Local target config file |
+| `CAPACITY_TARGETS_FILE` | unset | Local target config file |
 | `RECONCILER_INTERVAL_SECONDS` | `60` | Background reconcile loop |
 | `RESERVATION_STATUS_POLL_SECONDS` | `10` | Reservation detail polling |
 | `ADMIN_STATUS_POLL_SECONDS` | `30` | Main/admin status polling |

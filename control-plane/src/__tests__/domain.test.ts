@@ -4,9 +4,11 @@ import type { CapacityTarget, ModelDefinition } from "../domain/types.js";
 import { NoopBackendConfigSync } from "../litellm/LiteLlmBackendConfigSync.js";
 import { Reconciler } from "../reconciler/Reconciler.js";
 import { InMemoryReservationRepository } from "../repository/InMemoryReservationRepository.js";
+import { InMemoryTargetModelDiscoveryRepository } from "../repository/InMemoryTargetModelDiscoveryRepository.js";
 import { InMemoryTargetStatusRepository } from "../repository/InMemoryTargetStatusRepository.js";
 import { ModelCatalog } from "../services/ModelCatalog.js";
 import { ReservationService } from "../services/ReservationService.js";
+import { RuntimeModelDiscovery } from "../services/RuntimeModelDiscovery.js";
 import { TrafficKeepaliveService } from "../services/TrafficKeepaliveService.js";
 
 const target: CapacityTarget = {
@@ -14,7 +16,7 @@ const target: CapacityTarget = {
   displayName: "GPU Pool 96GB",
   provider: "aws-ecs",
   modelIds: ["qwen", "gemma"],
-  healthCheckUrl: "http://example.test/health"
+  healthUrl: "http://example.test/health"
 };
 
 const models: ModelDefinition[] = [
@@ -92,7 +94,7 @@ describe("reservation behavior", () => {
   });
 
   it("adds discovered runtime models as selectable catalog entries", () => {
-    const discoveryTarget: CapacityTarget = { id: "discovery", displayName: "Discovery", provider: "docker", modelIds: [], healthCheckUrl: "http://example.test/health" };
+    const discoveryTarget: CapacityTarget = { id: "discovery", displayName: "Discovery", provider: "docker", modelIds: [], healthUrl: "http://example.test/health" };
     const catalog = new ModelCatalog([], [discoveryTarget]);
     catalog.recordRuntimeModels(discoveryTarget.id, [
       { id: "default" },
@@ -133,7 +135,7 @@ describe("reservation behavior", () => {
   });
 
   it("refreshes discovered models with loaded runtime metadata", () => {
-    const discoveryTarget: CapacityTarget = { id: "discovery", displayName: "Discovery", provider: "docker", modelIds: [], healthCheckUrl: "http://example.test/health" };
+    const discoveryTarget: CapacityTarget = { id: "discovery", displayName: "Discovery", provider: "docker", modelIds: [], healthUrl: "http://example.test/health" };
     const catalog = new ModelCatalog([], [discoveryTarget]);
     catalog.recordRuntimeModels(discoveryTarget.id, [{ id: "unsloth/Qwen3.6-35B-A3B-MTP-GGUF:UD-Q6_K_XL", aliases: ["qwen-3.6"] }]);
     catalog.recordRuntimeModels(discoveryTarget.id, [
@@ -161,6 +163,22 @@ describe("reservation behavior", () => {
         size: 20_218_236_544
       })
     });
+  });
+
+  it("hydrates discovered models from the discovery cache", async () => {
+    const discoveryTarget: CapacityTarget = { id: "discovery", displayName: "Discovery", provider: "docker", modelIds: [], healthUrl: "http://example.test/health" };
+    const repository = new InMemoryTargetModelDiscoveryRepository();
+    await repository.record({
+      targetId: discoveryTarget.id,
+      discoveredAt: new Date("2026-06-29T12:00:00.000Z"),
+      models: [{ id: "unsloth/Qwen3.6-35B-A3B-MTP-GGUF:UD-Q6_K_XL", aliases: ["qwen-3.6"] }]
+    });
+
+    const catalog = new ModelCatalog([], [discoveryTarget]);
+    await new RuntimeModelDiscovery(catalog, repository).hydrateCachedTargets();
+
+    expect(catalog.getModel("qwen-3.6")?.id).toBe("unsloth/Qwen3.6-35B-A3B-MTP-GGUF:UD-Q6_K_XL");
+    expect(discoveryTarget.modelIds).toEqual(["unsloth/Qwen3.6-35B-A3B-MTP-GGUF:UD-Q6_K_XL"]);
   });
 
   it("marks active reservations failed when provider reports failure", async () => {

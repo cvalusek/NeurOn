@@ -26,7 +26,7 @@ On every reconciliation pass:
 8. Store simple target status.
 9. Sync LiteLLM when a target first becomes healthy.
 10. Refresh runtime model IDs when a target is healthy.
-11. Mark relevant active reservations failed if target provisioning fails.
+11. Mark relevant active reservations failed if target starting fails.
 
 ## Desired State
 
@@ -43,7 +43,7 @@ stop a target that another active reservation still needs.
 The UI and API expose intentionally simple runtime states:
 
 - `stopped`
-- `provisioning`
+- `starting`
 - `healthy`
 - `stopping`
 - `failed`
@@ -65,7 +65,7 @@ keeps carrying its previous window.
 
 ## Startup Estimates
 
-Target status stores recent provisioning-to-healthy durations in memory. The UI
+Target status stores recent starting-to-healthy durations in memory. The UI
 uses these samples to show an estimate like:
 
 ```text

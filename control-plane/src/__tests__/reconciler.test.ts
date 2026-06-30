@@ -6,7 +6,7 @@ import { Reconciler } from "../reconciler/Reconciler.js";
 import { InMemoryReservationRepository } from "../repository/InMemoryReservationRepository.js";
 import { InMemoryTargetStatusRepository } from "../repository/InMemoryTargetStatusRepository.js";
 
-const target: CapacityTarget = { id: "t1", displayName: "T1", provider: "aws-ecs", modelIds: ["m1"], healthCheckUrl: "http://example.test" };
+const target: CapacityTarget = { id: "t1", displayName: "T1", provider: "aws-ecs", modelIds: ["m1"], healthUrl: "http://example.test" };
 
 describe("reconciler decisions", () => {
   it("turns targets off when no active reservation needs them", async () => {
@@ -31,14 +31,14 @@ describe("reconciler decisions", () => {
     expect(statuses.get("t1")?.observed).toBe("failed");
   });
 
-  it("records startup duration estimates from provisioning to healthy", async () => {
+  it("records startup duration estimates from Starting to healthy", async () => {
     const repository = new InMemoryReservationRepository();
     const statuses = new InMemoryTargetStatusRepository();
     const provider = new FakeCapacityProvider();
     const reconciler = new Reconciler([target], repository, statuses, provider, new NoopBackendConfigSync());
     const startedAt = new Date("2026-06-25T10:00:00.000Z");
     await repository.create({ username: "clint", modelIds: ["m1"], targetIds: ["t1"], createdAt: startedAt, expiresAt: new Date("2026-06-25T11:00:00.000Z"), status: "active" });
-    provider.statuses.set("t1", { observed: "provisioning", message: "Provisioning" });
+    provider.statuses.set("t1", { observed: "starting", message: "starting" });
     await reconciler.reconcile(startedAt);
     provider.statuses.set("t1", { observed: "healthy", message: "Running" });
     await reconciler.reconcile(new Date("2026-06-25T10:02:00.000Z"));
@@ -70,7 +70,7 @@ describe("reconciler decisions", () => {
     expect(provider.desired.get("t1")).toBe("on");
   });
 
-  it("keeps a target provisioning until requested model warmup succeeds", async () => {
+  it("keeps a target starting until requested model warmup succeeds", async () => {
     const repository = new InMemoryReservationRepository();
     const statuses = new InMemoryTargetStatusRepository();
     const provider = new FakeCapacityProvider();
@@ -95,7 +95,7 @@ describe("reconciler decisions", () => {
     await reconciler.reconcile(new Date("2026-06-25T10:00:00.000Z"));
 
     expect(modelWarmup.calls).toEqual([["m1"]]);
-    expect(statuses.get("t1")).toMatchObject({ desired: "on", observed: "provisioning", message: "model still loading" });
+    expect(statuses.get("t1")).toMatchObject({ desired: "on", observed: "starting", message: "model still loading" });
     expect((await repository.list())[0].status).toBe("active");
   });
 

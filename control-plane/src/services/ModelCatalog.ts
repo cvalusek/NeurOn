@@ -32,6 +32,28 @@ export class ModelCatalog {
     return this.targetById.get(id);
   }
 
+  upsertTarget(target: CapacityTarget): void {
+    this.targetById.set(target.id, target);
+    for (const modelId of target.modelIds) {
+      const existing = this.modelById.get(modelId);
+      if (existing) {
+        existing.targetIds = mergeStrings(existing.targetIds, [target.id]);
+        this.addModelLookups(existing);
+      } else {
+        const model: ModelDefinition = { id: modelId, displayName: modelId, aliases: [modelId], targetIds: [target.id] };
+        this.modelById.set(model.id, model);
+        this.addModelLookups(model);
+      }
+    }
+  }
+
+  removeTarget(targetId: string): void {
+    this.targetById.delete(targetId);
+    for (const model of this.modelById.values()) {
+      model.targetIds = model.targetIds.filter((id) => id !== targetId);
+    }
+  }
+
   recordRuntimeModels(targetId: string, runtimeModels: Array<string | RuntimeModelInfo>): void {
     const runtimeInfos = dedupeRuntimeModels(runtimeModels.map(toRuntimeModelInfo).filter(isSelectableRuntimeModel));
     const runtimeIds = runtimeInfos.map((model) => model.id);

@@ -59,7 +59,7 @@ synthetic traffic reservation, the target remains desired on.
 
 ## Startup Estimates
 
-Startup estimates are based on recent observed transitions from provisioning to
+Startup estimates are based on recent observed transitions from starting to
 healthy. They are shown for operator context only and are not used for capacity
 decisions.
 
@@ -106,8 +106,9 @@ operators should still keep test intent narrow.
 ## Local Development
 
 Local compose uses the Docker provider and mounts the host Docker socket so
-NeurOn can install, start, and stop the configured PreFer container. Treat that
-as trusted local-admin access to Docker. Set `USE_FAKE_PROVIDER=true` for
+NeurOn can provision, start, and stop the configured PreFer container when
+resource creation is enabled. Treat that as trusted local-admin access to
+Docker. Set `USE_FAKE_PROVIDER=true` for
 app-only development or tests. The Docker Compose provider remains available
 for bring-your-own local runtime projects. Netskope/corporate CA builds are
 supported through the compose overlay and `.netskope` Dockerfile.

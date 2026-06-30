@@ -24,6 +24,6 @@
       }
     ],
     "modelsMax": 2,
-    "healthCheckUrl": "http://demo-gpu-pool.local/health"
+    "healthUrl": "http://demo-gpu-pool.local/health"
   }
 ]

@@ -4,7 +4,7 @@ import type { CapacityProviderStatus, CapacityTarget, RunPodTargetConfig } from 
 const defaultApiBaseUrl = "https://rest.runpod.io/v1";
 
 export class RunPodCapacityProvider implements CapacityProvider {
-  async installTarget(target: CapacityTarget): Promise<void> {
+  async provisionTarget(target: CapacityTarget): Promise<Partial<CapacityTarget> | void> {
     const runpod = requireRunPod(target);
     if (runpod.podId) return;
     if (!runpod.create) throw new Error(`Target ${target.id} is missing runpod.podId or runpod.create config`);
@@ -14,11 +14,12 @@ export class RunPodCapacityProvider implements CapacityProvider {
     });
     if (!pod.id) throw new Error("RunPod create Pod response did not include an id");
     runpod.podId = pod.id;
+    return { runpod: { ...runpod } };
   }
 
   async ensureTargetOn(target: CapacityTarget): Promise<void> {
     const runpod = requireRunPod(target);
-    if (!runpod.podId) await this.installTarget(target);
+    if (!runpod.podId) throw new Error(`Target ${target.id} is missing runpod.podId; provision the resource explicitly first`);
     await this.request(runpod, `/pods/${requiredPodId(target)}/start`, { method: "POST" });
   }
 
@@ -30,14 +31,14 @@ export class RunPodCapacityProvider implements CapacityProvider {
 
   async getTargetStatus(target: CapacityTarget): Promise<CapacityProviderStatus> {
     const runpod = requireRunPod(target);
-    if (!runpod.podId) return { observed: "stopped", message: "RunPod Pod is not installed" };
+    if (!runpod.podId) return { observed: "stopped", message: "RunPod Pod is not provisioned" };
     const pod = await this.request<RunPodPod>(runpod, `/pods/${runpod.podId}`, { method: "GET" });
     const desiredStatus = pod.desiredStatus;
     if (desiredStatus === "RUNNING") return { observed: "healthy", message: "RunPod Pod desired status is RUNNING", details: pod as Record<string, unknown> };
     if (desiredStatus === "EXITED" || desiredStatus === "TERMINATED") {
       return { observed: "stopped", message: `RunPod Pod desired status is ${desiredStatus}`, details: pod as Record<string, unknown> };
     }
-    return { observed: "provisioning", message: `RunPod Pod desired status is ${desiredStatus ?? "unknown"}`, details: pod as Record<string, unknown> };
+    return { observed: "starting", message: `RunPod Pod desired status is ${desiredStatus ?? "unknown"}`, details: pod as Record<string, unknown> };
   }
 
   async forceStopTarget(target: CapacityTarget): Promise<void> {
