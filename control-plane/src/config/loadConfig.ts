@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { z } from "zod";
-import type { AppConfig, CapacityProviderDefinition, CapacityTarget, ModelDefinition, RuntimeProfile, StorageConfig } from "../domain/types.js";
+import type { AppConfig, CapacityProviderDefinition, CapacityTarget, ModelDefinition, NeuronProviderConfig, RuntimeProfile, StorageConfig } from "../domain/types.js";
 
 const targetSchema = z.object({
   id: z.string().min(1),
@@ -114,6 +114,16 @@ const providerSchema = z.object({
           apiKey: z.string().optional(),
           apiKeyEnv: z.string().optional(),
           apiBaseUrl: z.string().url().optional()
+        })
+        .optional(),
+      neuron: z
+        .object({
+          apiBaseUrl: z.string().url().optional(),
+          apiKey: z.string().optional(),
+          apiKeyEnv: z.string().optional(),
+          reservationMinutes: z.number().int().positive().optional(),
+          syncTargets: z.boolean().optional(),
+          targetIdPrefix: z.string().optional()
         })
         .optional()
     })
@@ -316,7 +326,11 @@ function loadProviderConfigFromEnv(prefix: string, type: string): Record<string,
     return compactObject({
       neuron: compactObject({
         apiBaseUrl: env(`${prefix}_NEURON_API_BASE_URL`),
-        apiKeyEnv: env(`${prefix}_NEURON_API_KEY_ENV`)
+        apiKey: env(`${prefix}_NEURON_API_KEY`),
+        apiKeyEnv: env(`${prefix}_NEURON_API_KEY_ENV`),
+        reservationMinutes: intOptionalEnv(`${prefix}_NEURON_RESERVATION_MINUTES`),
+        syncTargets: boolEnv(`${prefix}_NEURON_SYNC_TARGETS`),
+        targetIdPrefix: env(`${prefix}_NEURON_TARGET_ID_PREFIX`)
       })
     });
   }
@@ -325,14 +339,16 @@ function loadProviderConfigFromEnv(prefix: string, type: string): Record<string,
 
 async function loadCapacityTargets(providers: CapacityProviderDefinition[]): Promise<CapacityTarget[]> {
   const raw = env("CAPACITY_TARGETS_JSON") ?? (env("CAPACITY_TARGET_KEYS") ? JSON.stringify(loadTargetsFromEnv(providers)) : await readTargetsFile());
-  if (!raw) return [];
-  const parsed = z.array(targetSchema).parse(JSON.parse(raw));
+  const parsed = raw ? z.array(targetSchema).parse(JSON.parse(raw)) : [];
   const providerById = new Map(providers.map((provider) => [provider.id, provider]));
-  return parsed.map((target) => {
+  const configuredTargets = parsed.map((target) => {
     const providerId = target.providerId;
     const provider = normalizeProvider(target.provider ?? providerById.get(providerId ?? "")?.type ?? "aws-ecs");
     return { ...target, provider, providerId: providerId ?? provider };
   });
+  const syncedTargets = await loadSyncedNeuronTargets(providers);
+  const configuredIds = new Set(configuredTargets.map((target) => target.id));
+  return [...configuredTargets, ...syncedTargets.filter((target) => !configuredIds.has(target.id))];
 }
 
 function loadTargetsFromEnv(providers: CapacityProviderDefinition[]): unknown[] {
@@ -458,6 +474,97 @@ function loadNeuronTargetFromEnv(prefix: string): unknown {
   return compactObject({
     targetId: requiredScopedEnv(`${prefix}_NEURON_TARGET_ID`)
   });
+}
+
+async function loadSyncedNeuronTargets(providers: CapacityProviderDefinition[]): Promise<CapacityTarget[]> {
+  const targets: CapacityTarget[] = [];
+  for (const provider of providers.filter((candidate) => candidate.type === "neuron")) {
+    const config = provider.config?.neuron;
+    if (!config?.syncTargets) continue;
+    const remoteTargets = await fetchNeuronTargets(provider, config);
+    targets.push(...remoteTargets);
+  }
+  return targets;
+}
+
+async function fetchNeuronTargets(provider: CapacityProviderDefinition, config: NeuronProviderConfig): Promise<CapacityTarget[]> {
+  const [status, models] = await Promise.all([
+    neuronRequest<NeuronStatusResponse>(config, "/api/status"),
+    neuronRequest<NeuronModelsResponse>(config, "/api/models")
+  ]);
+  return status.capacityTargets.map((target) => {
+    const remoteModelIds = new Set([
+      ...target.modelIds,
+      ...models.models.filter((model) => model.targetIds.includes(target.id)).map((model) => model.id)
+    ]);
+    const localId = `${config.targetIdPrefix ?? `${provider.id}-`}${target.id}`;
+    return {
+      id: localId,
+      displayName: target.displayName,
+      provider: "neuron",
+      providerId: provider.id,
+      modelIds: Array.from(remoteModelIds),
+      models: models.models
+        .filter((model) => model.targetIds.includes(target.id))
+        .map((model) => ({
+          id: model.id,
+          displayName: model.displayName,
+          modelFamily: model.modelFamily,
+          aliases: model.aliases,
+          description: model.description,
+          backendModelIds: model.backendModelIds,
+          contextWindowTokens: model.contextWindowTokens,
+          contextLabel: model.contextLabel
+        })),
+      modelsMax: target.modelsMax,
+      litellmDisplayPrefix: target.litellmDisplayPrefix,
+      healthUrl: target.healthUrl,
+      apiUrl: target.apiUrl,
+      neuron: { targetId: target.id }
+    };
+  });
+}
+
+async function neuronRequest<T>(config: NeuronProviderConfig, path: string): Promise<T> {
+  if (!config.apiBaseUrl) throw new Error("NeurOn provider apiBaseUrl is required when syncTargets is enabled");
+  const key = config.apiKey ?? process.env[config.apiKeyEnv ?? "NEURON_API_KEY"];
+  if (!key) throw new Error(`NeurOn API key is required; set ${config.apiKeyEnv ?? "NEURON_API_KEY"} or neuron.apiKey`);
+  const response = await fetch(`${config.apiBaseUrl.replace(/\/$/, "")}${path}`, {
+    headers: {
+      authorization: `Bearer ${key}`
+    }
+  });
+  if (!response.ok) {
+    const body = await response.text().catch(() => "");
+    throw new Error(`NeurOn API returned ${response.status}${body ? `: ${body}` : ""}`);
+  }
+  return response.json() as Promise<T>;
+}
+
+interface NeuronStatusResponse {
+  capacityTargets: Array<{
+    id: string;
+    displayName: string;
+    modelIds: string[];
+    modelsMax?: number;
+    litellmDisplayPrefix?: string;
+    healthUrl?: string;
+    apiUrl?: string;
+  }>;
+}
+
+interface NeuronModelsResponse {
+  models: Array<{
+    id: string;
+    displayName?: string;
+    modelFamily?: string;
+    aliases?: string[];
+    targetIds: string[];
+    description?: string;
+    backendModelIds?: string[];
+    contextWindowTokens?: number;
+    contextLabel?: string;
+  }>;
 }
 
 function normalizeProviderType(provider: string): CapacityProviderDefinition["type"] {

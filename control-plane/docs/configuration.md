@@ -36,6 +36,16 @@ CAPACITY_PROVIDER_RUNPOD_MAIN_TYPE=runpod
 CAPACITY_PROVIDER_RUNPOD_MAIN_PROVISIONING_ENABLED=false
 ```
 
+Provider-specific env-expanded fields include:
+
+- RunPod: `CAPACITY_PROVIDER_<KEY>_RUNPOD_API_KEY_ENV`,
+  `CAPACITY_PROVIDER_<KEY>_RUNPOD_API_BASE_URL`
+- NeurOn: `CAPACITY_PROVIDER_<KEY>_NEURON_API_BASE_URL`,
+  `CAPACITY_PROVIDER_<KEY>_NEURON_API_KEY_ENV`,
+  `CAPACITY_PROVIDER_<KEY>_NEURON_RESERVATION_MINUTES`,
+  `CAPACITY_PROVIDER_<KEY>_NEURON_SYNC_TARGETS`,
+  `CAPACITY_PROVIDER_<KEY>_NEURON_TARGET_ID_PREFIX`
+
 Admins can also add persisted providers from `/admin/providers`. Providers from
 configuration are shown there as read-only; providers created in the UI are
 stored with the configured storage driver.
@@ -273,6 +283,39 @@ traffic log prefixes. By default, plugin clients can use the first
 `CAPACITY_TARGET_<KEY>_LITELLM_DISPLAY_PREFIX=__empty__` to publish an empty
 prefix from environment config when LiteLLM aliases the prefix away. JSON config
 can use `"litellmDisplayPrefix": ""` directly.
+
+## NeurOn Provider Env Fields
+
+Use a `neuron` provider when another NeurOn instance owns the real runtime
+targets and this NeurOn instance should reserve capacity through it:
+
+```env
+CAPACITY_PROVIDER_KEYS=UPSTREAM
+CAPACITY_PROVIDER_UPSTREAM_ID=upstream
+CAPACITY_PROVIDER_UPSTREAM_DISPLAY_NAME=Upstream NeurOn
+CAPACITY_PROVIDER_UPSTREAM_TYPE=neuron
+CAPACITY_PROVIDER_UPSTREAM_NEURON_API_BASE_URL=https://neuron-upstream.example.com
+CAPACITY_PROVIDER_UPSTREAM_NEURON_API_KEY_ENV=UPSTREAM_NEURON_API_KEY
+CAPACITY_PROVIDER_UPSTREAM_NEURON_SYNC_TARGETS=true
+CAPACITY_PROVIDER_UPSTREAM_NEURON_RESERVATION_MINUTES=5
+```
+
+When `NEURON_SYNC_TARGETS=true`, startup imports upstream targets from
+`/api/status` and upstream model metadata from `/api/models`. Local target IDs
+default to `<provider-id>-<upstream-target-id>`. Set
+`NEURON_TARGET_ID_PREFIX` to override that prefix.
+
+Manually configured NeurOn targets are also supported:
+
+```env
+CAPACITY_TARGET_REMOTE_QWEN_PROVIDER_ID=upstream
+CAPACITY_TARGET_REMOTE_QWEN_DISPLAY_NAME=Remote Qwen
+CAPACITY_TARGET_REMOTE_QWEN_NEURON_TARGET_ID=qwen
+```
+
+The local reconciler creates or extends one upstream reservation per local
+NeurOn target while local demand exists, then ends that upstream reservation
+when demand disappears.
 
 ## Docker Env Fields
 

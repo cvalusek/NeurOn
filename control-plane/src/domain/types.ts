@@ -81,6 +81,15 @@ export interface NeuronTargetConfig {
   targetId: string;
 }
 
+export interface NeuronProviderConfig {
+  apiBaseUrl?: string;
+  apiKey?: string;
+  apiKeyEnv?: string;
+  reservationMinutes?: number;
+  syncTargets?: boolean;
+  targetIdPrefix?: string;
+}
+
 export interface RuntimeProfile {
   id: string;
   name: string;
@@ -126,6 +135,7 @@ export interface CapacityProviderDefinition {
   };
   config?: {
     runpod?: Pick<RunPodTargetConfig, "apiKey" | "apiKeyEnv" | "apiBaseUrl">;
+    neuron?: NeuronProviderConfig;
     [key: string]: unknown;
   };
   credentialId?: string;
@@ -173,6 +183,7 @@ export interface CapacityTarget {
   dockerCompose?: DockerComposeTargetConfig;
   runpod?: RunPodTargetConfig;
   neuron?: NeuronTargetConfig;
+  neuronProvider?: NeuronProviderConfig;
   healthUrl?: string;
   apiUrl?: string;
   litellm?: LiteLlmTargetConfig;

@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { CompositeCapacityProvider } from "../capacity/CompositeCapacityProvider.js";
 import { loadConfig } from "../config/loadConfig.js";
 import type { CapacityProvider } from "../domain/interfaces.js";
@@ -15,6 +15,7 @@ const managedEnv = [
 
 afterEach(() => {
   for (const key of managedEnv) delete process.env[key];
+  vi.restoreAllMocks();
 });
 
 describe("provider definitions", () => {
@@ -139,6 +140,116 @@ describe("provider definitions", () => {
       apiBaseUrl: "https://rest.runpod.io/v1",
       podId: "pod-qwen",
       runtimePort: 8080
+    });
+  });
+
+  it("syncs targets and model metadata from an upstream NeurOn provider", async () => {
+    process.env.CAPACITY_PROVIDERS_JSON = JSON.stringify([
+      {
+        id: "upstream",
+        displayName: "Upstream NeurOn",
+        type: "neuron",
+        config: {
+          neuron: {
+            apiBaseUrl: "https://neuron.example.test",
+            apiKey: "secret",
+            syncTargets: true
+          }
+        }
+      }
+    ]);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        if (url.endsWith("/api/status")) {
+          return {
+            ok: true,
+            json: async () => ({
+              capacityTargets: [
+                {
+                  id: "qwen",
+                  displayName: "Qwen GPU",
+                  modelIds: ["qwen"],
+                  modelsMax: 2,
+                  apiUrl: "https://runtime.example.test"
+                }
+              ]
+            })
+          };
+        }
+        return {
+          ok: true,
+          json: async () => ({
+            models: [
+              {
+                id: "qwen",
+                displayName: "Qwen",
+                aliases: ["qwen", "qwen/latest"],
+                targetIds: ["qwen"],
+                contextWindowTokens: 32768
+              }
+            ]
+          })
+        };
+      })
+    );
+
+    const { config, models } = await loadConfig();
+
+    expect(config.capacityTargets[0]).toMatchObject({
+      id: "upstream-qwen",
+      displayName: "Qwen GPU",
+      provider: "neuron",
+      providerId: "upstream",
+      modelIds: ["qwen"],
+      modelsMax: 2,
+      apiUrl: "https://runtime.example.test",
+      neuron: { targetId: "qwen" }
+    });
+    expect(models[0]).toMatchObject({
+      id: "qwen",
+      displayName: "Qwen",
+      aliases: ["qwen", "qwen/latest"],
+      targetIds: ["upstream-qwen"],
+      contextWindowTokens: 32768
+    });
+  });
+
+  it("materializes provider-level NeurOn config before dispatching to the adapter", async () => {
+    const captured: CapacityTarget[] = [];
+    const neuronProvider: CapacityProvider = {
+      provisionTarget: async () => undefined,
+      ensureTargetOn: async (target) => {
+        captured.push(target);
+      },
+      ensureTargetOff: async () => undefined,
+      getTargetStatus: async (): Promise<CapacityProviderStatus> => ({ observed: "stopped", message: "Stopped" }),
+      forceStopTarget: async () => undefined
+    };
+    const composite = new CompositeCapacityProvider(
+      { neuron: neuronProvider },
+      [
+        {
+          id: "upstream",
+          displayName: "Upstream",
+          type: "neuron",
+          config: { neuron: { apiBaseUrl: "https://neuron.example.test", apiKeyEnv: "UPSTREAM_NEURON_KEY" } }
+        }
+      ]
+    );
+
+    await composite.ensureTargetOn({
+      id: "upstream-qwen",
+      displayName: "Upstream Qwen",
+      provider: "neuron",
+      providerId: "upstream",
+      modelIds: ["qwen"],
+      neuron: { targetId: "qwen" }
+    });
+
+    expect(captured[0].neuronProvider).toEqual({
+      apiBaseUrl: "https://neuron.example.test",
+      apiKeyEnv: "UPSTREAM_NEURON_KEY"
     });
   });
 

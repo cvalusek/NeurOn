@@ -1,8 +1,8 @@
 ---
 type: Reference
 title: Providers
-description: Capacity, Docker Compose, AWS ECS/ASG, and LiteLLM provider behavior.
-tags: [providers, aws, docker, litellm]
+description: Capacity, Docker Compose, AWS ECS/ASG, NeurOn, and LiteLLM provider behavior.
+tags: [providers, aws, docker, neuron, litellm]
 timestamp: 2026-06-25T00:00:00Z
 ---
 
@@ -126,6 +126,45 @@ Status:
 ```bash
 GET /v1/pods/{podId}
 ```
+
+## NeurOn
+
+The NeurOn provider delegates capacity to another NeurOn instance. It is used
+when this control plane should expose targets from an upstream control plane
+while keeping local reservations and API keys local.
+
+Provider-level config holds the upstream API endpoint and credential:
+
+```json
+{
+  "id": "upstream",
+  "displayName": "Upstream NeurOn",
+  "type": "neuron",
+  "config": {
+    "neuron": {
+      "apiBaseUrl": "https://neuron-upstream.example.com",
+      "apiKeyEnv": "UPSTREAM_NEURON_API_KEY",
+      "syncTargets": true,
+      "reservationMinutes": 5
+    }
+  }
+}
+```
+
+When `syncTargets` is true, startup reads upstream `/api/status` and
+`/api/models`, then materializes local targets whose IDs are prefixed with the
+provider ID by default, for example `upstream-gpu-pool`. Each synced target
+stores the upstream target ID in `neuron.targetId`.
+
+For lifecycle, `ensureTargetOn` creates an upstream reservation for the
+upstream target and later extends that same reservation from now. `ensureTargetOff`
+ends the upstream reservation. The upstream reservation ID remains private to
+the provider adapter; local reservation ownership and MCP `end_reservation`
+scoping are unchanged.
+
+Status reads upstream `/api/status` and mirrors the upstream target's observed
+state and message. Provisioning is not supported because NeurOn provider
+targets are discovered from the upstream instance.
 
 ## Docker Container
 

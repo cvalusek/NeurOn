@@ -62,5 +62,8 @@ function effectiveTarget(target: CapacityTarget, provider: CapacityProviderDefin
       ...(target.runpod ?? {})
     };
   }
+  if (provider.type === "neuron" && provider.config?.neuron) {
+    next.neuronProvider = provider.config.neuron;
+  }
   return next;
 }

@@ -9,6 +9,7 @@ import { CompositeCapacityProvider } from "./capacity/CompositeCapacityProvider.
 import { DockerContainerCapacityProvider } from "./capacity/DockerContainerCapacityProvider.js";
 import { DockerComposeCapacityProvider } from "./capacity/DockerComposeCapacityProvider.js";
 import { FakeCapacityProvider } from "./capacity/FakeCapacityProvider.js";
+import { NeuronCapacityProvider } from "./capacity/NeuronCapacityProvider.js";
 import { RunPodCapacityProvider } from "./capacity/RunPodCapacityProvider.js";
 import type { AppConfig, ModelDefinition } from "./domain/types.js";
 import { LiteLlmSpendLogsTrafficSource } from "./litellm/LiteLlmSpendLogsTrafficSource.js";
@@ -53,6 +54,7 @@ export async function buildApp(config: AppConfig, models: ModelDefinition[]) {
           "aws-ecs": new AwsEcsAsgCapacityProvider(config.awsRegion),
           docker: new DockerContainerCapacityProvider(),
           "docker-compose": new DockerComposeCapacityProvider(),
+          neuron: new NeuronCapacityProvider(),
           runpod: new RunPodCapacityProvider()
         }, providerCatalog);
   const backendConfigSync = config.litellmApiBaseUrl && config.litellmApiKey ? new LiteLlmBackendConfigSync(config.litellmApiBaseUrl, config.litellmApiKey) : new NoopBackendConfigSync();
