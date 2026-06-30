@@ -16,8 +16,9 @@ export class ReservationService {
     this.validateInput(input);
     const requestedModelIds = unique(input.modelIds ?? []);
     const modelIds = requestedModelIds.length > 0 ? this.catalog.canonicalModelIds(requestedModelIds) : [];
+    const requestedTargetIds = unique(input.targetIds ?? []);
     const now = new Date();
-    const targetIds = modelIds.length > 0 ? this.catalog.targetsForModels(modelIds).map((target) => target.id) : this.catalog.validateTargetIds(unique(input.targetIds ?? []));
+    const targetIds = this.targetIdsForRequest(modelIds, requestedTargetIds);
     return this.repository.create({
       username: user.username,
       apiKeyName: user.apiKeyName,
@@ -67,6 +68,21 @@ export class ReservationService {
     if (input.keepaliveMinutes !== undefined && (!Number.isFinite(input.keepaliveMinutes) || input.keepaliveMinutes <= 0 || input.keepaliveMinutes > MAX_KEEPALIVE_MINUTES)) {
       throw new Error(`Keepalive must be between 1 and ${MAX_KEEPALIVE_MINUTES} minutes`);
     }
+  }
+
+  private targetIdsForRequest(modelIds: string[], requestedTargetIds: string[]): string[] {
+    if (modelIds.length === 0) return this.catalog.validateTargetIds(requestedTargetIds);
+    if (requestedTargetIds.length === 0) return this.catalog.targetsForModels(modelIds).map((target) => target.id);
+
+    const targetIds = this.catalog.validateTargetIds(requestedTargetIds);
+    for (const modelId of modelIds) {
+      const model = this.catalog.getModel(modelId);
+      if (!model) throw new Error(`Unknown model ID: ${modelId}`);
+      if (!model.targetIds.some((targetId) => targetIds.includes(targetId))) {
+        throw new Error(`Model ${modelId} is not available on target(s): ${targetIds.join(", ")}`);
+      }
+    }
+    return targetIds;
   }
 }
 

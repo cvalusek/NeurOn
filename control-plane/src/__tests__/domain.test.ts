@@ -63,6 +63,32 @@ describe("reservation behavior", () => {
     expect((await repository.list())[0].targetIds).toEqual([target.id]);
   });
 
+  it("honors explicit target IDs for a model available on multiple targets", async () => {
+    const primary: CapacityTarget = { ...target, id: "primary", modelIds: ["qwen"] };
+    const secondary: CapacityTarget = { ...target, id: "secondary", modelIds: ["qwen"] };
+    const sharedModels: ModelDefinition[] = [{ id: "qwen", displayName: "Qwen", aliases: ["qwen"], targetIds: [primary.id, secondary.id] }];
+    const repository = new InMemoryReservationRepository();
+    const reservations = new ReservationService(repository, new ModelCatalog(sharedModels, [primary, secondary]));
+
+    await reservations.createForUser({ username: "clint", isAdmin: false }, { modelIds: ["qwen"], targetIds: [secondary.id], durationMinutes: 30 });
+
+    expect((await repository.list())[0].targetIds).toEqual([secondary.id]);
+  });
+
+  it("rejects an explicit target that cannot serve the requested model", async () => {
+    const qwenTarget: CapacityTarget = { ...target, id: "qwen-target", modelIds: ["qwen"] };
+    const gemmaTarget: CapacityTarget = { ...target, id: "gemma-target", modelIds: ["gemma"] };
+    const splitModels: ModelDefinition[] = [
+      { id: "qwen", displayName: "Qwen", aliases: ["qwen"], targetIds: [qwenTarget.id] },
+      { id: "gemma", displayName: "Gemma", aliases: ["gemma"], targetIds: [gemmaTarget.id] }
+    ];
+    const reservations = new ReservationService(new InMemoryReservationRepository(), new ModelCatalog(splitModels, [qwenTarget, gemmaTarget]));
+
+    await expect(reservations.createForUser({ username: "clint", isAdmin: false }, { modelIds: ["qwen"], targetIds: [gemmaTarget.id], durationMinutes: 30 })).rejects.toThrow(
+      "Model qwen is not available on target(s): gemma-target"
+    );
+  });
+
   it("allows target-only reservations before model discovery has populated choices", async () => {
     const { reservations, repository } = harness();
     await reservations.createForUser({ username: "clint", isAdmin: false }, { targetIds: [target.id], durationMinutes: 30 });
