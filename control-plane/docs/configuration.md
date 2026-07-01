@@ -121,6 +121,11 @@ RUNTIME_PROFILES_JSON=[{"id":"prefer-nightly","name":"PreFer Nightly","type":"do
 - `SHARED_PASSWORD`
 - `COOKIE_SECRET`
 - `ADMIN_USERS`
+- `GITHUB_AUTH_ENABLED`
+- `GITHUB_AUTH_CLIENT_ID`
+- `GITHUB_AUTH_CLIENT_SECRET`
+- `GITHUB_AUTH_ALLOWED_USERS`
+- `GITHUB_AUTH_ALLOWED_ORGS`
 - `STORAGE_DRIVER`
 - `SQLITE_PATH`
 - `DATABASE_URL`
@@ -194,6 +199,38 @@ Authorization: Bearer sk-neuron-...
 `ADMIN_USERS` controls admin status for Basic, cookie, and API-key auth. When
 `ADMIN_USERS` is empty, any authenticated user is treated as an admin, matching
 the existing local-development behavior.
+
+GitHub sign-in can be configured from environment or from Admin > Auth. Create a
+GitHub OAuth app with this callback URL:
+
+```text
+https://<neuron-host>/auth/github/callback
+```
+
+For local development, use:
+
+```text
+http://localhost:8090/auth/github/callback
+```
+
+Environment-backed GitHub auth is read-only in the UI:
+
+```env
+GITHUB_AUTH_ENABLED=true
+GITHUB_AUTH_CLIENT_ID=...
+GITHUB_AUTH_CLIENT_SECRET=...
+GITHUB_AUTH_ALLOWED_USERS=alice,bob
+GITHUB_AUTH_ALLOWED_ORGS=my-org
+```
+
+If both allow lists are empty, any GitHub user who completes OAuth can sign in.
+If `GITHUB_AUTH_ALLOWED_USERS` is set, the GitHub login must be listed. If
+`GITHUB_AUTH_ALLOWED_ORGS` is set, the user must belong to at least one listed
+organization. GitHub-authenticated users use their GitHub login as the NeurOn
+username, so `ADMIN_USERS` should list GitHub logins for admin access.
+
+Admins can add, edit, disable, or delete persisted GitHub methods from
+`/admin/auth`. Persisted methods are stored by the configured storage driver.
 
 ## Env-Expanded Target Config
 

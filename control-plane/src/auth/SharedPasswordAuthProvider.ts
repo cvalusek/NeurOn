@@ -28,6 +28,26 @@ export class SharedPasswordAuthProvider implements AuthProvider {
     return `${payload}.${signature}`;
   }
 
+  createState(payload: Record<string, unknown>): string {
+    if (!this.cookieSecret) throw new Error("COOKIE_SECRET is not configured");
+    const encoded = Buffer.from(JSON.stringify(payload)).toString("base64url");
+    const signature = crypto.createHmac("sha256", this.cookieSecret).update(encoded).digest("base64url");
+    return `${encoded}.${signature}`;
+  }
+
+  verifyState<T extends Record<string, unknown>>(state: string): T | undefined {
+    if (!this.cookieSecret) return undefined;
+    const [payload, signature] = state.split(".");
+    if (!payload || !signature) return undefined;
+    const expected = crypto.createHmac("sha256", this.cookieSecret).update(payload).digest("base64url");
+    if (!safeEqual(signature, expected)) return undefined;
+    return JSON.parse(Buffer.from(payload, "base64url").toString("utf8")) as T;
+  }
+
+  isAdmin(username: string): boolean {
+    return this.adminUsers.length === 0 || this.adminUsers.includes(username);
+  }
+
   private fromBasicAuth(header: string | string[] | undefined): AuthenticatedUser | undefined {
     const value = Array.isArray(header) ? header[0] : header;
     if (!value?.startsWith("Basic ")) return undefined;
@@ -51,13 +71,15 @@ export class SharedPasswordAuthProvider implements AuthProvider {
     const [payload, signature] = cookie.split(".");
     if (!payload || !signature || !this.cookieSecret) return undefined;
     const expected = crypto.createHmac("sha256", this.cookieSecret).update(payload).digest("base64url");
-    if (!crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expected))) return undefined;
+    if (!safeEqual(signature, expected)) return undefined;
     const parsed = JSON.parse(Buffer.from(payload, "base64url").toString("utf8")) as { username?: string };
     if (!parsed.username) return undefined;
     return { username: parsed.username, isAdmin: this.isAdmin(parsed.username) };
   }
+}
 
-  private isAdmin(username: string): boolean {
-    return this.adminUsers.length === 0 || this.adminUsers.includes(username);
-  }
+function safeEqual(left: string, right: string): boolean {
+  const leftBuffer = Buffer.from(left);
+  const rightBuffer = Buffer.from(right);
+  return leftBuffer.length === rightBuffer.length && crypto.timingSafeEqual(leftBuffer, rightBuffer);
 }

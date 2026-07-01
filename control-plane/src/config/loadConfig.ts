@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { z } from "zod";
-import type { AppConfig, CapacityProviderDefinition, CapacityTarget, ModelDefinition, NeuronProviderConfig, RuntimeProfile, StorageConfig } from "../domain/types.js";
+import type { AppConfig, AuthMethod, CapacityProviderDefinition, CapacityTarget, ModelDefinition, NeuronProviderConfig, RuntimeProfile, StorageConfig } from "../domain/types.js";
 
 const targetSchema = z.object({
   id: z.string().min(1),
@@ -235,7 +235,8 @@ export async function loadConfig(): Promise<{ config: AppConfig; models: ModelDe
       adminUsers: (process.env.ADMIN_USERS ?? "")
         .split(",")
         .map((user) => user.trim())
-        .filter(Boolean)
+        .filter(Boolean),
+      authMethods: loadAuthMethods()
     },
     models: Array.from(modelsById.values()).sort((a, b) => a.id.localeCompare(b.id))
   };
@@ -338,6 +339,28 @@ function builtInRuntimeProfiles(): RuntimeProfile[] {
           env: { LLAMA_ARG_MODELS_PRESET: "/presets/smol.ini" }
         }
       ]
+    }
+  ];
+}
+
+function loadAuthMethods(): AuthMethod[] {
+  const githubClientId = env("GITHUB_AUTH_CLIENT_ID");
+  const githubClientSecret = env("GITHUB_AUTH_CLIENT_SECRET");
+  if (!githubClientId || !githubClientSecret) return [];
+  return [
+    {
+      id: env("GITHUB_AUTH_ID") ?? "github",
+      displayName: env("GITHUB_AUTH_DISPLAY_NAME") ?? "GitHub",
+      type: "github",
+      enabled: boolEnv("GITHUB_AUTH_ENABLED") ?? true,
+      config: {
+        github: {
+          clientId: githubClientId,
+          clientSecret: githubClientSecret,
+          allowedUsers: listEnv("GITHUB_AUTH_ALLOWED_USERS"),
+          allowedOrganizations: listEnv("GITHUB_AUTH_ALLOWED_ORGS")
+        }
+      }
     }
   ];
 }

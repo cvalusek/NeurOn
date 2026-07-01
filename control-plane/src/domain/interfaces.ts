@@ -1,4 +1,4 @@
-import type { ApiKey, AuthenticatedUser, CapacityProviderDefinition, CapacityProviderStatus, CapacityTarget, Reservation, TargetModelDiscoveryRecord, TargetProvisioningJob, TargetStatus } from "./types.js";
+import type { ApiKey, AuthenticatedUser, AuthMethod, CapacityProviderDefinition, CapacityProviderStatus, CapacityTarget, Reservation, TargetModelDiscoveryRecord, TargetProvisioningJob, TargetStatus } from "./types.js";
 
 export interface CapacityProvider {
   provisionTarget(target: CapacityTarget): Promise<Partial<CapacityTarget> | void>;
@@ -28,6 +28,14 @@ export interface ApiKeyRepository {
   listForUser(username: string): Promise<ApiKey[]>;
   deleteForUser(id: string, username: string): Promise<boolean>;
   touchLastUsedAt(id: string, lastUsedAt: Date): Promise<void>;
+}
+
+export interface AuthMethodRepository {
+  create(input: AuthMethod): Promise<AuthMethod>;
+  get(id: string): Promise<AuthMethod | undefined>;
+  list(): Promise<AuthMethod[]>;
+  update(id: string, input: AuthMethod): Promise<AuthMethod>;
+  delete(id: string): Promise<boolean>;
 }
 
 export interface CapacityProviderRepository {

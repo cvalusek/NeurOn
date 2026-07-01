@@ -1,4 +1,5 @@
 import type { ApiKey, AppConfig, AuthenticatedUser, CapacityTarget, ModelDefinition, Reservation, RuntimeProfile, TargetStatus } from "../domain/types.js";
+import type { AuthMethodView } from "../services/AuthMethodService.js";
 import type { ProviderView } from "../services/ProviderService.js";
 import type { TargetView } from "../services/TargetService.js";
 
@@ -82,13 +83,16 @@ export function layout(title: string, user: AuthenticatedUser | undefined, body:
   </style>
 </head>
 <body>
-  <header><div class="topbar"><strong class="brand">NeurOn</strong><nav><a href="/">Home</a><a href="/api-keys">API keys</a><a href="/admin">Admin</a><a href="/admin/providers">Providers</a><a href="/admin/targets">Targets</a></nav><span class="user">${user ? escapeHtml(user.username) : ""}</span></div></header>
+  <header><div class="topbar"><strong class="brand">NeurOn</strong><nav><a href="/">Home</a><a href="/api-keys">API keys</a><a href="/admin">Admin</a><a href="/admin/auth">Auth</a><a href="/admin/providers">Providers</a><a href="/admin/targets">Targets</a></nav><span class="user">${user ? escapeHtml(user.username) : ""}</span></div></header>
   <main>${body}</main>
 </body>
 </html>`;
 }
 
-export function loginPage(error = ""): string {
+export function loginPage(error = "", githubMethods: Array<{ id: string; displayName: string }> = []): string {
+  const githubButtons = githubMethods.length
+    ? `<div class="inline-actions" style="margin-top: 14px;">${githubMethods.map((method) => `<form method="get" action="/auth/github/start"><input type="hidden" name="method" value="${escapeHtml(method.id)}"><button class="secondary" type="submit">Sign in with ${escapeHtml(method.displayName)}</button></form>`).join("")}</div>`
+    : "";
   return layout("Login", undefined, `<section class="panel">
     <h1>Sign in</h1>
     ${error ? `<p class="status">${escapeHtml(error)}</p>` : ""}
@@ -97,6 +101,7 @@ export function loginPage(error = ""): string {
       <p><label>Password<br><input name="password" type="password" required></label></p>
       <button type="submit">Sign in</button>
     </form>
+    ${githubButtons}
   </section>`);
 }
 
@@ -373,7 +378,7 @@ export function apiKeysPage(user: AuthenticatedUser, apiKeys: ApiKey[], createdT
 export function adminPage(user: AuthenticatedUser, config: AppConfig): string {
   return layout("NeurOn Admin", user, `<section class="panel">
     <h1>Admin</h1>
-    <p><a href="/admin/providers">Manage providers</a> | <a href="/admin/targets">Manage targets</a></p>
+    <p><a href="/admin/auth">Manage authentication</a> | <a href="/admin/providers">Manage providers</a> | <a href="/admin/targets">Manage targets</a></p>
     <div id="admin-status"></div>
   </section>
   <script type="module">
@@ -414,6 +419,83 @@ export function adminPage(user: AuthenticatedUser, config: AppConfig): string {
     refresh();
     setInterval(refresh, ${config.adminStatusPollSeconds * 1000});
   </script>`);
+}
+
+export function adminAuthPage(user: AuthenticatedUser, methods: AuthMethodView[], error = ""): string {
+  const rows = methods.length ? methods.map(authMethodRow).join("") : `<p class="muted">No additional authentication methods configured.</p>`;
+  return layout("NeurOn Auth", user, `<section class="panel">
+    <h1>Authentication</h1>
+    ${error ? `<p class="status">${escapeHtml(error)}</p>` : ""}
+    <form method="post" action="/admin/auth">
+      <div class="field-grid">
+        <p><label>ID<br><input name="id" type="text" value="github" required></label></p>
+        <p><label>Display name<br><input name="displayName" type="text" value="GitHub"></label></p>
+      </div>
+      <p><label><input name="enabled" type="checkbox" checked> Enabled</label></p>
+      <div class="field-grid">
+        <p><label>GitHub client ID<br><input name="clientId" type="text" required></label></p>
+        <p><label>GitHub client secret<br><input name="clientSecret" type="password" required></label></p>
+      </div>
+      <div class="field-grid">
+        <p><label>Allowed users<br><input name="allowedUsers" type="text" placeholder="alice,bob"></label></p>
+        <p><label>Allowed organizations<br><input name="allowedOrganizations" type="text" placeholder="my-org"></label></p>
+      </div>
+      <div class="actions"><button type="submit">Add GitHub auth</button></div>
+    </form>
+  </section>
+  <section class="panel">
+    <h2>Methods</h2>
+    <div class="summary-list">${rows}</div>
+  </section>
+  <script type="module">
+    document.addEventListener('click', (event) => {
+      const button = event.target.closest('[data-tab]');
+      if (!button) return;
+      const root = button.closest('[data-tabs]');
+      if (!root) return;
+      root.querySelectorAll('[data-tab]').forEach(candidate => candidate.setAttribute('aria-selected', String(candidate === button)));
+      root.querySelectorAll('[data-tab-panel]').forEach(panel => { panel.hidden = panel.dataset.tabPanel !== button.dataset.tab; });
+    });
+  </script>`);
+}
+
+function authMethodRow(method: AuthMethodView): string {
+  const github = method.config.github;
+  const allowUsers = github?.allowedUsers?.join(", ") ?? "";
+  const allowOrgs = github?.allowedOrganizations?.join(", ") ?? "";
+  const editAction = method.editable
+    ? authMethodEditPanel(method)
+    : `<form method="post" action="/admin/auth/${escapeHtml(method.id)}/copy-to-db"><button class="secondary" type="submit">Copy config auth to DB</button></form>`;
+  const deleteAction = method.editable ? authMethodDeletePanel(method) : `<p class="muted">This method is loaded from environment config. Remove it from configuration or copy it to the database before deleting it here.</p>`;
+  return `<details class="drilldown"><summary><div><strong>${escapeHtml(method.displayName)}</strong><div class="muted"><code>${escapeHtml(method.id)}</code> | ${escapeHtml(method.type)} | ${method.enabled ? "enabled" : "disabled"}</div></div><span class="badge ${method.source === "persisted" ? "active" : "done"}">${escapeHtml(method.source)}</span></summary><div class="drilldown-body" data-tabs><div class="tabbar"><button type="button" data-tab="view" aria-selected="true">View</button><button type="button" data-tab="edit" aria-selected="false">Edit</button><button type="button" data-tab="delete" aria-selected="false">Delete</button></div><section class="tab-panel" data-tab-panel="view"><p><strong>Client ID:</strong> <code>${escapeHtml(github?.clientId ?? "")}</code></p><p><strong>Allowed users:</strong> ${allowUsers ? escapeHtml(allowUsers) : "<span class=\"muted\">Any GitHub user</span>"}</p><p><strong>Allowed organizations:</strong> ${allowOrgs ? escapeHtml(allowOrgs) : "<span class=\"muted\">None required</span>"}</p></section><section class="tab-panel" data-tab-panel="edit" hidden>${editAction}</section><section class="tab-panel" data-tab-panel="delete" hidden>${deleteAction}</section></div></details>`;
+}
+
+function authMethodEditPanel(method: AuthMethodView): string {
+  const github = method.config.github;
+  return `<form method="post" action="/admin/auth/${escapeHtml(method.id)}/update">
+    <div class="field-grid">
+      <p><label>ID<br><input name="id" type="text" value="${escapeHtml(method.id)}" required></label></p>
+      <p><label>Display name<br><input name="displayName" type="text" value="${escapeHtml(method.displayName)}"></label></p>
+    </div>
+    <p><label><input name="enabled" type="checkbox" ${method.enabled ? "checked" : ""}> Enabled</label></p>
+    <div class="field-grid">
+      <p><label>GitHub client ID<br><input name="clientId" type="text" value="${escapeHtml(github?.clientId ?? "")}" required></label></p>
+      <p><label>GitHub client secret<br><input name="clientSecret" type="password" placeholder="leave blank to keep current secret"></label></p>
+    </div>
+    <div class="field-grid">
+      <p><label>Allowed users<br><input name="allowedUsers" type="text" value="${escapeHtml(github?.allowedUsers?.join(",") ?? "")}"></label></p>
+      <p><label>Allowed organizations<br><input name="allowedOrganizations" type="text" value="${escapeHtml(github?.allowedOrganizations?.join(",") ?? "")}"></label></p>
+    </div>
+    <div class="actions"><button type="submit">Save auth method</button></div>
+  </form>`;
+}
+
+function authMethodDeletePanel(method: AuthMethodView): string {
+  return `<p class="muted">Type <code>${escapeHtml(method.id)}</code> to delete this auth method.</p>
+  <form method="post" action="/admin/auth/${escapeHtml(method.id)}/delete">
+    <p><label>Method ID<br><input name="confirmName" type="text" autocomplete="off" required></label></p>
+    <button class="danger" type="submit">Delete auth method</button>
+  </form>`;
 }
 
 export function targetAdminPage(user: AuthenticatedUser, targets: TargetView[], providers: ProviderView[], runtimeProfiles: RuntimeProfile[] = [], error = "", createdTargetId = ""): string {

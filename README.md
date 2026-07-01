@@ -55,7 +55,9 @@ Most local configuration lives in `.env`; see [.env.example](.env.example).
 Useful knobs:
 
 - `CONTROL_PLANE_PORT` sets the host port for the web app.
-- `SHARED_PASSWORD`, `COOKIE_SECRET`, and `ADMIN_USERS` configure v1 auth.
+- `SHARED_PASSWORD`, `COOKIE_SECRET`, and `ADMIN_USERS` configure auth.
+- `GITHUB_AUTH_CLIENT_ID` and `GITHUB_AUTH_CLIENT_SECRET` enable GitHub
+  sign-in; admins can manage persisted GitHub methods from Admin > Auth.
 - Users can create `sk-neuron-...` API keys for Bearer-auth API, OpenAPI, and
   MCP clients.
 - `CAPACITY_TARGETS_FILE`, `CAPACITY_TARGETS_JSON`, or `CAPACITY_TARGET_KEYS`

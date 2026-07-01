@@ -31,7 +31,8 @@ const config: AppConfig = {
   adminStatusPollSeconds: 10,
   healthCheckTimeoutSeconds: 1,
   healthCheckIntervalSeconds: 15,
-  adminUsers: []
+  adminUsers: [],
+  authMethods: []
 };
 
 const models: ModelDefinition[] = [{ id: "m1", displayName: "M1", aliases: ["m1"], targetIds: ["t1"] }];
@@ -231,6 +232,66 @@ describe("API authentication context", () => {
     expect(refreshed.body).toContain("RunPod Shared");
     expect(refreshed.body).toContain("runpod-shared");
     expect(refreshed.body).toContain("Save provider");
+  });
+
+  it("serves admin auth management and creates persisted GitHub methods", async () => {
+    process.env.USE_FAKE_PROVIDER = "true";
+    const { app } = await buildApp(config, models);
+    const auth = { authorization: `Basic ${Buffer.from("actual:secret").toString("base64")}` };
+
+    const page = await app.inject({ method: "GET", url: "/admin/auth", headers: auth });
+    expect(page.statusCode).toBe(200);
+    expect(page.body).toContain("Authentication");
+    expect(page.body).toContain("Add GitHub auth");
+
+    const created = await app.inject({
+      method: "POST",
+      url: "/admin/auth",
+      headers: { ...auth, "content-type": "application/x-www-form-urlencoded" },
+      payload: new URLSearchParams({
+        id: "github-main",
+        displayName: "GitHub Main",
+        enabled: "on",
+        clientId: "client-id",
+        clientSecret: "client-secret",
+        allowedUsers: "actual",
+        allowedOrganizations: "neuron"
+      }).toString()
+    });
+    expect(created.statusCode).toBe(302);
+
+    const refreshed = await app.inject({ method: "GET", url: "/admin/auth", headers: auth });
+    await app.close();
+    expect(refreshed.body).toContain("GitHub Main");
+    expect(refreshed.body).toContain("github-main");
+    expect(refreshed.body).toContain("actual");
+    expect(refreshed.body).toContain("neuron");
+    expect(refreshed.body).not.toContain("client-secret");
+  });
+
+  it("starts GitHub OAuth for configured auth methods", async () => {
+    process.env.USE_FAKE_PROVIDER = "true";
+    const { app } = await buildApp({
+      ...config,
+      cookieSecret: "test-cookie-secret",
+      authMethods: [{
+        id: "github",
+        displayName: "GitHub",
+        type: "github",
+        enabled: true,
+        config: { github: { clientId: "client-id", clientSecret: "client-secret" } }
+      }]
+    }, models);
+
+    const login = await app.inject({ method: "GET", url: "/login" });
+    expect(login.body).toContain("Sign in with GitHub");
+
+    const response = await app.inject({ method: "GET", url: "/auth/github/start?method=github", headers: { host: "neuron.test" } });
+    await app.close();
+    expect(response.statusCode).toBe(302);
+    expect(response.headers.location).toContain("https://github.com/login/oauth/authorize");
+    expect(response.headers.location).toContain("client_id=client-id");
+    expect(response.headers.location).toContain("redirect_uri=http%3A%2F%2Fneuron.test%2Fauth%2Fgithub%2Fcallback");
   });
 
   it("copies declarative providers into persisted storage from the admin UI", async () => {

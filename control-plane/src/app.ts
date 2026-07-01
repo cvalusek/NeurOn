@@ -22,6 +22,7 @@ import { registerApiRoutes } from "./routes/api.js";
 import { registerMcpRoutes } from "./routes/mcp.js";
 import { registerUiRoutes } from "./routes/ui.js";
 import { ApiKeyService } from "./services/ApiKeyService.js";
+import { AuthMethodService } from "./services/AuthMethodService.js";
 import { ModelCatalog } from "./services/ModelCatalog.js";
 import { ModelWarmupService } from "./services/ModelWarmupService.js";
 import { ProviderCatalog } from "./services/ProviderCatalog.js";
@@ -37,6 +38,7 @@ export async function buildApp(config: AppConfig, models: ModelDefinition[]) {
   const app = Fastify({ logger: true });
   const reservationRepository = await createReservationRepository(config.storage);
   const apiKeys = reservationRepository.apiKeys;
+  const authMethodService = new AuthMethodService(config.authMethods, reservationRepository.authMethods);
   const providerCatalog = new ProviderCatalog(config.capacityProviders);
   const providerService = new ProviderService(config.capacityProviders, reservationRepository.capacityProviders, providerCatalog);
   await providerService.initialize();
@@ -104,18 +106,22 @@ export async function buildApp(config: AppConfig, models: ModelDefinition[]) {
   app.addHook("onClose", async () => reservationRepository.close());
 
   app.addHook("preHandler", async (request, reply) => {
-    if (request.url === "/healthz" || request.url === "/login" || request.url === "/openapi.json" || request.url.startsWith("/docs")) return;
+    if (request.url === "/healthz" || request.url === "/login" || request.url.startsWith("/auth/") || request.url === "/openapi.json" || request.url.startsWith("/docs")) return;
     const user = await authProvider.authenticate({ headers: request.headers, cookies: request.cookies });
     if (!user) {
       if (request.url.startsWith("/api/")) return reply.code(401).send({ error: "Authentication required" });
       return reply.redirect("/login");
+    }
+    if ((request.url.startsWith("/admin") || request.url.startsWith("/api/admin/")) && !user.isAdmin) {
+      if (request.url.startsWith("/api/")) return reply.code(403).send({ error: "Admin access required" });
+      return reply.code(403).type("text/html").send("Admin access required");
     }
     request.user = user;
   });
 
   registerApiRoutes(app, catalog, reservations, statuses, apiKeyService, reservationService, trafficKeepalive, reconciler, capacityProvider, runtimeModelDiscovery, healthChecker, targetService, targetProvisioningService);
   registerMcpRoutes(app, catalog, reservations, statuses, reservationService);
-  registerUiRoutes(app, config, authProvider, catalog, apiKeyService, reservationService, providerService, targetService, targetProvisioningService);
+  registerUiRoutes(app, config, authProvider, authMethodService, catalog, apiKeyService, reservationService, providerService, targetService, targetProvisioningService);
 
   const bootstrapRuntimeModels = async () => {
     for (const target of catalog.listTargets().filter(shouldBootstrapRuntimeModels)) {

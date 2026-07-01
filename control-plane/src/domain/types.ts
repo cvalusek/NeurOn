@@ -8,6 +8,26 @@ export interface AuthenticatedUser {
   apiKeyName?: string;
 }
 
+export type AuthMethodType = "github";
+
+export interface GitHubAuthMethodConfig {
+  clientId: string;
+  clientSecret: string;
+  allowedUsers?: string[];
+  allowedOrganizations?: string[];
+}
+
+export interface AuthMethod {
+  id: string;
+  displayName: string;
+  type: AuthMethodType;
+  enabled: boolean;
+  config: {
+    github?: GitHubAuthMethodConfig;
+    [key: string]: unknown;
+  };
+}
+
 export interface ApiKey {
   id: string;
   username: string;
@@ -288,6 +308,7 @@ export interface AppConfig {
   healthCheckTimeoutSeconds: number;
   healthCheckIntervalSeconds: number;
   adminUsers: string[];
+  authMethods: AuthMethod[];
 }
 
 export type StorageConfig =
