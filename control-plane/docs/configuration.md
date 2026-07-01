@@ -83,6 +83,32 @@ The PreFer profile also declares that `/models` is backed by the
 `prefer-model-cache` volume. Docker provisioning currently creates containers
 with all GPUs available by default.
 
+Runtime profiles can declare variants. A variant is a named flavor of the base
+profile that layers a small set of overrides onto it. Variants use the same
+portable fields as profiles: `image`, `port`, `health`, `api`, `volumes`,
+`env`, and `discovery`.
+
+The built-in PreFer profile includes these variants:
+
+- `standard`: does not set a preset; PreFer auto-selects from runtime signals.
+- `deepseek-v4-flash`: sets `LLAMA_ARG_MODELS_PRESET` to
+  `/presets/deepseek-v4-flash.ini`.
+- `glm-5.2`: sets `LLAMA_ARG_MODELS_PRESET` to `/presets/glm-5.2.ini`.
+- `glm-5.2-reap`: sets `LLAMA_ARG_MODELS_PRESET` to
+  `/presets/glm-5.2-reap.ini`.
+- `smol`: sets `LLAMA_ARG_MODELS_PRESET` to `/presets/smol.ini` for automated
+  UI tests and local smoke checks.
+
+A variant with a preset looks like:
+
+```json
+{
+  "env": {
+    "LLAMA_ARG_MODELS_PRESET": "/presets/smol.ini"
+  }
+}
+```
+
 Additional profiles can be supplied with `RUNTIME_PROFILES_JSON`:
 
 ```env

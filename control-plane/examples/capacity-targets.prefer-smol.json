@@ -1,0 +1,30 @@
+[
+  {
+    "id": "prefer-smol",
+    "displayName": "PreFer Smol",
+    "provider": "docker",
+    "trafficModelPrefixes": ["prefer/"],
+    "models": [
+      {
+        "id": "qwen-smol",
+        "displayName": "Qwen Smol",
+        "modelFamily": "Qwen",
+        "description": "Tiny local PreFer preset model for quick UI and API smoke tests",
+        "aliases": ["prefer/qwen-smol"],
+        "backendModelIds": ["qwen-smol", "prefer/qwen-smol"],
+        "contextLabel": "32k"
+      }
+    ],
+    "docker": {
+      "containerName": "prefer-smol",
+      "image": "ghcr.io/cvalusek/prefer:latest",
+      "ports": ["8080:8080"],
+      "volumes": ["prefer-model-cache:/models"],
+      "environment": {
+        "LLAMA_ARG_MODELS_PRESET": "/presets/smol.ini"
+      }
+    },
+    "healthUrl": "http://host.docker.internal:8080/health",
+    "apiUrl": "http://host.docker.internal:8080/v1"
+  }
+]

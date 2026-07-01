@@ -57,3 +57,13 @@ default.
 The target creation UI keeps the common PreFer case small: choose the runtime
 profile and enter a model volume name. The selected profile supplies the
 container path.
+
+Runtime profiles can also define variants. A variant is a named flavor of the
+base profile. The target creation UI exposes variants when the selected profile
+declares them and applies the variant's overrides before creating provider
+specific target config.
+
+Variants are intentionally smaller than arbitrary target customization. They
+are for profile-owned choices such as a test-friendly PreFer preset. Per-target
+operator settings, provider-specific creation options, and secret handling still
+belong in explicit target or provider configuration.

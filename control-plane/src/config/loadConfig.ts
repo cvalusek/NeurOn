@@ -132,6 +132,19 @@ const providerSchema = z.object({
   credentialId: z.string().optional()
 });
 
+const runtimeProfileVariantSchema = z.object({
+  id: z.string().min(1),
+  name: z.string().min(1),
+  description: z.string().optional(),
+  image: z.string().optional(),
+  port: z.number().int().positive().optional(),
+  health: z.string().optional(),
+  api: z.string().optional(),
+  volumes: z.record(z.string()).optional(),
+  env: z.record(z.string()).optional(),
+  discovery: z.boolean().optional()
+});
+
 const runtimeProfileSchema = z
   .object({
     id: z.string().min(1),
@@ -143,7 +156,8 @@ const runtimeProfileSchema = z
     api: z.string().optional(),
     volumes: z.record(z.string()).optional(),
     env: z.record(z.string()).optional(),
-    discovery: z.boolean().optional()
+    discovery: z.boolean().optional(),
+    variants: z.array(runtimeProfileVariantSchema).optional()
   })
   .transform((profile): RuntimeProfile => ({
     id: profile.id,
@@ -155,7 +169,8 @@ const runtimeProfileSchema = z
     api: profile.api,
     volumes: profile.volumes,
     env: profile.env,
-    discovery: profile.discovery
+    discovery: profile.discovery,
+    variants: profile.variants
   }));
 
 export async function loadConfig(): Promise<{ config: AppConfig; models: ModelDefinition[] }> {
@@ -291,7 +306,38 @@ function builtInRuntimeProfiles(): RuntimeProfile[] {
       name: "PreFer",
       type: "docker",
       image: "ghcr.io/cvalusek/prefer:latest",
-      volumes: { "/models": "prefer-model-cache" }
+      volumes: { "/models": "prefer-model-cache" },
+      variants: [
+        {
+          id: "standard",
+          name: "Standard",
+          description: "Let PreFer auto-select a preset from the runtime environment"
+        },
+        {
+          id: "deepseek-v4-flash",
+          name: "DeepSeek V4 Flash",
+          description: "Pin PreFer to the deepseek-v4-flash named preset",
+          env: { LLAMA_ARG_MODELS_PRESET: "/presets/deepseek-v4-flash.ini" }
+        },
+        {
+          id: "glm-5.2",
+          name: "GLM 5.2",
+          description: "Pin PreFer to the glm-5.2 named preset",
+          env: { LLAMA_ARG_MODELS_PRESET: "/presets/glm-5.2.ini" }
+        },
+        {
+          id: "glm-5.2-reap",
+          name: "GLM 5.2 REAP",
+          description: "Pin PreFer to the glm-5.2-reap named preset",
+          env: { LLAMA_ARG_MODELS_PRESET: "/presets/glm-5.2-reap.ini" }
+        },
+        {
+          id: "smol",
+          name: "Smol",
+          description: "Tiny PreFer preset for automated UI tests and local smoke checks",
+          env: { LLAMA_ARG_MODELS_PRESET: "/presets/smol.ini" }
+        }
+      ]
     }
   ];
 }

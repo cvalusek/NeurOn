@@ -57,6 +57,8 @@ The examples directory includes:
 
 - `capacity-targets.local-fake.json` for local UI/API development
 - `capacity-targets.prefer-docker.json` as a local PreFer container example
+- `capacity-targets.prefer-smol.json` as a quick PreFer/latest `smol.ini`
+  preset example
 - `capacity-targets.local-docker.json` as a bring-your-own Docker Compose
   runtime example
 - `capacity-targets.runpod.example.json` as a RunPod Pod example

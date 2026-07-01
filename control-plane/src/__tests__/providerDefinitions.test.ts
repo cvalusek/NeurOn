@@ -336,7 +336,38 @@ describe("provider definitions", () => {
       name: "PreFer",
       type: "docker",
       image: "ghcr.io/cvalusek/prefer:latest",
-      volumes: { "/models": "prefer-model-cache" }
+      volumes: { "/models": "prefer-model-cache" },
+      variants: [
+        {
+          id: "standard",
+          name: "Standard",
+          description: "Let PreFer auto-select a preset from the runtime environment"
+        },
+        {
+          id: "deepseek-v4-flash",
+          name: "DeepSeek V4 Flash",
+          description: "Pin PreFer to the deepseek-v4-flash named preset",
+          env: { LLAMA_ARG_MODELS_PRESET: "/presets/deepseek-v4-flash.ini" }
+        },
+        {
+          id: "glm-5.2",
+          name: "GLM 5.2",
+          description: "Pin PreFer to the glm-5.2 named preset",
+          env: { LLAMA_ARG_MODELS_PRESET: "/presets/glm-5.2.ini" }
+        },
+        {
+          id: "glm-5.2-reap",
+          name: "GLM 5.2 REAP",
+          description: "Pin PreFer to the glm-5.2-reap named preset",
+          env: { LLAMA_ARG_MODELS_PRESET: "/presets/glm-5.2-reap.ini" }
+        },
+        {
+          id: "smol",
+          name: "Smol",
+          description: "Tiny PreFer preset for automated UI tests and local smoke checks",
+          env: { LLAMA_ARG_MODELS_PRESET: "/presets/smol.ini" }
+        }
+      ]
     });
     expect(config.runtimeProfiles).toContainEqual({
       id: "prefer-nightly",

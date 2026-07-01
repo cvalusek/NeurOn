@@ -367,19 +367,6 @@ export function apiKeysPage(user: AuthenticatedUser, apiKeys: ApiKey[], createdT
       button.textContent = 'Copied';
       setTimeout(() => { button.textContent = previous; }, 900);
     });
-    document.addEventListener('click', async (event) => {
-      const button = event.target.closest('[data-provision-target]');
-      if (!button) return;
-      event.preventDefault();
-      const targetId = button.dataset.provisionTarget;
-      button.disabled = true;
-      const previous = button.textContent;
-      button.textContent = 'Provisioning...';
-      const response = await fetch('/api/admin/targets/' + encodeURIComponent(targetId) + '/provision', { method: 'POST' });
-      button.textContent = response.ok ? 'Provisioned' : 'Provision failed';
-      await refreshTargetStatus();
-      setTimeout(() => { button.disabled = false; button.textContent = previous; }, 1400);
-    });
   </script>`);
 }
 
@@ -456,6 +443,7 @@ function targetCreateModal(providers: ProviderView[], runtimeProfiles: RuntimePr
     <form method="post" action="/admin/targets">
       <p><label>Provider<br>${targetProviderSelect(providers)}</label></p>
       <p><label>Profile<br>${runtimeProfileSelect(runtimeProfiles)}</label></p>
+      <p><label>Variant<br><select name="runtimeProfileVariantId"></select></label></p>
       <p id="target-runtime-profile-note" class="muted"></p>
       <div class="field-grid">
         <p><label>ID<br><input name="id" type="text" placeholder="target-id" required></label></p>
@@ -505,6 +493,19 @@ function targetAdminScript(providers: ProviderView[], runtimeProfiles: RuntimePr
       button.textContent = 'Copied';
       setTimeout(() => { button.textContent = previous; }, 900);
     });
+    document.addEventListener('click', async (event) => {
+      const button = event.target.closest('[data-provision-target]');
+      if (!button) return;
+      event.preventDefault();
+      const targetId = button.dataset.provisionTarget;
+      button.disabled = true;
+      const previous = button.textContent;
+      button.textContent = 'Provisioning...';
+      const response = await fetch('/api/admin/targets/' + encodeURIComponent(targetId) + '/provision', { method: 'POST' });
+      button.textContent = response.ok ? 'Provisioned' : 'Provision failed';
+      await refreshTargetStatus();
+      setTimeout(() => { button.disabled = false; button.textContent = previous; }, 1400);
+    });
     document.addEventListener('click', (event) => {
       const opener = event.target.closest('[data-open-modal]');
       if (opener) document.getElementById(opener.dataset.openModal).hidden = false;
@@ -518,8 +519,10 @@ function targetAdminScript(providers: ProviderView[], runtimeProfiles: RuntimePr
     });
     const providers = ${safeJson(Object.fromEntries(providers.map((provider) => [provider.id, provider.type])))};
     const runtimeProfiles = ${safeJson(Object.fromEntries(runtimeProfiles.map((profile) => [profile.id, profile])))};
+    const escapeText = (value) => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' }[char]));
     const provider = document.querySelector('#target-modal select[name="providerId"]');
     const runtimeProfile = document.querySelector('#target-modal select[name="runtimeProfileId"]');
+    const runtimeProfileVariant = document.querySelector('#target-modal select[name="runtimeProfileVariantId"]');
     const runtimeNote = document.querySelector('#target-runtime-profile-note');
     const dockerModelVolumeInput = document.querySelector('#target-modal input[name="dockerModelVolume"]');
     dockerModelVolumeInput?.addEventListener('input', () => { dockerModelVolumeInput.dataset.touched = 'true'; });
@@ -527,6 +530,33 @@ function targetAdminScript(providers: ProviderView[], runtimeProfiles: RuntimePr
     const aws = document.querySelector('#aws-target-fields');
     const docker = document.querySelector('#docker-target-fields');
     const neuron = document.querySelector('#neuron-target-fields');
+    const selectedProfile = () => runtimeProfile ? runtimeProfiles[runtimeProfile.value] : undefined;
+    const selectedVariant = () => {
+      const profile = selectedProfile();
+      return profile?.variants?.find(variant => variant.id === runtimeProfileVariant?.value);
+    };
+    const effectiveProfile = () => {
+      const profile = selectedProfile();
+      const variant = selectedVariant();
+      if (!profile || !variant) return profile;
+      return {
+        ...profile,
+        image: variant.image ?? profile.image,
+        port: variant.port ?? profile.port,
+        health: variant.health ?? profile.health,
+        api: variant.api ?? profile.api,
+        volumes: variant.volumes ?? profile.volumes,
+        env: { ...(profile.env ?? {}), ...(variant.env ?? {}) },
+        discovery: variant.discovery ?? profile.discovery
+      };
+    };
+    const syncVariants = () => {
+      if (!runtimeProfileVariant) return;
+      const profile = selectedProfile();
+      const variants = profile?.variants ?? [];
+      runtimeProfileVariant.innerHTML = variants.map(variant => '<option value="' + escapeText(variant.id) + '">' + escapeText(variant.name) + '</option>').join('');
+      runtimeProfileVariant.closest('p').hidden = variants.length === 0;
+    };
     const sync = () => {
       if (!provider) return;
       const type = providers[provider.value];
@@ -534,16 +564,19 @@ function targetAdminScript(providers: ProviderView[], runtimeProfiles: RuntimePr
       aws.hidden = type !== 'aws-ecs' && type !== 'aws-ecs-asg';
       docker.hidden = type !== 'docker';
       neuron.hidden = type !== 'neuron';
-      const profile = runtimeProfile ? runtimeProfiles[runtimeProfile.value] : undefined;
+      const profile = effectiveProfile();
+      const variant = selectedVariant();
       const port = profile?.port ?? 8080;
       const discovery = profile ? profile.discovery ?? true : false;
       const profileVolumes = Object.entries(profile?.volumes ?? {});
       const modelVolume = profileVolumes[0];
-      runtimeNote.textContent = profile ? [profile.type, profile.image, 'port ' + port, modelVolume ? 'volume ' + modelVolume[1] + ' -> ' + modelVolume[0] : '', discovery ? 'discovery on' : 'discovery off'].filter(Boolean).join(' | ') : '';
+      runtimeNote.textContent = profile ? [profile.type, profile.image, variant ? 'variant ' + variant.name : '', 'port ' + port, modelVolume ? 'volume ' + modelVolume[1] + ' -> ' + modelVolume[0] : '', discovery ? 'discovery on' : 'discovery off'].filter(Boolean).join(' | ') : '';
       if (dockerModelVolumeInput && !dockerModelVolumeInput.dataset.touched) dockerModelVolumeInput.value = modelVolume?.[1] ?? '';
     };
     provider?.addEventListener('change', sync);
-    runtimeProfile?.addEventListener('change', sync);
+    runtimeProfile?.addEventListener('change', () => { syncVariants(); sync(); });
+    runtimeProfileVariant?.addEventListener('change', sync);
+    syncVariants();
     sync();
     document.querySelectorAll('form[data-target-edit-form]').forEach(form => {
       const providerSelect = form.querySelector('select[name="providerId"]');
@@ -571,7 +604,6 @@ function targetAdminScript(providers: ProviderView[], runtimeProfiles: RuntimePr
         panel.innerHTML = target ? statusCard(target) : '<p class="muted">Status unavailable</p>';
       });
     }
-    const escapeText = (value) => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' }[char]));
     refreshTargetStatus();
   `;
 }
@@ -822,8 +854,10 @@ export function providerAdminPage(user: AuthenticatedUser, providers: ProviderVi
     sync();
     const targetProviders = ${safeJson(Object.fromEntries(providers.map((provider) => [provider.id, provider.type])))};
     const runtimeProfiles = ${safeJson(Object.fromEntries(runtimeProfiles.map((profile) => [profile.id, profile])))};
+    const escapeText = (value) => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' }[char]));
     const targetProvider = document.querySelector('#provider-target-modal select[name="providerId"]');
     const runtimeProfile = document.querySelector('#provider-target-modal select[name="runtimeProfileId"]');
+    const runtimeProfileVariant = document.querySelector('#provider-target-modal select[name="runtimeProfileVariantId"]');
     const runpodTarget = document.querySelector('#provider-target-modal [data-provider-fields="runpod"]');
     const dockerTarget = document.querySelector('#provider-target-modal [data-provider-fields="docker"]');
     const awsTarget = document.querySelector('#provider-target-modal [data-provider-fields="aws"]');
@@ -831,22 +865,52 @@ export function providerAdminPage(user: AuthenticatedUser, providers: ProviderVi
     const runtimeNote = document.querySelector('#runtime-profile-note');
     const dockerModelVolumeInput = document.querySelector('#provider-target-modal input[name="dockerModelVolume"]');
     dockerModelVolumeInput?.addEventListener('input', () => { dockerModelVolumeInput.dataset.touched = 'true'; });
+    const selectedTargetProfile = () => runtimeProfiles[runtimeProfile.value];
+    const selectedTargetVariant = () => {
+      const profile = selectedTargetProfile();
+      return profile?.variants?.find(variant => variant.id === runtimeProfileVariant?.value);
+    };
+    const effectiveTargetProfile = () => {
+      const profile = selectedTargetProfile();
+      const variant = selectedTargetVariant();
+      if (!profile || !variant) return profile;
+      return {
+        ...profile,
+        image: variant.image ?? profile.image,
+        port: variant.port ?? profile.port,
+        health: variant.health ?? profile.health,
+        api: variant.api ?? profile.api,
+        volumes: variant.volumes ?? profile.volumes,
+        env: { ...(profile.env ?? {}), ...(variant.env ?? {}) },
+        discovery: variant.discovery ?? profile.discovery
+      };
+    };
+    const syncTargetVariants = () => {
+      if (!runtimeProfileVariant) return;
+      const profile = selectedTargetProfile();
+      const variants = profile?.variants ?? [];
+      runtimeProfileVariant.innerHTML = variants.map(variant => '<option value="' + escapeText(variant.id) + '">' + escapeText(variant.name) + '</option>').join('');
+      runtimeProfileVariant.closest('p').hidden = variants.length === 0;
+    };
     const syncTargetCreate = () => {
       const targetType = targetProviders[targetProvider.value] ?? '';
       runpodTarget.hidden = targetType !== 'runpod';
       dockerTarget.hidden = targetType !== 'docker';
       awsTarget.hidden = targetType !== 'aws-ecs' && targetType !== 'aws-ecs-asg';
       neuronTarget.hidden = targetType !== 'neuron';
-      const profile = runtimeProfiles[runtimeProfile.value];
+      const profile = effectiveTargetProfile();
+      const variant = selectedTargetVariant();
       const port = profile?.port ?? 8080;
       const discovery = profile ? profile.discovery ?? true : false;
       const profileVolumes = Object.entries(profile?.volumes ?? {});
       const modelVolume = profileVolumes[0];
-      runtimeNote.textContent = profile ? [profile.type, profile.image, 'port ' + port, modelVolume ? 'volume ' + modelVolume[1] + ' -> ' + modelVolume[0] : '', discovery ? 'discovery on' : 'discovery off'].filter(Boolean).join(' | ') : '';
+      runtimeNote.textContent = profile ? [profile.type, profile.image, variant ? 'variant ' + variant.name : '', 'port ' + port, modelVolume ? 'volume ' + modelVolume[1] + ' -> ' + modelVolume[0] : '', discovery ? 'discovery on' : 'discovery off'].filter(Boolean).join(' | ') : '';
       if (dockerModelVolumeInput && !dockerModelVolumeInput.dataset.touched) dockerModelVolumeInput.value = modelVolume?.[1] ?? '';
     };
     targetProvider?.addEventListener('change', syncTargetCreate);
-    runtimeProfile?.addEventListener('change', syncTargetCreate);
+    runtimeProfile?.addEventListener('change', () => { syncTargetVariants(); syncTargetCreate(); });
+    runtimeProfileVariant?.addEventListener('change', syncTargetCreate);
+    syncTargetVariants();
     syncTargetCreate();
   </script>`);
 }
@@ -904,6 +968,7 @@ function createTargetFromProviderModal(providers: ProviderView[], runtimeProfile
       <form method="post" action="/admin/targets">
         <p><label>Provider<br>${targetProviderSelect(providers)}</label></p>
         <p><label>Profile<br>${runtimeProfileSelect(runtimeProfiles)}</label></p>
+        <p><label>Variant<br><select name="runtimeProfileVariantId"></select></label></p>
         <p id="runtime-profile-note" class="muted"></p>
         <div class="field-grid">
           <p><label>ID<br><input name="id" type="text" placeholder="target-id" required></label></p>

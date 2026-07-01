@@ -10,7 +10,16 @@ const config: AppConfig = {
   awsRegion: "us-east-1",
   litellmTrafficPollSeconds: 0,
   litellmTrafficLookbackSeconds: 300,
-  runtimeProfiles: [{ id: "prefer", name: "PreFer", type: "docker", image: "ghcr.io/cvalusek/prefer:latest", volumes: { "/models": "prefer-model-cache" } }],
+  runtimeProfiles: [
+    {
+      id: "prefer",
+      name: "PreFer",
+      type: "docker",
+      image: "ghcr.io/cvalusek/prefer:latest",
+      volumes: { "/models": "prefer-model-cache" },
+      variants: [{ id: "smol", name: "Smol", env: { LLAMA_ARG_MODELS_PRESET: "/presets/smol.ini" } }]
+    }
+  ],
   capacityProviders: [
     { id: "aws-ecs", displayName: "AWS ECS", type: "aws-ecs", config: {} },
     { id: "runpod", displayName: "RunPod", type: "runpod", config: {} },
@@ -318,6 +327,7 @@ describe("API authentication context", () => {
         displayName: "PreFer Local",
         providerId: "docker",
         runtimeProfileId: "prefer",
+        runtimeProfileVariantId: "smol",
         dockerContainerName: "prefer"
       }).toString()
     });
@@ -327,6 +337,8 @@ describe("API authentication context", () => {
     await app.close();
 
     expect(page.body).toContain("prefer-model-cache");
+    expect(page.body).toContain("LLAMA_ARG_MODELS_PRESET");
+    expect(page.body).toContain("/presets/smol.ini");
     expect(page.body).toContain("http://host.docker.internal:8080/health");
     expect(page.body).toContain("http://host.docker.internal:8080/v1");
   });

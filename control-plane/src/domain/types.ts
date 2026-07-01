@@ -101,6 +101,20 @@ export interface RuntimeProfile {
   volumes?: Record<string, string>;
   env?: Record<string, string>;
   discovery?: boolean;
+  variants?: RuntimeProfileVariant[];
+}
+
+export interface RuntimeProfileVariant {
+  id: string;
+  name: string;
+  description?: string;
+  image?: string;
+  port?: number;
+  health?: string;
+  api?: string;
+  volumes?: Record<string, string>;
+  env?: Record<string, string>;
+  discovery?: boolean;
 }
 
 export type TargetProvisioningJobStatus = "draft" | "running" | "completed" | "failed" | "aborting" | "aborted";

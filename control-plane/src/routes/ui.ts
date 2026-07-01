@@ -224,6 +224,7 @@ const targetFormSchema = z.object({
   providerId: z.string().min(1),
   modelIds: z.string().optional(),
   runtimeProfileId: z.string().optional(),
+  runtimeProfileVariantId: z.string().optional(),
   healthUrl: z.string().optional(),
   apiUrl: z.string().optional(),
   runpodPodId: z.string().optional(),
@@ -243,7 +244,7 @@ async function providerFromForm(providerId: string, providerService: ProviderSer
 }
 
 function targetFromForm(body: z.infer<typeof targetFormSchema>, provider: CapacityProviderDefinition, config?: AppConfig): CapacityTarget {
-  const profile = config?.runtimeProfiles.find((candidate) => candidate.id === body.runtimeProfileId);
+  const profile = effectiveRuntimeProfile(config?.runtimeProfiles, body.runtimeProfileId, body.runtimeProfileVariantId);
   const target: Record<string, unknown> = {};
   target.id = body.id;
   target.displayName = body.displayName || body.id;
@@ -297,6 +298,27 @@ function targetFromForm(body: z.infer<typeof targetFormSchema>, provider: Capaci
     target.neuron = { targetId: body.neuronTargetId };
   }
   return target as unknown as CapacityTarget;
+}
+
+function effectiveRuntimeProfile(runtimeProfiles: RuntimeProfile[] | undefined, profileId: string | undefined, variantId: string | undefined): RuntimeProfile | undefined {
+  const profile = runtimeProfiles?.find((candidate) => candidate.id === profileId);
+  if (!profile) {
+    if (variantId) throw new Error(`Runtime profile not found for variant: ${variantId}`);
+    return undefined;
+  }
+  if (!variantId) return profile;
+  const variant = profile.variants?.find((candidate) => candidate.id === variantId);
+  if (!variant) throw new Error(`Runtime profile variant not found: ${variantId}`);
+  return {
+    ...profile,
+    image: variant.image ?? profile.image,
+    port: variant.port ?? profile.port,
+    health: variant.health ?? profile.health,
+    api: variant.api ?? profile.api,
+    volumes: variant.volumes ?? profile.volumes,
+    env: { ...(profile.env ?? {}), ...(variant.env ?? {}) },
+    discovery: variant.discovery ?? profile.discovery
+  };
 }
 
 function profilePort(profile: RuntimeProfile | undefined): number {
