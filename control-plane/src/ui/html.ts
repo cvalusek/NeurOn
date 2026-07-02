@@ -47,6 +47,9 @@ export function layout(title: string, user: AuthenticatedUser | undefined, body:
     .target-status-meta, .reservation-meta { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
     .reservation-list { display: grid; gap: 8px; margin-top: 12px; }
     .reservation-card { border-top: 1px solid #e2e7e1; padding-top: 10px; }
+    .reservation-cost { margin-top: 4px; color: #334155; font-size: 13px; }
+    .reservation-cost strong { color: #1f2933; }
+    .start-cost { border: 1px solid #d8ddd7; border-radius: 6px; background: #fbfcfb; padding: 10px; margin-top: 14px; }
     .reservation-actions { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; }
     .chip-row { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
     input[type="number"], input[type="text"], input[type="password"], select, textarea { padding: 8px; border: 1px solid #aab4ad; border-radius: 6px; min-width: 140px; max-width: 100%; }
@@ -83,7 +86,7 @@ export function layout(title: string, user: AuthenticatedUser | undefined, body:
   </style>
 </head>
 <body>
-  <header><div class="topbar"><strong class="brand">NeurOn</strong><nav><a href="/">Home</a><a href="/api-keys">API keys</a><a href="/admin">Admin</a><a href="/admin/auth">Auth</a><a href="/admin/providers">Providers</a><a href="/admin/targets">Targets</a></nav><span class="user">${user ? escapeHtml(user.username) : ""}</span></div></header>
+  <header><div class="topbar"><strong class="brand">NeurOn</strong><nav><a href="/">Home</a><a href="/api-keys">API keys</a><a href="/admin/activations">Activations</a><a href="/admin">Admin</a><a href="/admin/auth">Auth</a><a href="/admin/providers">Providers</a><a href="/admin/targets">Targets</a></nav><span class="user">${user ? escapeHtml(user.username) : ""}</span></div></header>
   <main>${body}</main>
 </body>
 </html>`;
@@ -105,7 +108,7 @@ export function loginPage(error = "", githubMethods: Array<{ id: string; display
   </section>`);
 }
 
-export function startPage(user: AuthenticatedUser, targets: Array<{ target: CapacityTarget; models: ModelDefinition[] }>, error = ""): string {
+export function startPage(user: AuthenticatedUser, targets: Array<{ target: CapacityTarget; models: ModelDefinition[] }>, error = "", costEstimates: Record<string, { hourlyUsd: number }> = {}): string {
   const initialTargetId = targets[0]?.target.id ?? "";
   return layout("NeurOn", user, `<section class="panel">
     <h2>Your reservation</h2>
@@ -153,6 +156,7 @@ export function startPage(user: AuthenticatedUser, targets: Array<{ target: Capa
         <button class="choice" type="button" data-custom-keepalive="true" aria-pressed="false">Custom</button>
         <label id="custom-keepalive-wrap" class="hidden">Minutes <input id="custom-keepalive" type="number" min="1" max="60" value="2"></label>
       </div>
+      <div id="start-cost-estimate" class="start-cost">Estimated cost: Not available</div>
       <div class="actions">
         <button type="submit">Reserve</button>
       </div>
@@ -165,6 +169,7 @@ export function startPage(user: AuthenticatedUser, targets: Array<{ target: Capa
   <script type="module">
     const modelLookup = ${safeJson(modelLookupForTargets(targets))};
     const targetLookup = ${safeJson(targetLookupForTargets(targets))};
+    const costLookup = ${safeJson(costEstimates)};
     const form = document.querySelector('#start-form');
     const duration = document.querySelector('#duration-minutes');
     const keepalive = document.querySelector('#keepalive-minutes');
@@ -176,6 +181,7 @@ export function startPage(user: AuthenticatedUser, targets: Array<{ target: Capa
     const keepaliveButtons = [...document.querySelectorAll('[data-keepalive], [data-custom-keepalive]')];
     const customWrap = document.querySelector('#custom-duration-wrap');
     const customKeepaliveWrap = document.querySelector('#custom-keepalive-wrap');
+    const startCostEstimate = document.querySelector('#start-cost-estimate');
     document.addEventListener('click', async (event) => {
       const button = event.target.closest('[data-copy]');
       if (!button) return;
@@ -205,6 +211,20 @@ export function startPage(user: AuthenticatedUser, targets: Array<{ target: Capa
       return '<span class="muted">Start: usually ' + durationShort(estimate.avgSeconds) + ', range ' + durationShort(estimate.minSeconds) + '-' + durationShort(estimate.maxSeconds) + '</span>';
     };
     const formatDateTime = (iso) => new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(iso));
+    const formatUsd = (value) => '$' + new Intl.NumberFormat(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(value ?? 0);
+    const selectedTargetId = () => targetInputs.find(input => input.checked)?.value ?? targetInputs[0]?.value;
+    const updateStartCostEstimate = () => {
+      const targetCost = costLookup[selectedTargetId()];
+      if (!targetCost?.hourlyUsd && targetCost?.hourlyUsd !== 0) {
+        startCostEstimate.textContent = 'Estimated cost: Not available';
+        return;
+      }
+      const durationMinutes = Math.max(0, Number(duration.value) || 0);
+      const keepaliveMinutes = Math.max(0, Number(keepalive.value) || 0);
+      const estimatedMinutes = durationMinutes + keepaliveMinutes;
+      const estimatedCost = targetCost.hourlyUsd * estimatedMinutes / 60;
+      startCostEstimate.textContent = 'Estimated cost: ' + formatUsd(estimatedCost) + ' for ' + estimatedMinutes + ' min (duration + keepalive)';
+    };
     const timeLeft = (iso) => {
       const ms = new Date(iso).getTime() - Date.now();
       if (ms <= 0) return 'expired';
@@ -216,6 +236,11 @@ export function startPage(user: AuthenticatedUser, targets: Array<{ target: Capa
       return rest ? hours + 'h ' + rest + 'm left' : hours + 'h left';
     };
     const friendlyExpiration = (iso) => formatDateTime(iso) + ' (' + timeLeft(iso) + ')';
+    const reservationCostLine = (cost) => {
+      const soFar = '<div><strong>Cost so far:</strong> ' + (cost ? formatUsd(cost.estimatedCostUsd) : 'Not allocated yet') + '</div>';
+      const projected = cost?.projectedTotalCostUsd !== undefined ? '<div><strong>Projected total:</strong> ' + formatUsd(cost.projectedTotalCostUsd) + '</div>' : '';
+      return '<div class="reservation-cost">' + soFar + projected + '</div>';
+    };
     const statusBadge = (status) => '<span class="badge ' + status + '">' + status + '</span>';
     const countdown = (iso) => '<span class="countdown" data-countdown-expires="' + escapeText(iso) + '">' + escapeText(timeLeft(iso)) + '</span>';
     const reservationTimeHtml = (reservation) => {
@@ -228,7 +253,7 @@ export function startPage(user: AuthenticatedUser, targets: Array<{ target: Capa
       const actions = includeActions
         ? '<div class="reservation-actions"><form method="post" action="/reservations/' + reservation.reservationId + '/extend"><button class="secondary" name="durationMinutes" value="1" type="submit">+1 min</button></form><form method="post" action="/reservations/' + reservation.reservationId + '/extend"><button class="secondary" name="durationMinutes" value="2" type="submit">+2 min</button></form><form method="post" action="/reservations/' + reservation.reservationId + '/extend"><button class="secondary" name="durationMinutes" value="5" type="submit">+5 min</button></form><form method="post" action="/reservations/' + reservation.reservationId + '/extend"><button class="secondary" name="durationMinutes" value="15" type="submit">+15 min</button></form><form method="post" action="/reservations/' + reservation.reservationId + '/extend"><button class="secondary" name="durationMinutes" value="30" type="submit">+30 min</button></form><form method="post" action="/reservations/' + reservation.reservationId + '/extend"><button class="secondary" name="durationMinutes" value="60" type="submit">+1 hour</button></form><form method="post" action="/reservations/' + reservation.reservationId + '/done"><button class="danger" type="submit">I\\'m done</button></form></div>'
         : '';
-      return '<div class="reservation-card"><div><div class="reservation-meta">' + statusBadge(reservation.status) + '<strong>' + escapeText(reservation.displayUsername ?? reservation.username) + '</strong><span class="muted">' + reservationTimeHtml(reservation) + '</span></div><div class="muted">' + escapeText(reservationTargets(reservation)) + '</div>' + modelChipRow(reservation.modelIds) + '</div>' + actions + '</div>';
+      return '<div class="reservation-card"><div><div class="reservation-meta">' + statusBadge(reservation.status) + '<strong>' + escapeText(reservation.displayUsername ?? reservation.username) + '</strong><span class="muted">' + reservationTimeHtml(reservation) + '</span></div><div class="muted">' + escapeText(reservationTargets(reservation)) + '</div>' + reservationCostLine(reservation.costEstimate) + modelChipRow(reservation.modelIds) + '</div>' + actions + '</div>';
     };
     const targetStatusCard = (target, reservations) => {
       const relevant = reservations.filter(reservation => reservation.targets.some(candidate => candidate.id === target.id));
@@ -242,6 +267,7 @@ export function startPage(user: AuthenticatedUser, targets: Array<{ target: Capa
       customWrap.classList.toggle('hidden', !isCustom);
       duration.value = isCustom ? custom.value : button?.dataset.duration ?? duration.value;
       if (isCustom) custom.focus();
+      updateStartCostEstimate();
     };
     durationButtons.forEach(button => button.addEventListener('click', () => selectDuration(button)));
     const selectKeepalive = (button) => {
@@ -250,6 +276,7 @@ export function startPage(user: AuthenticatedUser, targets: Array<{ target: Capa
       customKeepaliveWrap.classList.toggle('hidden', !isCustom);
       keepalive.value = isCustom ? customKeepalive.value : button?.dataset.keepalive ?? keepalive.value;
       if (isCustom) customKeepalive.focus();
+      updateStartCostEstimate();
     };
     keepaliveButtons.forEach(button => button.addEventListener('click', () => selectKeepalive(button)));
     const selectTarget = (targetId) => {
@@ -262,8 +289,12 @@ export function startPage(user: AuthenticatedUser, targets: Array<{ target: Capa
         });
       });
     };
-    targetInputs.forEach(input => input.addEventListener('change', () => selectTarget(input.value)));
+    targetInputs.forEach(input => input.addEventListener('change', () => {
+      selectTarget(input.value);
+      updateStartCostEstimate();
+    }));
     selectTarget(targetInputs.find(input => input.checked)?.value ?? targetInputs[0]?.value);
+    updateStartCostEstimate();
     custom.addEventListener('input', () => {
       const customButton = document.querySelector('[data-custom-duration]');
       selectDuration(customButton);
@@ -312,6 +343,8 @@ export function reservationPage(user: AuthenticatedUser, reservation: Reservatio
     <p>Status: <span id="reservation-status" class="status">${escapeHtml(reservation.status)}</span></p>
     <p>Models: <span id="reservation-models">${escapeHtml(reservation.modelIds.join(", "))}</span></p>
     <p>Expires: <span id="reservation-expires">${reservation.expiresAt.toISOString()}</span></p>
+    <p>Cost so far: <span id="reservation-cost-so-far" class="status">Not allocated yet</span></p>
+    <p>Projected total: <span id="reservation-cost-projected" class="status">Not available</span></p>
     <div id="target-status"></div>
     <form method="post" action="/reservations/${escapeHtml(reservation.id)}/done"><button class="large danger" type="submit">I'm done</button></form>
   </section>
@@ -330,12 +363,15 @@ export function reservationPage(user: AuthenticatedUser, reservation: Reservatio
     };
     const friendlyExpiration = (iso) => formatDateTime(iso) + ' (' + timeLeft(iso) + ')';
     const reservationTime = (data) => data.endedAt ? 'ended ' + formatDateTime(data.endedAt) : friendlyExpiration(data.expiresAt);
+    const formatUsd = (value) => '$' + new Intl.NumberFormat(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(value ?? 0);
     async function refresh() {
       const res = await fetch('/api/reservations/' + reservationId + '/status');
       if (!res.ok) return;
       const data = await res.json();
       document.querySelector('#reservation-status').textContent = data.status;
       document.querySelector('#reservation-expires').textContent = reservationTime(data);
+      document.querySelector('#reservation-cost-so-far').textContent = data.costEstimate ? formatUsd(data.costEstimate.estimatedCostUsd) : 'Not allocated yet';
+      document.querySelector('#reservation-cost-projected').textContent = data.costEstimate?.projectedTotalCostUsd !== undefined ? formatUsd(data.costEstimate.projectedTotalCostUsd) : 'Not available';
       document.querySelector('#target-status').innerHTML = data.targets.map(t => '<p><strong>' + t.id + '</strong>: ' + t.observed + ' - ' + t.message + '</p>').join('');
     }
     refresh();
@@ -395,6 +431,8 @@ export function adminPage(user: AuthenticatedUser, config: AppConfig): string {
     };
     const friendlyExpiration = (iso) => formatDateTime(iso) + ' (' + timeLeft(iso) + ')';
     const statusBadge = (status) => '<span class="badge ' + status + '">' + status + '</span>';
+    const formatUsd = (value) => '$' + new Intl.NumberFormat(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(value ?? 0);
+    const reservationCost = (reservation) => reservation.costEstimate ? formatUsd(reservation.costEstimate.estimatedCostUsd) : '';
     const reservationTime = (reservation) => {
       if (reservation.status === 'active') return 'until ' + friendlyExpiration(reservation.expiresAt);
       if (reservation.endedAt) return reservation.status === 'done' ? 'ended ' + formatDateTime(reservation.endedAt) : reservation.status + ' ' + formatDateTime(reservation.endedAt);
@@ -413,11 +451,36 @@ export function adminPage(user: AuthenticatedUser, config: AppConfig): string {
         const provision = t.needsProvisioning ? '<button onclick="provisionTarget(\\'' + t.id + '\\')">Provision</button> ' : '';
         return '<tr><td>' + t.id + '</td><td>' + t.desired + '</td><td>' + t.observed + '</td><td>' + t.message + '</td><td>' + t.activeUsers.join(', ') + '</td><td>' + provision + '<button onclick="discoverTarget(\\'' + t.id + '\\')">Discover</button> <button onclick="reconcileTarget(\\'' + t.id + '\\')">Reconcile</button> <button class="danger" onclick="forceStop(\\'' + t.id + '\\')">Force stop</button></td></tr>';
       }).join('');
-      const reservations = data.reservations.map(r => '<tr><td>' + r.reservationId + '</td><td>' + (r.displayUsername ?? r.username) + '</td><td>' + statusBadge(r.status) + '</td><td>' + reservationTime(r) + '</td><td>' + r.modelIds.join(', ') + '</td></tr>').join('');
-      document.querySelector('#admin-status').innerHTML = '<h2>Targets</h2><table><thead><tr><th>Target</th><th>Desired</th><th>Observed</th><th>Message</th><th>Users</th><th></th></tr></thead><tbody>' + targets + '</tbody></table><h2>Reservations</h2><table><thead><tr><th>ID</th><th>User</th><th>Status</th><th>Expires</th><th>Models</th></tr></thead><tbody>' + reservations + '</tbody></table>';
+      const reservations = data.reservations.map(r => '<tr><td>' + r.reservationId + '</td><td>' + (r.displayUsername ?? r.username) + '</td><td>' + statusBadge(r.status) + '</td><td>' + reservationTime(r) + '</td><td>' + reservationCost(r) + '</td><td>' + r.modelIds.join(', ') + '</td></tr>').join('');
+      document.querySelector('#admin-status').innerHTML = '<h2>Targets</h2><table><thead><tr><th>Target</th><th>Desired</th><th>Observed</th><th>Message</th><th>Users</th><th></th></tr></thead><tbody>' + targets + '</tbody></table><h2>Reservations</h2><table><thead><tr><th>ID</th><th>User</th><th>Status</th><th>Expires</th><th>Cost</th><th>Models</th></tr></thead><tbody>' + reservations + '</tbody></table>';
     }
     refresh();
     setInterval(refresh, ${config.adminStatusPollSeconds * 1000});
+  </script>`);
+}
+
+export function activationPage(user: AuthenticatedUser): string {
+  return layout("Activations", user, `<section class="panel">
+    <h1>Activations</h1>
+    <div id="activation-list"><p class="muted">Loading...</p></div>
+  </section>
+  <script type="module">
+    const escapeText = (value) => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' }[char]));
+    const formatDateTime = (iso) => iso ? new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(iso)) : '';
+    const formatUsd = (value) => '$' + new Intl.NumberFormat(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(value ?? 0);
+    const statusBadge = (status) => '<span class="badge ' + status + '">' + escapeText(status) + '</span>';
+    const activationWindow = (activation) => escapeText(formatDateTime(activation.startedAt) + ' - ' + (activation.endedAt ? formatDateTime(activation.endedAt) : 'active'));
+    const reservationRows = (activation) => activation.reservations.length
+      ? '<table><thead><tr><th>Reservation</th><th>User</th><th>Status</th><th>Cost</th><th>Models</th></tr></thead><tbody>' + activation.reservations.map(reservation => '<tr><td><a href="/reservations/' + escapeText(reservation.reservationId) + '">' + escapeText(reservation.reservationId) + '</a></td><td>' + escapeText(reservation.displayUsername) + '</td><td>' + statusBadge(reservation.status) + '</td><td>' + formatUsd(reservation.estimatedCostUsd) + '</td><td>' + escapeText(reservation.modelIds.join(', ')) + '</td></tr>').join('') + '</tbody></table>'
+      : '<p class="muted">No reservation allocations recorded.</p>';
+    const activationCard = (activation) => '<details class="drilldown"><summary><div><strong>' + escapeText(activation.targetDisplayName) + '</strong><div class="muted"><code>' + escapeText(activation.id) + '</code> | ' + activationWindow(activation) + '</div></div><span>' + statusBadge(activation.status) + '</span></summary><div class="drilldown-body"><p><strong>Estimated cost:</strong> ' + formatUsd(activation.estimatedCostUsd) + '</p><p><strong>Hourly estimate:</strong> ' + (activation.estimatedHourlyCostUsd === undefined ? 'Not configured' : formatUsd(activation.estimatedHourlyCostUsd)) + '</p>' + reservationRows(activation) + '</div></details>';
+    async function refresh() {
+      const response = await fetch('/api/admin/activations');
+      if (!response.ok) return;
+      const data = await response.json();
+      document.querySelector('#activation-list').innerHTML = data.activations.length ? '<div class="summary-list">' + data.activations.map(activationCard).join('') + '</div>' : '<p class="muted">No activations recorded yet.</p>';
+    }
+    refresh();
   </script>`);
 }
 

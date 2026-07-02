@@ -10,6 +10,7 @@ import { SqliteCapacityTargetRepository } from "../repository/SqliteCapacityTarg
 import { SqliteReservationRepository } from "../repository/SqliteReservationRepository.js";
 import { SqliteTargetModelDiscoveryRepository } from "../repository/SqliteTargetModelDiscoveryRepository.js";
 import { SqliteTargetProvisioningJobRepository } from "../repository/SqliteTargetProvisioningJobRepository.js";
+import { SqliteTargetActivationRepository } from "../repository/SqliteTargetActivationRepository.js";
 
 let tempDir: string | undefined;
 
@@ -165,6 +166,47 @@ describe("SqliteTargetProvisioningJobRepository", () => {
       targetId: "runpod-prefer"
     });
     expect(job?.createdAt).toEqual(createdAt);
+  });
+});
+
+describe("SqliteTargetActivationRepository", () => {
+  it("persists target activations and reservation cost links across repository restarts", async () => {
+    tempDir = await mkdtemp(path.join(os.tmpdir(), "neuron-sqlite-"));
+    const databasePath = path.join(tempDir, "neuron.db");
+    const reservationRepository = new SqliteReservationRepository(databasePath);
+    const reservation = await reservationRepository.create({
+      username: "clint",
+      modelIds: ["m1"],
+      targetIds: ["t1"],
+      createdAt: new Date("2026-06-27T12:00:00.000Z"),
+      expiresAt: new Date("2026-06-27T13:00:00.000Z"),
+      status: "active"
+    });
+    reservationRepository.close();
+
+    const first = new SqliteTargetActivationRepository(databasePath);
+    const activation = await first.createActivation({
+      targetId: "t1",
+      startedAt: new Date("2026-06-27T12:00:00.000Z"),
+      status: "open",
+      estimatedHourlyCostUsd: 4,
+      estimatedCostUsd: 0,
+      lastCostedAt: new Date("2026-06-27T12:00:00.000Z")
+    });
+    await first.addReservationCost({
+      targetActivationId: activation.id,
+      reservationId: reservation.id,
+      at: new Date("2026-06-27T12:00:00.000Z"),
+      estimatedCostUsd: 2
+    });
+    await first.updateActivation(activation.id, { status: "closed", endedAt: new Date("2026-06-27T12:30:00.000Z"), estimatedCostUsd: 2 });
+    first.close();
+
+    const second = new SqliteTargetActivationRepository(databasePath);
+    expect(await second.getOpenActivationForTarget("t1")).toBeUndefined();
+    expect(await second.listActivationsForTarget("t1")).toMatchObject([{ id: activation.id, status: "closed", estimatedCostUsd: 2 }]);
+    expect(await second.listReservationAllocations(reservation.id)).toMatchObject([{ targetActivationId: activation.id, reservationId: reservation.id, estimatedCostUsd: 2 }]);
+    second.close();
   });
 });
 

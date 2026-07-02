@@ -99,6 +99,11 @@ const targetSchema = z.object({
       backendName: z.string(),
       apiBaseUrl: z.string().url()
     })
+    .optional(),
+  costEstimate: z
+    .object({
+      hourlyUsd: z.number().nonnegative().optional()
+    })
     .optional()
 });
 
@@ -459,7 +464,10 @@ function loadTargetsFromEnv(providers: CapacityProviderDefinition[]): unknown[] 
             backendName: requiredScopedEnv(`${prefix}_LITELLM_BACKEND_NAME`),
             apiBaseUrl: requiredScopedEnv(`${prefix}_LITELLM_API_BASE_URL`)
           }
-        : undefined
+        : undefined,
+      costEstimate: compactObject({
+        hourlyUsd: numberOptionalEnv(`${prefix}_ESTIMATED_HOURLY_COST_USD`)
+      })
     });
   });
 }
@@ -664,6 +672,13 @@ function intOptionalEnv(name: string): number | undefined {
   const value = env(name);
   if (!value) return undefined;
   const parsed = Number.parseInt(value, 10);
+  return Number.isFinite(parsed) ? parsed : undefined;
+}
+
+function numberOptionalEnv(name: string): number | undefined {
+  const value = env(name);
+  if (!value) return undefined;
+  const parsed = Number.parseFloat(value);
   return Number.isFinite(parsed) ? parsed : undefined;
 }
 

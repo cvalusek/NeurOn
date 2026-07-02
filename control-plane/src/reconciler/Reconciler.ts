@@ -4,6 +4,7 @@ import type { HealthChecker } from "./HealthChecker.js";
 import type { RuntimeModelDiscovery } from "../services/RuntimeModelDiscovery.js";
 import type { ModelWarmupService } from "../services/ModelWarmupService.js";
 import type { TrafficPoller } from "../services/TrafficPoller.js";
+import type { CostEstimationService } from "../services/CostEstimationService.js";
 
 export class Reconciler {
   private running = false;
@@ -17,7 +18,8 @@ export class Reconciler {
     private readonly healthChecker?: HealthChecker,
     private readonly runtimeModelDiscovery?: RuntimeModelDiscovery,
     private readonly modelWarmup?: ModelWarmupService,
-    private readonly trafficPoller?: TrafficPoller
+    private readonly trafficPoller?: TrafficPoller,
+    private readonly costEstimation?: CostEstimationService
   ) {}
 
   async reconcile(now = new Date()): Promise<void> {
@@ -46,6 +48,12 @@ export class Reconciler {
           } else {
             await this.capacityProvider.ensureTargetOff(target);
           }
+          await this.costEstimation?.reconcileTargetActivation(
+            target,
+            activeReservations.filter((reservation) => reservation.targetIds.includes(target.id)),
+            desired,
+            now
+          );
           const providerStatus = await this.capacityProvider.getTargetStatus(target);
           let observed = desired === "off" && providerStatus.observed === "healthy" ? "stopping" : providerStatus.observed;
           let message = providerStatus.message;

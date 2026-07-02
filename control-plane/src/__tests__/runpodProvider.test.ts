@@ -69,4 +69,32 @@ describe("RunPodCapacityProvider", () => {
 
     expect(provisionTarget.runpod?.podId).toBe("created-pod");
   });
+
+  it("reads adjusted hourly cost from the RunPod Pod detail response", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({
+        ok: true,
+        text: async () => JSON.stringify({ id: "pod-123", adjustedCostPerHr: 0.69, costPerHr: "0.74" })
+      }))
+    );
+
+    const costEstimate = await new RunPodCapacityProvider().getTargetCostEstimate(target);
+
+    expect(costEstimate).toEqual({ hourlyUsd: 0.69 });
+  });
+
+  it("falls back to the base hourly cost when no adjusted hourly cost is returned", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({
+        ok: true,
+        text: async () => JSON.stringify({ id: "pod-123", costPerHr: "0.74" })
+      }))
+    );
+
+    const costEstimate = await new RunPodCapacityProvider().getTargetCostEstimate(target);
+
+    expect(costEstimate).toEqual({ hourlyUsd: 0.74 });
+  });
 });

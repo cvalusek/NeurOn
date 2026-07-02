@@ -1,5 +1,5 @@
 import type { CapacityProvider } from "../domain/interfaces.js";
-import type { CapacityProviderStatus, CapacityTarget, RunPodTargetConfig } from "../domain/types.js";
+import type { CapacityProviderStatus, CapacityTarget, RunPodTargetConfig, TargetCostEstimateConfig } from "../domain/types.js";
 
 const defaultApiBaseUrl = "https://rest.runpod.io/v1";
 
@@ -41,6 +41,14 @@ export class RunPodCapacityProvider implements CapacityProvider {
     return { observed: "starting", message: `RunPod Pod desired status is ${desiredStatus ?? "unknown"}`, details: pod as Record<string, unknown> };
   }
 
+  async getTargetCostEstimate(target: CapacityTarget): Promise<TargetCostEstimateConfig | undefined> {
+    const runpod = requireRunPod(target);
+    if (!runpod.podId) return undefined;
+    const pod = await this.request<RunPodPod>(runpod, `/pods/${runpod.podId}`, { method: "GET" });
+    const hourlyUsd = hourlyCostFromPod(pod);
+    return hourlyUsd === undefined ? undefined : { hourlyUsd };
+  }
+
   async forceStopTarget(target: CapacityTarget): Promise<void> {
     await this.ensureTargetOff(target);
   }
@@ -66,6 +74,11 @@ export class RunPodCapacityProvider implements CapacityProvider {
 interface RunPodPod {
   id?: string;
   desiredStatus?: "RUNNING" | "EXITED" | "TERMINATED" | string;
+  adjustedCostPerHr?: number | string;
+  costPerHr?: number | string;
+  machine?: {
+    costPerHr?: number | string;
+  };
 }
 
 function requireRunPod(target: CapacityTarget): RunPodTargetConfig {
@@ -83,4 +96,17 @@ function apiKey(runpod: RunPodTargetConfig): string {
   const value = runpod.apiKey ?? process.env[runpod.apiKeyEnv ?? "RUNPOD_API_KEY"];
   if (!value) throw new Error(`RunPod API key is required; set ${runpod.apiKeyEnv ?? "RUNPOD_API_KEY"} or runpod.apiKey`);
   return value;
+}
+
+function hourlyCostFromPod(pod: RunPodPod): number | undefined {
+  return firstPositiveNumber(pod.adjustedCostPerHr, pod.costPerHr, pod.machine?.costPerHr);
+}
+
+function firstPositiveNumber(...values: Array<number | string | undefined>): number | undefined {
+  for (const value of values) {
+    if (value === undefined || value === "") continue;
+    const numeric = typeof value === "number" ? value : Number(value);
+    if (Number.isFinite(numeric) && numeric >= 0) return numeric;
+  }
+  return undefined;
 }

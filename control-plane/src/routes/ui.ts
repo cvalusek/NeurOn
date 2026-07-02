@@ -8,9 +8,10 @@ import { AuthMethodService } from "../services/AuthMethodService.js";
 import { ModelCatalog } from "../services/ModelCatalog.js";
 import { ProviderService } from "../services/ProviderService.js";
 import { ReservationService } from "../services/ReservationService.js";
+import { CostEstimationService } from "../services/CostEstimationService.js";
 import { TargetService } from "../services/TargetService.js";
 import { TargetProvisioningService } from "../services/TargetProvisioningService.js";
-import { adminAuthPage, adminPage, apiKeysPage, loginPage, providerAdminPage, reservationPage, startPage, targetAdminPage } from "../ui/html.js";
+import { activationPage, adminAuthPage, adminPage, apiKeysPage, loginPage, providerAdminPage, reservationPage, startPage, targetAdminPage } from "../ui/html.js";
 import { requireUser } from "../utils/http.js";
 
 export function registerUiRoutes(
@@ -23,7 +24,8 @@ export function registerUiRoutes(
   reservationService: ReservationService,
   providerService: ProviderService,
   targetService: TargetService,
-  targetProvisioningService: TargetProvisioningService
+  targetProvisioningService: TargetProvisioningService,
+  costEstimation: CostEstimationService
 ) {
   app.get("/login", async (_request, reply) => reply.type("text/html").send(loginPage("", await authMethodService.listEnabled("github"))));
   app.post("/login", async (request, reply) => {
@@ -74,7 +76,8 @@ export function registerUiRoutes(
   app.get("/", async (request, reply) => {
     const query = z.object({ error: z.string().optional() }).parse(request.query);
     const targets = catalog.listTargets().map((target) => ({ target, models: catalog.listModelsForTarget(target.id) }));
-    return reply.type("text/html").send(startPage(requireUser(request), targets, query.error));
+    const costEstimates = await startCostEstimates(targets.map(({ target }) => target), costEstimation);
+    return reply.type("text/html").send(startPage(requireUser(request), targets, query.error, costEstimates));
   });
   app.get("/api-keys", async (request, reply) => {
     const user = requireUser(request);
@@ -126,6 +129,7 @@ export function registerUiRoutes(
     return reply.redirect("/");
   });
   app.get("/admin", async (request, reply) => reply.type("text/html").send(adminPage(requireUser(request), config)));
+  app.get("/admin/activations", async (request, reply) => reply.type("text/html").send(activationPage(requireUser(request))));
   app.get("/admin/auth", async (request, reply) => {
     const query = z.object({ error: z.string().optional() }).parse(request.query);
     return reply.type("text/html").send(adminAuthPage(requireUser(request), await authMethodService.list(), query.error));
@@ -474,6 +478,16 @@ function reservationFormErrorMessage(error: unknown): string {
     return error.message;
   }
   return "Could not create reservation";
+}
+
+async function startCostEstimates(targets: CapacityTarget[], costEstimation: CostEstimationService): Promise<Record<string, { hourlyUsd: number }>> {
+  const estimates = await Promise.all(
+    targets.map(async (target) => {
+      const estimate = await costEstimation.resolveTargetCostEstimate(target);
+      return estimate?.hourlyUsd === undefined ? undefined : [target.id, { hourlyUsd: estimate.hourlyUsd }] as const;
+    })
+  );
+  return Object.fromEntries(estimates.filter((estimate): estimate is [string, { hourlyUsd: number }] => Boolean(estimate)));
 }
 
 function authMethodFromForm(body: z.infer<typeof authMethodFormSchema>, existing?: AuthMethod): AuthMethod {

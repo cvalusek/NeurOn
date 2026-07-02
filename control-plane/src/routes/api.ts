@@ -1,10 +1,11 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
-import type { CapacityProvider, ReservationRepository, TargetStatusRepository } from "../domain/interfaces.js";
-import type { CapacityTarget } from "../domain/types.js";
+import type { CapacityProvider, ReservationRepository, TargetActivationRepository, TargetStatusRepository } from "../domain/interfaces.js";
+import type { CapacityTarget, Reservation, TargetActivation, TargetActivationReservation } from "../domain/types.js";
 import { HealthChecker } from "../reconciler/HealthChecker.js";
 import { Reconciler } from "../reconciler/Reconciler.js";
 import { ApiKeyService } from "../services/ApiKeyService.js";
+import { CostEstimationService } from "../services/CostEstimationService.js";
 import { ModelCatalog } from "../services/ModelCatalog.js";
 import { ReservationService } from "../services/ReservationService.js";
 import { RuntimeModelDiscovery } from "../services/RuntimeModelDiscovery.js";
@@ -27,7 +28,9 @@ export function registerApiRoutes(
   runtimeModelDiscovery: RuntimeModelDiscovery,
   healthChecker: HealthChecker,
   targetService: TargetService,
-  targetProvisioningService: TargetProvisioningService
+  targetProvisioningService: TargetProvisioningService,
+  costEstimation: CostEstimationService,
+  targetActivations: TargetActivationRepository
 ) {
   app.get("/healthz", async () => ({ ok: true }));
   app.get(
@@ -122,21 +125,21 @@ export function registerApiRoutes(
       try {
         const body = z.object({ modelIds: z.array(z.string()).default([]), targetIds: z.array(z.string()).default([]), durationMinutes: z.number(), keepaliveMinutes: z.number().optional() }).parse(request.body);
         const reservation = await reservationService.createForUser(requireUser(request), body);
-        return reply.code(201).send(reservationJson(reservation, statuses.list()));
+        return reply.code(201).send(await reservationPayload(reservation, statuses, costEstimation, catalog));
       } catch (error) {
         return sendError(reply, error);
       }
     }
   );
 
-  app.get("/api/reservations/:id", async (request, reply) => reservationEndpoint(request, reply, reservationService, statuses));
-  app.get("/api/reservations/:id/status", async (request, reply) => reservationEndpoint(request, reply, reservationService, statuses));
+  app.get("/api/reservations/:id", async (request, reply) => reservationEndpoint(request, reply, reservationService, statuses, costEstimation, catalog));
+  app.get("/api/reservations/:id/status", async (request, reply) => reservationEndpoint(request, reply, reservationService, statuses, costEstimation, catalog));
 
   app.post("/api/reservations/:id/done", async (request, reply) => {
     try {
       const { id } = z.object({ id: z.string() }).parse(request.params);
       const reservation = await reservationService.markDone(id, requireUser(request));
-      return reservationJson(reservation, statuses.list());
+      return reservationPayload(reservation, statuses, costEstimation, catalog);
     } catch (error) {
       return sendError(reply, error);
     }
@@ -159,7 +162,7 @@ export function registerApiRoutes(
         const { id } = z.object({ id: z.string() }).parse(request.params);
         const { durationMinutes, fromNow } = z.object({ durationMinutes: z.number(), fromNow: z.boolean().optional() }).parse(request.body);
         const reservation = await reservationService.extend(id, requireUser(request), durationMinutes, { fromNow });
-        return reservationJson(reservation, statuses.list());
+        return reservationPayload(reservation, statuses, costEstimation, catalog);
       } catch (error) {
         return sendError(reply, error);
       }
@@ -176,11 +179,12 @@ export function registerApiRoutes(
         response: { 200: statusSchema }
       }
     },
-    async () => statusPayload(catalog, reservations, statuses)
+    async () => statusPayload(catalog, reservations, statuses, costEstimation)
   );
-  app.get("/api/admin/reservations", async () => ({ reservations: (await reservations.list()).map((reservation) => reservationJson(reservation, statuses.list())) }));
+  app.get("/api/admin/reservations", async () => ({ reservations: await reservationPayloads(await reservations.list(), statuses, costEstimation, catalog) }));
   app.get("/api/admin/targets", async () => ({ capacityTargets: await targetsPayload(catalog, reservations, statuses) }));
-  app.get("/api/admin/status", async () => statusPayload(catalog, reservations, statuses, { includeReservationHistory: true }));
+  app.get("/api/admin/activations", async () => activationPayload(catalog, reservations, targetActivations));
+  app.get("/api/admin/status", async () => statusPayload(catalog, reservations, statuses, costEstimation, { includeReservationHistory: true }));
 
   app.post("/api/admin/targets/:id/reconcile", async (request, reply) => {
     try {
@@ -279,24 +283,33 @@ function runDiscoveryBootstrapInBackground(
     });
 }
 
-async function reservationEndpoint(request: { params: unknown }, reply: { code: (code: number) => { send: (body: unknown) => unknown } }, service: ReservationService, statuses: TargetStatusRepository) {
+async function reservationEndpoint(request: { params: unknown }, reply: { code: (code: number) => { send: (body: unknown) => unknown } }, service: ReservationService, statuses: TargetStatusRepository, costEstimation: CostEstimationService, catalog: ModelCatalog) {
   try {
     const { id } = z.object({ id: z.string() }).parse(request.params);
     const reservation = await service.getOwned(id, requireUser(request as never));
-    return reservationJson(reservation, statuses.list());
+    return reservationPayload(reservation, statuses, costEstimation, catalog);
   } catch (error) {
     return sendError(reply as never, error, 404);
   }
 }
 
-async function statusPayload(catalog: ModelCatalog, reservations: ReservationRepository, statuses: TargetStatusRepository, options: { includeReservationHistory?: boolean } = {}) {
+async function statusPayload(catalog: ModelCatalog, reservations: ReservationRepository, statuses: TargetStatusRepository, costEstimation: CostEstimationService, options: { includeReservationHistory?: boolean } = {}) {
   const activeReservations = await reservations.listActive(new Date());
   const visibleReservations = options.includeReservationHistory ? await reservations.list() : activeReservations;
   return {
-    reservations: visibleReservations.map((reservation) => reservationJson(reservation, statuses.list())),
-    activeReservations: activeReservations.map((reservation) => reservationJson(reservation, statuses.list())),
+    reservations: await reservationPayloads(visibleReservations, statuses, costEstimation, catalog),
+    activeReservations: await reservationPayloads(activeReservations, statuses, costEstimation, catalog),
     capacityTargets: await targetsPayload(catalog, reservations, statuses)
   };
+}
+
+async function reservationPayloads(reservations: Reservation[], statuses: TargetStatusRepository, costEstimation: CostEstimationService, catalog?: ModelCatalog) {
+  return Promise.all(reservations.map((reservation) => reservationPayload(reservation, statuses, costEstimation, catalog)));
+}
+
+async function reservationPayload(reservation: Reservation, statuses: TargetStatusRepository, costEstimation: CostEstimationService, catalog?: ModelCatalog) {
+  const targets = catalog ? reservation.targetIds.map((targetId) => catalog.getTarget(targetId)).filter((target): target is CapacityTarget => Boolean(target)) : [];
+  return reservationJson(reservation, statuses.list(), await costEstimation.estimateForReservation(reservation, targets));
 }
 
 async function targetsPayload(catalog: ModelCatalog, reservations: ReservationRepository, statuses: TargetStatusRepository) {
@@ -308,6 +321,49 @@ async function targetsPayload(catalog: ModelCatalog, reservations: ReservationRe
       Array.from(new Set(active.filter((reservation) => reservation.targetIds.includes(target.id)).map(reservationDisplayUsername)))
     )
   );
+}
+
+async function activationPayload(catalog: ModelCatalog, reservations: ReservationRepository, targetActivations: TargetActivationRepository) {
+  const allReservations = await reservations.list();
+  const reservationById = new Map(allReservations.map((reservation) => [reservation.id, reservation]));
+  const targets = await Promise.all(
+    catalog.listTargets().map(async (target) => ({
+      target,
+      activations: await Promise.all((await targetActivations.listActivationsForTarget(target.id)).map((activation) => activationJson(activation, target, reservationById, targetActivations)))
+    }))
+  );
+  return {
+    activations: targets.flatMap((entry) => entry.activations).sort((left, right) => new Date(right.startedAt).getTime() - new Date(left.startedAt).getTime() || left.id.localeCompare(right.id))
+  };
+}
+
+async function activationJson(activation: TargetActivation, target: CapacityTarget, reservationById: Map<string, Reservation>, targetActivations: TargetActivationRepository) {
+  const allocations = await targetActivations.listActivationReservations(activation.id);
+  return {
+    id: activation.id,
+    targetId: activation.targetId,
+    targetDisplayName: target.displayName,
+    status: activation.status,
+    startedAt: activation.startedAt.toISOString(),
+    endedAt: activation.endedAt?.toISOString(),
+    estimatedHourlyCostUsd: activation.estimatedHourlyCostUsd,
+    estimatedCostUsd: activation.estimatedCostUsd,
+    reservations: allocations.map((allocation) => activationReservationJson(allocation, reservationById)).filter(Boolean)
+  };
+}
+
+function activationReservationJson(allocation: TargetActivationReservation, reservationById: Map<string, Reservation>) {
+  const reservation = reservationById.get(allocation.reservationId);
+  if (!reservation) return undefined;
+  return {
+    reservationId: allocation.reservationId,
+    displayUsername: reservationDisplayUsername(reservation),
+    status: reservation.status,
+    startedAt: allocation.startedAt.toISOString(),
+    endedAt: allocation.endedAt?.toISOString(),
+    estimatedCostUsd: allocation.estimatedCostUsd,
+    modelIds: reservation.modelIds
+  };
 }
 
 function authSecurity(): Array<Record<string, string[]>> {
@@ -373,7 +429,18 @@ const reservationSchema = {
     endedAt: { type: "string", format: "date-time" },
     modelIds: { type: "array", items: { type: "string" } },
     targets: { type: "array", items: targetRefSchema },
-    failureMessage: { type: "string" }
+    failureMessage: { type: "string" },
+    costEstimate: {
+      type: "object",
+      properties: {
+        estimatedCostUsd: { type: "number" },
+        projectedRemainingCostUsd: { type: "number" },
+        projectedTotalCostUsd: { type: "number" },
+        estimatedHourlyCostUsd: { type: "number" },
+        currency: { type: "string" }
+      },
+      required: ["estimatedCostUsd", "currency"]
+    }
   },
   required: ["reservationId", "username", "displayUsername", "status", "expiresAt", "modelIds", "targets"]
 } as const;

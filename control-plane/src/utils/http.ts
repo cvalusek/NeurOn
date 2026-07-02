@@ -1,5 +1,6 @@
 import type { FastifyReply, FastifyRequest } from "fastify";
 import type { ApiKey, AuthenticatedUser, CapacityTarget, Reservation, TargetStatus } from "../domain/types.js";
+import type { ReservationCostEstimate } from "../services/CostEstimationService.js";
 
 export function requireUser(request: FastifyRequest): AuthenticatedUser {
   const user = request.user;
@@ -7,7 +8,7 @@ export function requireUser(request: FastifyRequest): AuthenticatedUser {
   return user;
 }
 
-export function reservationJson(reservation: Reservation, statuses: TargetStatus[]) {
+export function reservationJson(reservation: Reservation, statuses: TargetStatus[], costEstimate?: ReservationCostEstimate) {
   return {
     reservationId: reservation.id,
     username: reservation.username,
@@ -27,7 +28,8 @@ export function reservationJson(reservation: Reservation, statuses: TargetStatus
         message: status?.message ?? "Not checked"
       };
     }),
-    failureMessage: reservation.failureMessage
+    failureMessage: reservation.failureMessage,
+    costEstimate
   };
 }
 

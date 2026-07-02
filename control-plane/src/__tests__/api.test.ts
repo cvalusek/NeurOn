@@ -78,6 +78,29 @@ describe("API authentication context", () => {
     expect(adminStatus.json().reservations.map((reservation: { reservationId: string }) => reservation.reservationId)).toContain(expired.json().reservationId);
   });
 
+  it("includes reservation cost estimates after reconciler allocation", async () => {
+    process.env.USE_FAKE_PROVIDER = "true";
+    const { app, reconciler } = await buildApp({
+      ...config,
+      capacityTargets: [{ ...config.capacityTargets[0], costEstimate: { hourlyUsd: 12 } }]
+    }, models);
+    const auth = { authorization: `Basic ${Buffer.from("actual:secret").toString("base64")}` };
+    const created = await app.inject({
+      method: "POST",
+      url: "/api/reservations",
+      headers: auth,
+      payload: { modelIds: ["m1"], durationMinutes: 60 }
+    });
+    await reconciler.reconcile(new Date("2026-06-25T10:00:00.000Z"));
+    await reconciler.reconcile(new Date("2026-06-25T10:15:00.000Z"));
+
+    const response = await app.inject({ method: "GET", url: `/api/reservations/${created.json().reservationId}`, headers: auth });
+    await app.close();
+
+    expect(response.json().costEstimate).toMatchObject({ estimatedCostUsd: 3, currency: "USD" });
+    expect(response.json().costEstimate.projectedTotalCostUsd).toBeGreaterThanOrEqual(3);
+  });
+
   it("creates API keys, authenticates bearer requests, and revokes keys", async () => {
     process.env.USE_FAKE_PROVIDER = "true";
     const { app } = await buildApp(config, models);

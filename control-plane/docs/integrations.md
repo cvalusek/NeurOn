@@ -65,6 +65,10 @@ The OpenAPI document includes Basic and Bearer authentication schemes and
 schemas for the main plugin-facing endpoints, including models, reservations,
 status, API keys, and MCP.
 
+Reservation responses may include `costEstimate` after the reconciler has
+allocated estimated target activation cost to that reservation. This is best-effort
+chargeback metadata, not a provider invoice.
+
 Good read-only smoke tests:
 
 ```bash

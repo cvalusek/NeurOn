@@ -102,6 +102,9 @@ request body when resource creation is enabled on the provider.
 Health checks are optional for RunPod targets. NeurOn can use RunPod Pod status
 as the capacity signal. Discovery uses `apiUrl` when configured, or
 infers RunPod's proxy URL from Pod ID and runtime port.
+When target cost is not configured explicitly, NeurOn reads the Pod detail
+response at activation start and uses RunPod's adjusted hourly Pod cost when
+available, falling back to the base hourly Pod cost.
 
 Provision:
 
@@ -126,6 +129,10 @@ Status:
 ```bash
 GET /v1/pods/{podId}
 ```
+
+Cost estimation uses the same Pod detail endpoint. The RunPod API exposes
+`adjustedCostPerHr` for the effective hourly cost after Savings Plans and
+`costPerHr` for the base hourly cost.
 
 ## NeurOn
 

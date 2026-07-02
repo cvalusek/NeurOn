@@ -36,6 +36,20 @@ Important fields:
 A reservation contributes to desired capacity only when it is active and its
 expiration is in the future.
 
+### TargetActivation
+
+A target activation represents one contiguous period where the reconciler desired
+a capacity target on. Activations are created and closed by the reconciler, not
+by request handlers.
+
+Target activation reservations connect an activation to the reservations that
+contributed to it. They accumulate estimated cost allocated back to each
+reservation. Reservation API payloads expose their sum as
+`costEstimate`.
+
+The first draft uses configured hourly target estimates only. It does not query
+cloud billing APIs or provider invoices.
+
 ### CapacityTarget
 
 A capacity target represents a shared runtime/backend. It can serve one or more
@@ -85,6 +99,7 @@ The core interfaces keep replaceable parts isolated:
 - `ReservationRepository`
 - `ApiKeyRepository`
 - `TargetModelDiscoveryRepository`
+- `TargetActivationRepository`
 - `AuthProvider`
 - `TrafficSource`
 - `TargetStatusRepository`
@@ -96,6 +111,8 @@ into AWS, Docker, LiteLLM, or a concrete repository from unrelated code.
 
 - `ReservationService`: validates user input, canonicalizes model IDs, creates,
   extends, and ends reservations.
+- `CostEstimationService`: records target activations and accumulates estimated
+  per-reservation cost allocations from reconciler state.
 - `ApiKeyService`: generates personal API keys, stores only hashed key
   material, lists key metadata, and revokes keys.
 - `ModelCatalog`: maps selectable model IDs, aliases, backend IDs, and runtime

@@ -175,9 +175,10 @@ DATABASE_URL=postgres://neuron:secret@postgres:5432/neuron
 Local Compose defaults to SQLite at `/app/data/neuron.db` and mounts the
 repository `./data` directory into `/app/data`. SQLite and Postgres persist
 active reservations, `sk-neuron-...` API keys, configured providers, persisted
-targets, target provisioning jobs, and target model discovery results across
-NeurOn restarts. Target status and startup estimates remain in memory because
-they are observational and rebuilt by reconciliation.
+targets, target provisioning jobs, target model discovery results, target
+activations, and reservation cost allocation records across NeurOn restarts. Target status and
+startup estimates remain in memory because they are observational and rebuilt by
+reconciliation.
 
 ## Auth And API Keys
 
@@ -247,6 +248,7 @@ CAPACITY_TARGET_MULTIPLE_MOE_96GB_ID=gpu-pool-96gb
 CAPACITY_TARGET_MULTIPLE_MOE_96GB_DISPLAY_NAME=GPU Pool 96GB
 CAPACITY_TARGET_MULTIPLE_MOE_96GB_PROVIDER=aws-ecs
 CAPACITY_TARGET_MULTIPLE_MOE_96GB_HEALTH_URL=http://llm-96gb.internal:8080/health
+CAPACITY_TARGET_MULTIPLE_MOE_96GB_ESTIMATED_HOURLY_COST_USD=4.25
 ```
 
 Use `PROVIDER_ID` when the target should reference a reusable provider
@@ -260,6 +262,23 @@ When a target uses JSON config, `providerId` works the same way. If `provider`
 is omitted and `providerId` references a declared provider, NeurOn derives the
 target provider type from that provider definition. Set `PROVIDER` explicitly
 when no reusable provider definition exists.
+
+`ESTIMATED_HOURLY_COST_USD` is optional. When set, NeurOn records target
+activations and allocates elapsed estimated target cost across the active
+reservations for that activation. JSON config uses the equivalent shape:
+
+```json
+{
+  "costEstimate": {
+    "hourlyUsd": 4.25
+  }
+}
+```
+
+For RunPod targets, `ESTIMATED_HOURLY_COST_USD` is usually not required.
+When a target has a RunPod Pod ID and API key, NeurOn asks RunPod for the
+Pod's hourly cost when an activation opens. A configured
+`ESTIMATED_HOURLY_COST_USD` still wins when you need a manual override.
 
 Model keys are nested under a target:
 
@@ -313,6 +332,10 @@ CAPACITY_TARGET_RUNPOD_QWEN_RUNPOD_POD_ID=pod-qwen
 Target-level RunPod fields override provider-level RunPod fields. This lets
 one provider define shared access while each target keeps its Pod ID and
 runtime port.
+
+Cost estimation for RunPod targets uses the same RunPod API key. Put
+`RUNPOD_API_KEY` in the environment, set target-level `RUNPOD_API_KEY_ENV`, or
+define shared `RUNPOD_API_KEY_ENV` on the reusable provider record.
 
 `HEALTH_URL` is optional for RunPod targets. Without it, NeurOn trusts
 RunPod Pod status for capacity readiness. For model discovery, NeurOn infers
@@ -392,7 +415,7 @@ CAPACITY_TARGET_LOCAL_DOCKER_CONTAINER_NAME=prefer
 CAPACITY_TARGET_LOCAL_TRAFFIC_MODEL_PREFIXES=prefer/
 ```
 
-Set `DOCKER_IMAGE` and optional Docker run fields only when NeurOn should
+Set `DOCKER_IMAGE` and optional Docker provisioning fields only when NeurOn should
 provision a missing container through an explicit admin action. If the
 container already exists, NeurOn can start, stop, inspect, and discover models
 from it with just the container name and a runtime URL such as

@@ -21,12 +21,13 @@ On every reconciliation pass:
 4. Before turning off a previously-on target, poll LiteLLM traffic once when a
    traffic poller is configured.
 5. Apply desired state through the `CapacityProvider`.
-6. Read provider status.
-7. Run the target health check when provider status says the target is running.
-8. Store simple target status.
-9. Sync LiteLLM when a target first becomes healthy.
-10. Refresh runtime model IDs when a target is healthy.
-11. Mark relevant active reservations failed if target starting fails.
+6. Record or close the target activation and update cost allocation records.
+7. Read provider status.
+8. Run the target health check when provider status says the target is running.
+9. Store simple target status.
+10. Sync LiteLLM when a target first becomes healthy.
+11. Refresh runtime model IDs when a target is healthy.
+12. Mark relevant active reservations failed if target starting fails.
 
 ## Desired State
 
@@ -37,6 +38,19 @@ Desired capacity is aggregate state:
 
 Ending one user's reservation only removes that user's contribution. It must not
 stop a target that another active reservation still needs.
+
+## Cost Estimates
+
+When a target has `costEstimate.hourlyUsd`, or a provider can discover an hourly
+rate, the reconciler records a `TargetActivation` for each desired-on period.
+The activation snapshots the hourly cost when it opens. Manual target config
+wins; RunPod targets can otherwise read the Pod's hourly cost from the RunPod
+Pod detail API. On each pass, elapsed target cost since the previous pass is
+divided evenly across reservations that are active for that target at the
+current pass and accumulated on target activation reservations.
+
+This is an estimate for chargeback visibility. It is not a provider billing
+record, and it is not used to make scheduling or lifecycle decisions.
 
 ## Runtime States
 

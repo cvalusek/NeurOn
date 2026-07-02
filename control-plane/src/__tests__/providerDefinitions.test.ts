@@ -8,6 +8,10 @@ const managedEnv = [
   "CAPACITY_PROVIDERS_JSON",
   "CAPACITY_TARGETS_JSON",
   "CAPACITY_TARGET_KEYS",
+  "CAPACITY_TARGET_GPU_DISPLAY_NAME",
+  "CAPACITY_TARGET_GPU_PROVIDER",
+  "CAPACITY_TARGET_GPU_MODEL_IDS",
+  "CAPACITY_TARGET_GPU_ESTIMATED_HOURLY_COST_USD",
   "CAPACITY_TARGETS_FILE",
   "RUNTIME_PROFILES_JSON",
   "SHARED_PASSWORD"
@@ -75,6 +79,21 @@ describe("provider definitions", () => {
     });
   });
 
+  it("loads target cost estimate settings from env-expanded target config", async () => {
+    process.env.CAPACITY_TARGET_KEYS = "GPU";
+    process.env.CAPACITY_TARGET_GPU_DISPLAY_NAME = "GPU Pool";
+    process.env.CAPACITY_TARGET_GPU_PROVIDER = "fake";
+    process.env.CAPACITY_TARGET_GPU_MODEL_IDS = "m1";
+    process.env.CAPACITY_TARGET_GPU_ESTIMATED_HOURLY_COST_USD = "3.25";
+
+    const { config } = await loadConfig();
+
+    expect(config.capacityTargets[0]).toMatchObject({
+      id: "gpu",
+      costEstimate: { hourlyUsd: 3.25 }
+    });
+  });
+
   it("starts without configured providers or targets", async () => {
     const { config, models } = await loadConfig();
 
@@ -112,6 +131,10 @@ describe("provider definitions", () => {
       },
       ensureTargetOff: async () => undefined,
       getTargetStatus: async (): Promise<CapacityProviderStatus> => ({ observed: "stopped", message: "Stopped" }),
+      getTargetCostEstimate: async (target) => {
+        captured.push(target);
+        return { hourlyUsd: 0.69 };
+      },
       forceStopTarget: async () => undefined
     };
     const composite = new CompositeCapacityProvider(
@@ -141,6 +164,18 @@ describe("provider definitions", () => {
       podId: "pod-qwen",
       runtimePort: 8080
     });
+
+    const costEstimate = await composite.getTargetCostEstimate({
+      id: "runpod-qwen",
+      displayName: "RunPod Qwen",
+      provider: "runpod",
+      providerId: "runpod-main",
+      modelIds: ["qwen"],
+      runpod: { podId: "pod-qwen", runtimePort: 8080 }
+    });
+
+    expect(costEstimate).toEqual({ hourlyUsd: 0.69 });
+    expect(captured[1].runpod).toEqual(captured[0].runpod);
   });
 
   it("syncs targets and model metadata from an upstream NeurOn provider", async () => {

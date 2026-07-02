@@ -1,10 +1,11 @@
-import type { ApiKey, AuthenticatedUser, AuthMethod, CapacityProviderDefinition, CapacityProviderStatus, CapacityTarget, Reservation, TargetModelDiscoveryRecord, TargetProvisioningJob, TargetStatus } from "./types.js";
+import type { ApiKey, AuthenticatedUser, AuthMethod, CapacityProviderDefinition, CapacityProviderStatus, CapacityTarget, Reservation, TargetCostEstimateConfig, TargetModelDiscoveryRecord, TargetProvisioningJob, TargetActivation, TargetActivationReservation, TargetStatus } from "./types.js";
 
 export interface CapacityProvider {
   provisionTarget(target: CapacityTarget): Promise<Partial<CapacityTarget> | void>;
   ensureTargetOn(target: CapacityTarget): Promise<void>;
   ensureTargetOff(target: CapacityTarget): Promise<void>;
   getTargetStatus(target: CapacityTarget): Promise<CapacityProviderStatus>;
+  getTargetCostEstimate?(target: CapacityTarget): Promise<TargetCostEstimateConfig | undefined>;
   forceStopTarget(target: CapacityTarget): Promise<void>;
 }
 
@@ -67,6 +68,19 @@ export interface TargetModelDiscoveryRepository {
   get(targetId: string): Promise<TargetModelDiscoveryRecord | undefined>;
   list(): Promise<TargetModelDiscoveryRecord[]>;
   delete(targetId: string): Promise<boolean>;
+}
+
+export interface TargetActivationRepository {
+  createActivation(input: Omit<TargetActivation, "id"> & { id?: string }): Promise<TargetActivation>;
+  getActivation(id: string): Promise<TargetActivation | undefined>;
+  getOpenActivationForTarget(targetId: string): Promise<TargetActivation | undefined>;
+  listActivationsForTarget(targetId: string): Promise<TargetActivation[]>;
+  updateActivation(id: string, patch: Partial<TargetActivation>): Promise<TargetActivation>;
+  addReservationCost(input: { targetActivationId: string; reservationId: string; at: Date; estimatedCostUsd: number }): Promise<TargetActivationReservation>;
+  closeInactiveReservations(targetActivationId: string, activeReservationIds: string[], endedAt: Date): Promise<TargetActivationReservation[]>;
+  closeReservationsForActivation(targetActivationId: string, endedAt: Date): Promise<TargetActivationReservation[]>;
+  listActivationReservations(targetActivationId: string): Promise<TargetActivationReservation[]>;
+  listReservationAllocations(reservationId: string): Promise<TargetActivationReservation[]>;
 }
 
 export interface AuthProvider {

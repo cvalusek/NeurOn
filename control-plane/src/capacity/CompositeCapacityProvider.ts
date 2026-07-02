@@ -1,5 +1,5 @@
 import type { CapacityProvider } from "../domain/interfaces.js";
-import type { CapacityProviderDefinition, CapacityProviderStatus, CapacityTarget } from "../domain/types.js";
+import type { CapacityProviderDefinition, CapacityProviderStatus, CapacityTarget, TargetCostEstimateConfig } from "../domain/types.js";
 import { ProviderCatalog } from "../services/ProviderCatalog.js";
 
 export class CompositeCapacityProvider implements CapacityProvider {
@@ -33,6 +33,11 @@ export class CompositeCapacityProvider implements CapacityProvider {
   async getTargetStatus(target: CapacityTarget): Promise<CapacityProviderStatus> {
     const resolved = this.resolve(target);
     return resolved.provider.getTargetStatus(resolved.target);
+  }
+
+  async getTargetCostEstimate(target: CapacityTarget): Promise<TargetCostEstimateConfig | undefined> {
+    const resolved = this.resolve(target);
+    return resolved.provider.getTargetCostEstimate?.(resolved.target);
   }
 
   async forceStopTarget(target: CapacityTarget): Promise<void> {

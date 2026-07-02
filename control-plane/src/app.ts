@@ -27,6 +27,7 @@ import { ModelCatalog } from "./services/ModelCatalog.js";
 import { ModelWarmupService } from "./services/ModelWarmupService.js";
 import { ProviderCatalog } from "./services/ProviderCatalog.js";
 import { ProviderService } from "./services/ProviderService.js";
+import { CostEstimationService } from "./services/CostEstimationService.js";
 import { ReservationService } from "./services/ReservationService.js";
 import { RuntimeModelDiscovery, shouldBootstrapRuntimeModels } from "./services/RuntimeModelDiscovery.js";
 import { TargetProvisioningService } from "./services/TargetProvisioningService.js";
@@ -67,6 +68,7 @@ export async function buildApp(config: AppConfig, models: ModelDefinition[]) {
   const runtimeModelDiscovery = new RuntimeModelDiscovery(catalog, reservationRepository.targetModelDiscoveries);
   await runtimeModelDiscovery.hydrateCachedTargets();
   const modelWarmup = new ModelWarmupService(catalog);
+  const costEstimation = new CostEstimationService(reservationRepository.targetActivations, capacityProvider);
   const trafficPoller =
     config.litellmApiBaseUrl && config.litellmApiKey && config.litellmTrafficPollSeconds > 0
       ? new TrafficPoller(new LiteLlmSpendLogsTrafficSource(config.litellmApiBaseUrl, config.litellmApiKey, config.litellmTrafficLookbackSeconds), catalog, trafficKeepalive)
@@ -80,7 +82,8 @@ export async function buildApp(config: AppConfig, models: ModelDefinition[]) {
     healthChecker,
     runtimeModelDiscovery,
     modelWarmup,
-    trafficPoller
+    trafficPoller,
+    costEstimation
   );
 
   await app.register(cookie);
@@ -119,9 +122,9 @@ export async function buildApp(config: AppConfig, models: ModelDefinition[]) {
     request.user = user;
   });
 
-  registerApiRoutes(app, catalog, reservations, statuses, apiKeyService, reservationService, trafficKeepalive, reconciler, capacityProvider, runtimeModelDiscovery, healthChecker, targetService, targetProvisioningService);
+  registerApiRoutes(app, catalog, reservations, statuses, apiKeyService, reservationService, trafficKeepalive, reconciler, capacityProvider, runtimeModelDiscovery, healthChecker, targetService, targetProvisioningService, costEstimation, reservationRepository.targetActivations);
   registerMcpRoutes(app, catalog, reservations, statuses, reservationService);
-  registerUiRoutes(app, config, authProvider, authMethodService, catalog, apiKeyService, reservationService, providerService, targetService, targetProvisioningService);
+  registerUiRoutes(app, config, authProvider, authMethodService, catalog, apiKeyService, reservationService, providerService, targetService, targetProvisioningService, costEstimation);
 
   const bootstrapRuntimeModels = async () => {
     for (const target of catalog.listTargets().filter(shouldBootstrapRuntimeModels)) {

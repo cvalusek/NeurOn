@@ -11,6 +11,7 @@ const password = "browser-secret";
 let app: FastifyInstance;
 let baseUrl: string;
 let previousEnv: Record<string, string | undefined>;
+let reconcile: (now?: Date) => Promise<void>;
 
 test.beforeEach(async () => {
   previousEnv = snapshotEnv();
@@ -21,8 +22,10 @@ test.beforeEach(async () => {
   process.env.LITELLM_TRAFFIC_POLL_SECONDS = "0";
 
   const loaded = await loadConfig();
+  loaded.config.capacityTargets[0].costEstimate = { hourlyUsd: 12 };
   const built = await buildApp(loaded.config, loaded.models);
   app = built.app;
+  reconcile = (now?: Date) => built.reconciler.reconcile(now);
   await app.listen({ port: 0, host: "127.0.0.1" });
   const address = app.server.address();
   if (!address || typeof address === "string") throw new Error("Could not determine test server address");
@@ -57,10 +60,12 @@ test("creates, extends, and ends a reservation from the rendered UI", async ({ p
   await expect(page.locator("#current-reservation")).toContainText("No active reservation");
   await expect(page.locator("#start-form")).toContainText("PreFer Smol");
   await expect(page.locator("#start-form")).toContainText("Qwen Smol");
+  await expect(page.locator("#start-cost-estimate")).toContainText("Estimated cost: $0.80");
 
   await page.locator("label.option", { hasText: "Qwen Smol" }).click();
   await page.locator('[aria-label="Duration"]').getByRole("button", { name: "5 min", exact: true }).click();
   await expect(page.locator("#duration-minutes")).toHaveValue("5");
+  await expect(page.locator("#start-cost-estimate")).toContainText("Estimated cost: $1.40");
   await page.getByRole("button", { name: "Reserve" }).click();
 
   await expect(page.locator("#current-reservation")).toContainText("ui-user");
@@ -90,6 +95,7 @@ test("supports custom reservation duration and keepalive controls", async ({ pag
   await expect(page.locator("#custom-keepalive-wrap")).toBeVisible();
   await page.locator("#custom-keepalive").fill("4");
   await expect(page.locator("#keepalive-minutes")).toHaveValue("4");
+  await expect(page.locator("#start-cost-estimate")).toContainText("Estimated cost: $2.20");
 
   await page.getByRole("button", { name: "Reserve" }).click();
 
@@ -125,6 +131,31 @@ test("shows and completes the standalone reservation page", async ({ page }) => 
   await page.getByRole("button", { name: "I'm done" }).click();
   await expect(page).toHaveURL(`${baseUrl}/`);
   await expect(page.locator("#current-reservation")).toContainText("No active reservation");
+});
+
+test("shows reservation cost and activation history", async ({ page }) => {
+  await signIn(page, "cost-user");
+  await reserveSmolModel(page);
+
+  await reconcile(new Date("2026-06-25T10:00:00.000Z"));
+  await reconcile(new Date("2026-06-25T10:15:00.000Z"));
+
+  await page.reload();
+  await expect(page.locator("#current-reservation")).toContainText("Cost so far:");
+  await expect(page.locator("#current-reservation")).toContainText("$3.00");
+  await expect(page.locator("#current-reservation")).toContainText("Projected total:");
+
+  await page.getByRole("link", { name: "Activations" }).click();
+  await expect(page.getByRole("heading", { name: "Activations" })).toBeVisible();
+  await expect(page.locator("#activation-list")).toContainText("PreFer Smol");
+  await expect(page.locator("#activation-list")).toContainText("$3.00");
+  await expect(page.locator("#activation-list")).toContainText("cost-user");
+  await expect(page.locator("#activation-list")).toContainText("qwen-smol");
+
+  const reservationId = await page.locator("#activation-list a[href^='/reservations/']").first().textContent();
+  await page.goto(`${baseUrl}/reservations/${reservationId}`);
+  await expect(page.locator("#reservation-cost-so-far")).toContainText("$3.00");
+  await expect(page.locator("#reservation-cost-projected")).toContainText("$");
 });
 
 test("generates and revokes personal API keys", async ({ page }) => {

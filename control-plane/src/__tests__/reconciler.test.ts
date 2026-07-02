@@ -5,6 +5,8 @@ import { NoopBackendConfigSync } from "../litellm/LiteLlmBackendConfigSync.js";
 import { Reconciler } from "../reconciler/Reconciler.js";
 import { InMemoryReservationRepository } from "../repository/InMemoryReservationRepository.js";
 import { InMemoryTargetStatusRepository } from "../repository/InMemoryTargetStatusRepository.js";
+import { InMemoryTargetActivationRepository } from "../repository/InMemoryTargetActivationRepository.js";
+import { CostEstimationService } from "../services/CostEstimationService.js";
 
 const target: CapacityTarget = { id: "t1", displayName: "T1", provider: "aws-ecs", modelIds: ["m1"], healthUrl: "http://example.test" };
 
@@ -124,5 +126,62 @@ describe("reconciler decisions", () => {
 
     expect(modelWarmup.calls).toEqual([["m1"]]);
     expect(statuses.get("t1")).toMatchObject({ desired: "on", observed: "healthy" });
+  });
+
+  it("records target activations and allocates estimated cost to active reservations", async () => {
+    const repository = new InMemoryReservationRepository();
+    const statuses = new InMemoryTargetStatusRepository();
+    const targetActivations = new InMemoryTargetActivationRepository();
+    const provider = new FakeCapacityProvider();
+    provider.statuses.set("t1", { observed: "healthy", message: "Running" });
+    const costEstimation = new CostEstimationService(targetActivations);
+    const startedAt = new Date("2026-06-25T10:00:00.000Z");
+    const reservation = await repository.create({
+      username: "clint",
+      modelIds: ["m1"],
+      targetIds: ["t1"],
+      createdAt: startedAt,
+      expiresAt: new Date("2026-06-25T11:00:00.000Z"),
+      status: "active"
+    });
+    const reconciler = new Reconciler([{ ...target, costEstimate: { hourlyUsd: 6 } }], repository, statuses, provider, new NoopBackendConfigSync(), undefined, undefined, undefined, undefined, costEstimation);
+
+    await reconciler.reconcile(startedAt);
+    await reconciler.reconcile(new Date("2026-06-25T10:30:00.000Z"));
+    await repository.update(reservation.id, { status: "done", endedAt: new Date("2026-06-25T10:30:00.000Z") });
+    await reconciler.reconcile(new Date("2026-06-25T10:31:00.000Z"));
+
+    const activations = await targetActivations.listActivationsForTarget("t1");
+    expect(activations).toMatchObject([{ targetId: "t1", status: "closed", estimatedCostUsd: 3 }]);
+    expect(await costEstimation.estimateForReservation(reservation.id)).toEqual({ estimatedCostUsd: 3, currency: "USD" });
+    expect((await targetActivations.listReservationAllocations(reservation.id))[0]).toMatchObject({ targetActivationId: activations[0].id, estimatedCostUsd: 3 });
+  });
+
+  it("allocates estimated cost from provider-discovered hourly rates", async () => {
+    const repository = new InMemoryReservationRepository();
+    const statuses = new InMemoryTargetStatusRepository();
+    const targetActivations = new InMemoryTargetActivationRepository();
+    const provider = new FakeCapacityProvider();
+    provider.statuses.set("t1", { observed: "healthy", message: "Running" });
+    const costEstimation = new CostEstimationService(targetActivations, {
+      getTargetCostEstimate: async () => ({ hourlyUsd: 8 })
+    });
+    const startedAt = new Date("2026-06-25T10:00:00.000Z");
+    const reservation = await repository.create({
+      username: "clint",
+      modelIds: ["m1"],
+      targetIds: ["t1"],
+      createdAt: startedAt,
+      expiresAt: new Date("2026-06-25T11:00:00.000Z"),
+      status: "active"
+    });
+    const reconciler = new Reconciler([target], repository, statuses, provider, new NoopBackendConfigSync(), undefined, undefined, undefined, undefined, costEstimation);
+
+    await reconciler.reconcile(startedAt);
+    await reconciler.reconcile(new Date("2026-06-25T10:15:00.000Z"));
+
+    const activations = await targetActivations.listActivationsForTarget("t1");
+    expect(activations).toMatchObject([{ targetId: "t1", status: "open", estimatedHourlyCostUsd: 8, estimatedCostUsd: 2 }]);
+    expect(await costEstimation.estimateForReservation(reservation.id)).toEqual({ estimatedCostUsd: 2, currency: "USD" });
   });
 });

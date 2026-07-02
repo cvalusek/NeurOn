@@ -27,8 +27,15 @@ The main page contains:
 - model groups under the selected target
 - duration quick buttons plus custom duration
 - keepalive quick buttons plus custom keepalive
+- start-form estimated cost based on target hourly cost, duration, and keepalive
 - per-target status cards
 - reservations grouped under each target status card
+
+The start form shows a projected cost before reservation creation when NeurOn
+knows the selected target's hourly cost. Reservation cards split cost into
+cost so far, which is allocated from activation records, and projected total,
+which adds the remaining reservation window plus keepalive at the current
+target hourly estimate.
 
 ## API Keys Page
 
@@ -91,6 +98,28 @@ Each target has its own status card showing:
 
 Reservations render compact model copy chips so users can quickly copy the
 model ID or alias they should use.
+
+## Activations Page
+
+Route:
+
+```text
+GET /admin/activations
+```
+
+The activations page lists target activations recorded by the reconciler. Each
+activation shows:
+
+- target
+- open or closed status
+- activation window
+- configured hourly estimate, when present
+- total estimated activation cost
+- reservation allocation rows with user, reservation status, model IDs, and
+  estimated allocation cost
+
+The page is admin-scoped because activation history is operational chargeback
+data.
 
 ## Polling
 

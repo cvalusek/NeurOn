@@ -221,6 +221,33 @@ export interface CapacityTarget {
   healthUrl?: string;
   apiUrl?: string;
   litellm?: LiteLlmTargetConfig;
+  costEstimate?: TargetCostEstimateConfig;
+}
+
+export interface TargetCostEstimateConfig {
+  hourlyUsd?: number;
+}
+
+export type TargetActivationStatus = "open" | "closed";
+
+export interface TargetActivation {
+  id: string;
+  targetId: string;
+  startedAt: Date;
+  endedAt?: Date;
+  status: TargetActivationStatus;
+  estimatedHourlyCostUsd?: number;
+  estimatedCostUsd: number;
+  lastCostedAt: Date;
+}
+
+export interface TargetActivationReservation {
+  id: string;
+  targetActivationId: string;
+  reservationId: string;
+  startedAt: Date;
+  endedAt?: Date;
+  estimatedCostUsd: number;
 }
 
 export interface ModelDefinition {
