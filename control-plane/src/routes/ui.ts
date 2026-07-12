@@ -8,10 +8,11 @@ import { AuthMethodService } from "../services/AuthMethodService.js";
 import { ModelCatalog } from "../services/ModelCatalog.js";
 import { ProviderService } from "../services/ProviderService.js";
 import { ReservationService } from "../services/ReservationService.js";
+import { ReservationProfileService } from "../services/ReservationProfileService.js";
 import { CostEstimationService } from "../services/CostEstimationService.js";
 import { TargetService } from "../services/TargetService.js";
 import { TargetProvisioningService } from "../services/TargetProvisioningService.js";
-import { activationPage, adminAuthPage, adminPage, apiKeysPage, loginPage, providerAdminPage, reservationPage, startPage, targetAdminPage } from "../ui/html.js";
+import { activationPage, adminAuthPage, apiKeysPage, loginPage, profilesPage, providerAdminPage, reservationHistoryPage, reservationPage, startPage, targetAdminPage } from "../ui/html.js";
 import { requireUser } from "../utils/http.js";
 
 export function registerUiRoutes(
@@ -22,6 +23,7 @@ export function registerUiRoutes(
   catalog: ModelCatalog,
   apiKeyService: ApiKeyService,
   reservationService: ReservationService,
+  reservationProfileService: ReservationProfileService,
   providerService: ProviderService,
   targetService: TargetService,
   targetProvisioningService: TargetProvisioningService,
@@ -77,11 +79,17 @@ export function registerUiRoutes(
     const query = z.object({ error: z.string().optional() }).parse(request.query);
     const targets = catalog.listTargets().map((target) => ({ target, models: catalog.listModelsForTarget(target.id) }));
     const costEstimates = await startCostEstimates(targets.map(({ target }) => target), costEstimation);
-    return reply.type("text/html").send(startPage(requireUser(request), targets, query.error, costEstimates));
+    const user = requireUser(request);
+    return reply.type("text/html").send(startPage(user, targets, await reservationProfileService.listForUser(user), query.error, costEstimates));
   });
   app.get("/api-keys", async (request, reply) => {
     const user = requireUser(request);
     return reply.type("text/html").send(apiKeysPage(user, await apiKeyService.listForUser(user)));
+  });
+  app.get("/profiles", async (request, reply) => {
+    const user = requireUser(request);
+    const targets = catalog.listTargets().map((target) => ({ target, models: catalog.listModelsForTarget(target.id) }));
+    return reply.type("text/html").send(profilesPage(user, await reservationProfileService.listForUser(user), targets));
   });
   app.post("/api-keys", async (request, reply) => {
     const user = requireUser(request);
@@ -99,18 +107,51 @@ export function registerUiRoutes(
       const raw = z
         .object({
           modelIds: z.union([z.string(), z.array(z.string())]).optional(),
-          targetId: z.string(),
+          targetId: z.string().optional(),
+          profileId: z.string().optional(),
           durationMinutes: z.coerce.number(),
           keepaliveMinutes: z.coerce.number().optional()
         })
         .parse(request.body);
       const modelIds = raw.modelIds ? (Array.isArray(raw.modelIds) ? raw.modelIds : [raw.modelIds]) : [];
-      await reservationService.createForUser(requireUser(request), { modelIds, targetIds: [raw.targetId], durationMinutes: raw.durationMinutes, keepaliveMinutes: raw.keepaliveMinutes });
+      await reservationService.createForUser(requireUser(request), { modelIds, targetIds: raw.targetId ? [raw.targetId] : [], profileId: raw.profileId || undefined, durationMinutes: raw.durationMinutes, keepaliveMinutes: raw.keepaliveMinutes });
       return reply.redirect("/");
     } catch (error) {
       const message = reservationFormErrorMessage(error);
       return reply.redirect(`/?error=${encodeURIComponent(message)}`);
     }
+  });
+  app.post("/reservation-profiles", async (request, reply) => {
+    try {
+      const raw = z
+        .object({
+          name: z.string().min(1),
+          description: z.string().optional(),
+          modelIds: z.union([z.string(), z.array(z.string())]).optional(),
+          targetId: z.string(),
+          returnTo: z.enum(["/", "/profiles"]).default("/"),
+          defaultDurationMinutes: z.coerce.number().optional(),
+          defaultKeepaliveMinutes: z.coerce.number().optional()
+        })
+        .parse(request.body);
+      const modelIds = raw.modelIds ? (Array.isArray(raw.modelIds) ? raw.modelIds : [raw.modelIds]) : [];
+      await reservationProfileService.createForUser(requireUser(request), {
+        name: raw.name,
+        description: raw.description,
+        selections: [{ targetId: raw.targetId, modelIds }],
+        defaultDurationMinutes: raw.defaultDurationMinutes,
+        defaultKeepaliveMinutes: raw.defaultKeepaliveMinutes
+      });
+      return reply.redirect(raw.returnTo);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Could not save reservation profile";
+      return reply.redirect(`/?error=${encodeURIComponent(message)}`);
+    }
+  });
+  app.post("/reservation-profiles/:id/delete", async (request, reply) => {
+    const { id } = z.object({ id: z.string() }).parse(request.params);
+    await reservationProfileService.deleteForUser(id, requireUser(request));
+    return reply.redirect("/profiles");
   });
   app.get("/reservations/:id", async (request, reply) => {
     const { id } = z.object({ id: z.string() }).parse(request.params);
@@ -128,7 +169,8 @@ export function registerUiRoutes(
     await reservationService.extend(id, requireUser(request), body.durationMinutes);
     return reply.redirect("/");
   });
-  app.get("/admin", async (request, reply) => reply.type("text/html").send(adminPage(requireUser(request), config)));
+  app.get("/admin", async (_request, reply) => reply.redirect("/admin/auth"));
+  app.get("/admin/reservations", async (request, reply) => reply.type("text/html").send(reservationHistoryPage(requireUser(request))));
   app.get("/admin/activations", async (request, reply) => reply.type("text/html").send(activationPage(requireUser(request))));
   app.get("/admin/auth", async (request, reply) => {
     const query = z.object({ error: z.string().optional() }).parse(request.query);

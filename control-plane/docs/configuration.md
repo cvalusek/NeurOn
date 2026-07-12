@@ -174,7 +174,7 @@ DATABASE_URL=postgres://neuron:secret@postgres:5432/neuron
 
 Local Compose defaults to SQLite at `/app/data/neuron.db` and mounts the
 repository `./data` directory into `/app/data`. SQLite and Postgres persist
-active reservations, `sk-neuron-...` API keys, configured providers, persisted
+active reservations, reservation profiles, `sk-neuron-...` API keys, configured providers, persisted
 targets, target provisioning jobs, target model discovery results, target
 activations, and reservation cost allocation records across NeurOn restarts. Target status and
 startup estimates remain in memory because they are observational and rebuilt by

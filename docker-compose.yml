@@ -1,9 +1,11 @@
 services:
-  control-plane:
+  neuron:
     build:
       context: ./control-plane
       dockerfile: Dockerfile
     image: neuron-control-plane:local
+    container_name: neuron
+    restart: on-failure
     env_file:
       - .env
     ports:

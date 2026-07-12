@@ -52,6 +52,110 @@ describe("API authentication context", () => {
     expect(response.json().username).toBe("actual");
   });
 
+  it("creates reservation profiles and starts reservations from them", async () => {
+    process.env.USE_FAKE_PROVIDER = "true";
+    const { app } = await buildApp(config, models);
+    const auth = { authorization: `Basic ${Buffer.from("actual:secret").toString("base64")}` };
+
+    const createdProfile = await app.inject({
+      method: "POST",
+      url: "/api/reservation-profiles",
+      headers: auth,
+      payload: {
+        name: "Daily coding",
+        description: "Small target profile",
+        selections: [{ targetId: "t1", modelIds: ["m1"] }],
+        defaultDurationMinutes: 10,
+        defaultKeepaliveMinutes: 2
+      }
+    });
+    expect(createdProfile.statusCode).toBe(201);
+
+    const list = await app.inject({ method: "GET", url: "/api/reservation-profiles", headers: auth });
+    expect(list.json().reservationProfiles).toMatchObject([{ name: "Daily coding", selections: [{ targetId: "t1", modelIds: ["m1"] }] }]);
+
+    const reservation = await app.inject({
+      method: "POST",
+      url: "/api/reservations",
+      headers: auth,
+      payload: { profileId: createdProfile.json().id }
+    });
+    await app.close();
+
+    expect(reservation.statusCode).toBe(201);
+    expect(reservation.json()).toMatchObject({
+      profileId: createdProfile.json().id,
+      profileName: "Daily coding",
+      modelIds: ["m1"],
+      targets: [{ id: "t1" }]
+    });
+  });
+
+  it("serves a profiles page for the current user's reservation profiles", async () => {
+    process.env.USE_FAKE_PROVIDER = "true";
+    const { app } = await buildApp(config, models);
+    const auth = { authorization: `Basic ${Buffer.from("actual:secret").toString("base64")}` };
+    await app.inject({
+      method: "POST",
+      url: "/api/reservation-profiles",
+      headers: auth,
+      payload: { name: "Daily coding", selections: [{ targetId: "t1", modelIds: ["m1"] }] }
+    });
+
+    const page = await app.inject({ method: "GET", url: "/profiles", headers: auth });
+    await app.close();
+
+    expect(page.statusCode).toBe(200);
+    expect(page.body).toContain("Profiles");
+    expect(page.body).toContain("Daily coding");
+    expect(page.body).toContain("T1");
+    expect(page.body).toContain("m1");
+    expect(page.body).toContain("New profile");
+    expect(page.body).toContain('name="returnTo" value="/profiles"');
+  });
+
+  it("creates reservation profiles from the profiles page and returns there", async () => {
+    process.env.USE_FAKE_PROVIDER = "true";
+    const { app } = await buildApp(config, models);
+    const auth = { authorization: `Basic ${Buffer.from("actual:secret").toString("base64")}` };
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/reservation-profiles",
+      headers: auth,
+      payload: {
+        name: "Profiles page profile",
+        targetId: "t1",
+        modelIds: "m1",
+        defaultDurationMinutes: 15,
+        defaultKeepaliveMinutes: 5,
+        returnTo: "/profiles"
+      }
+    });
+    const page = await app.inject({ method: "GET", url: "/profiles", headers: auth });
+    await app.close();
+
+    expect(response.statusCode).toBe(302);
+    expect(response.headers.location).toBe("/profiles");
+    expect(page.body).toContain("Profiles page profile");
+  });
+
+  it("keeps direct reservation creation working without a reservation profile", async () => {
+    process.env.USE_FAKE_PROVIDER = "true";
+    const { app } = await buildApp(config, models);
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/reservations",
+      headers: { authorization: `Basic ${Buffer.from("actual:secret").toString("base64")}` },
+      payload: { modelIds: ["m1"], targetIds: ["t1"], durationMinutes: 10 }
+    });
+    await app.close();
+
+    expect(response.statusCode).toBe(201);
+    expect(response.json()).toMatchObject({ modelIds: ["m1"], targets: [{ id: "t1" }] });
+    expect(response.json().profileId).toBeUndefined();
+  });
+
   it("hides expired reservations from the default status payload", async () => {
     process.env.USE_FAKE_PROVIDER = "true";
     const { app } = await buildApp(config, models);
@@ -76,6 +180,36 @@ describe("API authentication context", () => {
 
     expect(status.json().reservations.map((reservation: { reservationId: string }) => reservation.reservationId)).toEqual([active.json().reservationId]);
     expect(adminStatus.json().reservations.map((reservation: { reservationId: string }) => reservation.reservationId)).toContain(expired.json().reservationId);
+  });
+
+  it("paginates admin reservation history by expiration descending", async () => {
+    process.env.USE_FAKE_PROVIDER = "true";
+    const { app } = await buildApp(config, models);
+    const auth = { authorization: `Basic ${Buffer.from("actual:secret").toString("base64")}` };
+    const shorter = await app.inject({
+      method: "POST",
+      url: "/api/reservations",
+      headers: auth,
+      payload: { modelIds: ["m1"], durationMinutes: 5 }
+    });
+    const longer = await app.inject({
+      method: "POST",
+      url: "/api/reservations",
+      headers: auth,
+      payload: { modelIds: ["m1"], durationMinutes: 30 }
+    });
+
+    const firstPage = await app.inject({ method: "GET", url: "/api/admin/reservations?page=1&pageSize=1", headers: auth });
+    const secondPage = await app.inject({ method: "GET", url: "/api/admin/reservations?page=2&pageSize=1", headers: auth });
+    const page = await app.inject({ method: "GET", url: "/admin/reservations", headers: auth });
+    await app.close();
+
+    expect(firstPage.json()).toMatchObject({ page: 1, pageSize: 1, total: 2, sort: "expires_desc" });
+    expect(firstPage.json().reservations.map((reservation: { reservationId: string }) => reservation.reservationId)).toEqual([longer.json().reservationId]);
+    expect(secondPage.json().reservations.map((reservation: { reservationId: string }) => reservation.reservationId)).toEqual([shorter.json().reservationId]);
+    expect(page.statusCode).toBe(200);
+    expect(page.body).toContain("Reservations");
+    expect(page.body).toContain("expires newest first");
   });
 
   it("includes reservation cost estimates after reconciler allocation", async () => {

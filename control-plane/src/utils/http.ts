@@ -16,6 +16,8 @@ export function reservationJson(reservation: Reservation, statuses: TargetStatus
     status: reservation.status,
     expiresAt: reservation.expiresAt.toISOString(),
     keepaliveMinutes: reservation.keepaliveMinutes,
+    profileId: reservation.profileId,
+    profileName: reservation.profileName,
     endedAt: reservation.endedAt?.toISOString(),
     modelIds: reservation.modelIds,
     targets: reservation.targetIds.map((targetId) => {

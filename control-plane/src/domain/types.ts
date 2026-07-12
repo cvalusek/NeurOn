@@ -42,6 +42,8 @@ export interface Reservation {
   id: string;
   username: string;
   apiKeyName?: string;
+  profileId?: string;
+  profileName?: string;
   modelIds: string[];
   targetIds: string[];
   createdAt: Date;
@@ -51,6 +53,23 @@ export interface Reservation {
   status: ReservationStatus;
   failureMessage?: string;
   synthetic?: boolean;
+}
+
+export interface ReservationProfileSelection {
+  targetId: string;
+  modelIds: string[];
+}
+
+export interface ReservationProfile {
+  id: string;
+  username: string;
+  name: string;
+  description?: string;
+  selections: ReservationProfileSelection[];
+  defaultDurationMinutes?: number;
+  defaultKeepaliveMinutes?: number;
+  createdAt: Date;
+  updatedAt: Date;
 }
 
 export interface AwsTargetConfig {

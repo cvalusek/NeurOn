@@ -9,6 +9,8 @@ interface ReservationRow {
   id: string;
   username: string;
   api_key_name: string | null;
+  profile_id: string | null;
+  profile_name: string | null;
   model_ids: string;
   target_ids: string;
   created_at: string;
@@ -36,10 +38,10 @@ export class SqliteReservationRepository implements ReservationRepository {
     this.db
       .prepare(
         `insert into reservations (
-          id, username, api_key_name, model_ids, target_ids, created_at, expires_at,
+          id, username, api_key_name, profile_id, profile_name, model_ids, target_ids, created_at, expires_at,
           keepalive_minutes, ended_at, status, failure_message, synthetic
         ) values (
-          @id, @username, @apiKeyName, @modelIds, @targetIds, @createdAt, @expiresAt,
+          @id, @username, @apiKeyName, @profileId, @profileName, @modelIds, @targetIds, @createdAt, @expiresAt,
           @keepaliveMinutes, @endedAt, @status, @failureMessage, @synthetic
         )`
       )
@@ -66,6 +68,8 @@ export class SqliteReservationRepository implements ReservationRepository {
         `update reservations set
           username = @username,
           api_key_name = @apiKeyName,
+          profile_id = @profileId,
+          profile_name = @profileName,
           model_ids = @modelIds,
           target_ids = @targetIds,
           created_at = @createdAt,
@@ -111,6 +115,8 @@ export class SqliteReservationRepository implements ReservationRepository {
         id text primary key,
         username text not null,
         api_key_name text,
+        profile_id text,
+        profile_name text,
         model_ids text not null,
         target_ids text not null,
         created_at text not null,
@@ -129,6 +135,12 @@ export class SqliteReservationRepository implements ReservationRepository {
     if (!columns.some((column) => column.name === "api_key_name")) {
       this.db.exec("alter table reservations add column api_key_name text");
     }
+    if (!columns.some((column) => column.name === "profile_id")) {
+      this.db.exec("alter table reservations add column profile_id text");
+    }
+    if (!columns.some((column) => column.name === "profile_name")) {
+      this.db.exec("alter table reservations add column profile_name text");
+    }
   }
 }
 
@@ -137,6 +149,8 @@ function toSqlParams(reservation: Reservation) {
     id: reservation.id,
     username: reservation.username,
     apiKeyName: reservation.apiKeyName ?? null,
+    profileId: reservation.profileId ?? null,
+    profileName: reservation.profileName ?? null,
     modelIds: JSON.stringify(reservation.modelIds),
     targetIds: JSON.stringify(reservation.targetIds),
     createdAt: reservation.createdAt.toISOString(),
@@ -154,6 +168,8 @@ function fromRow(row: ReservationRow): Reservation {
     id: row.id,
     username: row.username,
     apiKeyName: row.api_key_name ?? undefined,
+    profileId: row.profile_id ?? undefined,
+    profileName: row.profile_name ?? undefined,
     modelIds: JSON.parse(row.model_ids) as string[],
     targetIds: JSON.parse(row.target_ids) as string[],
     createdAt: new Date(row.created_at),
@@ -169,6 +185,8 @@ function fromRow(row: ReservationRow): Reservation {
 function cloneReservation(reservation: Reservation): Reservation {
   return {
     ...reservation,
+    profileId: reservation.profileId,
+    profileName: reservation.profileName,
     modelIds: [...reservation.modelIds],
     targetIds: [...reservation.targetIds],
     createdAt: new Date(reservation.createdAt),

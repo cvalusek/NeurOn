@@ -1,5 +1,5 @@
-import type { ReservationRepository } from "../domain/interfaces.js";
-import type { AuthenticatedUser, Reservation } from "../domain/types.js";
+import type { ReservationProfileRepository, ReservationRepository } from "../domain/interfaces.js";
+import type { AuthenticatedUser, Reservation, ReservationProfile } from "../domain/types.js";
 import { ModelCatalog } from "./ModelCatalog.js";
 
 const MAX_DURATION_MINUTES = 12 * 60;
@@ -9,24 +9,29 @@ const MAX_KEEPALIVE_MINUTES = 60;
 export class ReservationService {
   constructor(
     private readonly repository: ReservationRepository,
-    private readonly catalog: ModelCatalog
+    private readonly catalog: ModelCatalog,
+    private readonly profiles?: ReservationProfileRepository
   ) {}
 
-  async createForUser(user: AuthenticatedUser, input: { modelIds?: string[]; targetIds?: string[]; durationMinutes: number; keepaliveMinutes?: number }): Promise<Reservation> {
-    this.validateInput(input);
-    const requestedModelIds = unique(input.modelIds ?? []);
+  async createForUser(user: AuthenticatedUser, input: { modelIds?: string[]; targetIds?: string[]; profileId?: string; durationMinutes?: number; keepaliveMinutes?: number }): Promise<Reservation> {
+    const profile = input.profileId ? await this.getOwnedProfile(input.profileId, user) : undefined;
+    const expandedInput = inputWithResolvedDefaults(profile, input);
+    this.validateInput(expandedInput);
+    const requestedModelIds = unique(expandedInput.modelIds ?? []);
     const modelIds = requestedModelIds.length > 0 ? this.catalog.canonicalModelIds(requestedModelIds) : [];
-    const requestedTargetIds = unique(input.targetIds ?? []);
+    const requestedTargetIds = unique(expandedInput.targetIds ?? []);
     const now = new Date();
     const targetIds = this.targetIdsForRequest(modelIds, requestedTargetIds);
     return this.repository.create({
       username: user.username,
       apiKeyName: user.apiKeyName,
+      profileId: profile?.id,
+      profileName: profile?.name,
       modelIds,
       targetIds,
       createdAt: now,
-      expiresAt: new Date(now.getTime() + input.durationMinutes * 60_000),
-      keepaliveMinutes: input.keepaliveMinutes ?? DEFAULT_KEEPALIVE_MINUTES,
+      expiresAt: new Date(now.getTime() + expandedInput.durationMinutes * 60_000),
+      keepaliveMinutes: expandedInput.keepaliveMinutes ?? DEFAULT_KEEPALIVE_MINUTES,
       status: "active"
     });
   }
@@ -84,6 +89,26 @@ export class ReservationService {
     }
     return targetIds;
   }
+
+  private async getOwnedProfile(profileId: string, user: AuthenticatedUser): Promise<ReservationProfile> {
+    if (!this.profiles) throw new Error("Reservation profiles are not configured");
+    const profile = await this.profiles.get(profileId);
+    if (!profile || profile.username !== user.username) throw new Error("Reservation profile not found");
+    return profile;
+  }
+}
+
+function inputWithResolvedDefaults(profile: ReservationProfile | undefined, input: { modelIds?: string[]; targetIds?: string[]; durationMinutes?: number; keepaliveMinutes?: number }) {
+  const expanded = profile
+    ? {
+        modelIds: unique(profile.selections.flatMap((selection) => selection.modelIds)),
+        targetIds: unique(profile.selections.map((selection) => selection.targetId)),
+        durationMinutes: input.durationMinutes ?? profile.defaultDurationMinutes,
+        keepaliveMinutes: input.keepaliveMinutes ?? profile.defaultKeepaliveMinutes
+      }
+    : input;
+  if (expanded.durationMinutes === undefined) throw new Error(`Duration must be between 1 and ${MAX_DURATION_MINUTES} minutes`);
+  return { ...expanded, durationMinutes: expanded.durationMinutes };
 }
 
 function unique(values: string[]): string[] {

@@ -32,9 +32,24 @@ Important fields:
 - `status`: `active`, `done`, `expired`, or `failed`
 - optional `failureMessage`
 - optional `synthetic` for traffic keepalive reservations
+- optional `profileId` and `profileName` when the reservation was created from
+  a saved reservation profile
 
 A reservation contributes to desired capacity only when it is active and its
 expiration is in the future.
+
+### ReservationProfile
+
+A reservation profile is a user-owned saved launch shape. It records one or more
+target selections, each with the model IDs the user expects to use on that
+target. Current UI creation saves one target selection, but the stored shape is
+already a list so future workflows can span multiple targets without replacing
+the concept.
+
+Profiles are not runtime provider presets. They do not tune inference images,
+download models, or infer a production catalog. They only store user reservation
+intent and are expanded by `ReservationService` into the same `modelIds` and
+`targetIds` used by direct reservations.
 
 ### TargetActivation
 
@@ -110,7 +125,10 @@ into AWS, Docker, LiteLLM, or a concrete repository from unrelated code.
 ## Main Services
 
 - `ReservationService`: validates user input, canonicalizes model IDs, creates,
-  extends, and ends reservations.
+  extends, and ends reservations. It can also expand a user-owned reservation
+  profile into a normal reservation request.
+- `ReservationProfileService`: validates and stores user-owned reservation
+  profiles.
 - `CostEstimationService`: records target activations and accumulates estimated
   per-reservation cost allocations from reconciler state.
 - `ApiKeyService`: generates personal API keys, stores only hashed key
@@ -136,8 +154,9 @@ into AWS, Docker, LiteLLM, or a concrete repository from unrelated code.
 
 1. Auth resolves an `AuthenticatedUser`.
 2. UI or API creates a reservation with model IDs, duration, and keepalive
-   window.
-3. `ReservationService` maps models to targets through `ModelCatalog`.
+   window, or with a `profileId` plus duration/keepalive.
+3. `ReservationService` maps models to targets through `ModelCatalog`, expanding
+   the profile first when one was provided.
 4. Request handler stores intent only. It does not directly start or stop
    infrastructure.
 5. The periodic reconciler observes aggregate desired state and applies provider
@@ -180,6 +199,10 @@ Reservations and API keys can use memory, SQLite, or Postgres storage behind
 their repository interfaces. Durable storage lets NeurOn restart without
 forgetting active demand or invalidating plugin keys, so reconciliation
 continues to keep matching targets on after the process comes back.
+
+Reservation profiles use the same memory, SQLite, or Postgres storage family.
+SQLite and Postgres store the profile target selections as JSON so the profile
+can grow from one target selection to many without a relational schema change.
 
 Runtime model discovery results persist with the configured storage driver so
 NeurOn can restart without waking discovery-only targets just to recover their

@@ -12,6 +12,21 @@ The UI is server-rendered HTML with small browser JavaScript for polling and
 copy interactions. Do not turn NeurOn into a heavy SPA unless the product shape
 changes substantially.
 
+## Navigation
+
+The top bar is reserved for global chrome: menu, brand, signed-in user, and
+future page-provided actions. Primary navigation lives in the side tree.
+Workspace links include Home, Profiles, and API keys. Admin is reserved for
+user and authentication management. Configuration paths such as Providers and
+Targets live in a separate branch. Historical operational records such as
+Reservations and Activations live in History.
+
+The side navigation is a collapsible tree. On desktop-sized screens it opens by
+default as a left sidebar and can still be collapsed from the menu control. On
+narrow screens it behaves as an overlay drawer and becomes the primary way to
+reach anything beyond the quick links. Keep the tree server-rendered with a
+small toggle script.
+
 ## Main Page
 
 Route:
@@ -23,19 +38,56 @@ GET /
 The main page contains:
 
 - current user's active reservation
-- target-first reservation form
-- model groups under the selected target
+- reservation profile cards with target and primary model aliases
+- modal-based profile creation for target and model choices
 - duration quick buttons plus custom duration
 - keepalive quick buttons plus custom keepalive
 - start-form estimated cost based on target hourly cost, duration, and keepalive
 - per-target status cards
-- reservations grouped under each target status card
+- aggregate per-target reservation/user/model counts
+- the current user's reservations expanded under each target status card
+- other users' reservations collapsed under each target status card
 
 The start form shows a projected cost before reservation creation when NeurOn
 knows the selected target's hourly cost. Reservation cards split cost into
 cost so far, which is allocated from activation records, and projected total,
 which adds the remaining reservation window plus keepalive at the current
 target hourly estimate.
+
+Reservation profiles are user-owned saved launch shapes. The home page treats
+profiles as the main reservation path: users pick from a compact profile
+selector, adjust duration/keepalive if needed, and reserve. Target and model
+choices live in the new-profile modal so the main page can remain compact.
+Starting capacity from a profile still creates an ordinary reservation, and
+reservation cards show the profile name with a review modal when a reservation
+came from one. The profile data model stores selections as a list so future UI
+work can allow one profile to span multiple targets.
+
+## Profiles Page
+
+Route:
+
+```text
+GET /profiles
+```
+
+The profiles page lists the current user's reservation profiles with target
+summaries, primary model aliases, default duration/keepalive, and delete
+actions. Users can create profiles directly from this page with the same
+target/model chooser used by the home page.
+
+## Reservation History
+
+Route:
+
+```text
+GET /admin/reservations
+```
+
+The reservation history page lists all reservations for administrative review.
+It is sorted by expiration descending by default and paginates through the
+admin reservations API so long-running installations do not render the entire
+history at once.
 
 ## API Keys Page
 

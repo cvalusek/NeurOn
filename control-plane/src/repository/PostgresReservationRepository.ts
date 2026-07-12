@@ -9,6 +9,8 @@ interface ReservationRow {
   id: string;
   username: string;
   api_key_name: string | null;
+  profile_id: string | null;
+  profile_name: string | null;
   model_ids: string[] | string;
   target_ids: string[] | string;
   created_at: Date | string;
@@ -33,6 +35,8 @@ export class PostgresReservationRepository implements ReservationRepository {
         id text primary key,
         username text not null,
         api_key_name text,
+        profile_id text,
+        profile_name text,
         model_ids jsonb not null,
         target_ids jsonb not null,
         created_at timestamptz not null,
@@ -48,6 +52,8 @@ export class PostgresReservationRepository implements ReservationRepository {
         on reservations(status, expires_at);
     `);
     await this.pool.query("alter table reservations add column if not exists api_key_name text");
+    await this.pool.query("alter table reservations add column if not exists profile_id text");
+    await this.pool.query("alter table reservations add column if not exists profile_name text");
   }
 
   async create(input: Omit<Reservation, "id"> & { id?: string }): Promise<Reservation> {
@@ -55,9 +61,9 @@ export class PostgresReservationRepository implements ReservationRepository {
     const values = toSqlValues(reservation);
     await this.pool.query(
       `insert into reservations (
-        id, username, api_key_name, model_ids, target_ids, created_at, expires_at,
+        id, username, api_key_name, profile_id, profile_name, model_ids, target_ids, created_at, expires_at,
         keepalive_minutes, ended_at, status, failure_message, synthetic
-      ) values ($1, $2, $3, $4::jsonb, $5::jsonb, $6, $7, $8, $9, $10, $11, $12)`,
+      ) values ($1, $2, $3, $4, $5, $6::jsonb, $7::jsonb, $8, $9, $10, $11, $12, $13, $14)`,
       values
     );
     return cloneReservation(reservation);
@@ -81,15 +87,17 @@ export class PostgresReservationRepository implements ReservationRepository {
       `update reservations set
         username = $2,
         api_key_name = $3,
-        model_ids = $4::jsonb,
-        target_ids = $5::jsonb,
-        created_at = $6,
-        expires_at = $7,
-        keepalive_minutes = $8,
-        ended_at = $9,
-        status = $10,
-        failure_message = $11,
-        synthetic = $12
+        profile_id = $4,
+        profile_name = $5,
+        model_ids = $6::jsonb,
+        target_ids = $7::jsonb,
+        created_at = $8,
+        expires_at = $9,
+        keepalive_minutes = $10,
+        ended_at = $11,
+        status = $12,
+        failure_message = $13,
+        synthetic = $14
       where id = $1`,
       toSqlValues(updated)
     );
@@ -125,6 +133,8 @@ function toSqlValues(reservation: Reservation): unknown[] {
     reservation.id,
     reservation.username,
     reservation.apiKeyName ?? null,
+    reservation.profileId ?? null,
+    reservation.profileName ?? null,
     JSON.stringify(reservation.modelIds),
     JSON.stringify(reservation.targetIds),
     reservation.createdAt,
@@ -144,6 +154,8 @@ function fromRow(row: ReservationRow): Reservation {
     id: row.id,
     username: row.username,
     apiKeyName: row.api_key_name ?? undefined,
+    profileId: row.profile_id ?? undefined,
+    profileName: row.profile_name ?? undefined,
     modelIds,
     targetIds,
     createdAt: new Date(row.created_at),
@@ -159,6 +171,8 @@ function fromRow(row: ReservationRow): Reservation {
 function cloneReservation(reservation: Reservation): Reservation {
   return {
     ...reservation,
+    profileId: reservation.profileId,
+    profileName: reservation.profileName,
     modelIds: [...reservation.modelIds],
     targetIds: [...reservation.targetIds],
     createdAt: new Date(reservation.createdAt),

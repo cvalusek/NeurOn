@@ -1,4 +1,4 @@
-import type { ApiKeyRepository, AuthMethodRepository, CapacityProviderRepository, CapacityTargetRepository, ReservationRepository, TargetModelDiscoveryRepository, TargetProvisioningJobRepository, TargetActivationRepository } from "../domain/interfaces.js";
+import type { ApiKeyRepository, AuthMethodRepository, CapacityProviderRepository, CapacityTargetRepository, ReservationProfileRepository, ReservationRepository, TargetModelDiscoveryRepository, TargetProvisioningJobRepository, TargetActivationRepository } from "../domain/interfaces.js";
 import type { StorageConfig } from "../domain/types.js";
 import { InMemoryApiKeyRepository } from "./InMemoryApiKeyRepository.js";
 import { InMemoryAuthMethodRepository } from "./InMemoryAuthMethodRepository.js";
@@ -11,6 +11,7 @@ import { InMemoryTargetActivationRepository } from "./InMemoryTargetActivationRe
 
 export interface ReservationRepositoryHandle {
   repository: ReservationRepository;
+  reservationProfiles: ReservationProfileRepository;
   apiKeys: ApiKeyRepository;
   authMethods: AuthMethodRepository;
   capacityProviders: CapacityProviderRepository;
@@ -25,6 +26,7 @@ export async function createReservationRepository(config: StorageConfig): Promis
   if (config.driver === "sqlite") {
     const { SqliteReservationRepository } = await import("./SqliteReservationRepository.js");
     const { SqliteApiKeyRepository } = await import("./SqliteApiKeyRepository.js");
+    const { SqliteReservationProfileRepository } = await import("./SqliteReservationProfileRepository.js");
     const { SqliteAuthMethodRepository } = await import("./SqliteAuthMethodRepository.js");
     const { SqliteCapacityProviderRepository } = await import("./SqliteCapacityProviderRepository.js");
     const { SqliteCapacityTargetRepository } = await import("./SqliteCapacityTargetRepository.js");
@@ -32,6 +34,7 @@ export async function createReservationRepository(config: StorageConfig): Promis
     const { SqliteTargetProvisioningJobRepository } = await import("./SqliteTargetProvisioningJobRepository.js");
     const { SqliteTargetActivationRepository } = await import("./SqliteTargetActivationRepository.js");
     const repository = new SqliteReservationRepository(config.path);
+    const reservationProfiles = new SqliteReservationProfileRepository(config.path);
     const apiKeys = new SqliteApiKeyRepository(config.path);
     const authMethods = new SqliteAuthMethodRepository(config.path);
     const capacityProviders = new SqliteCapacityProviderRepository(config.path);
@@ -41,6 +44,7 @@ export async function createReservationRepository(config: StorageConfig): Promis
     const targetActivations = new SqliteTargetActivationRepository(config.path);
     return {
       repository,
+      reservationProfiles,
       apiKeys,
       authMethods,
       capacityProviders,
@@ -50,6 +54,7 @@ export async function createReservationRepository(config: StorageConfig): Promis
       targetActivations,
       close: async () => {
         repository.close();
+        reservationProfiles.close();
         apiKeys.close();
         authMethods.close();
         capacityProviders.close();
@@ -63,6 +68,7 @@ export async function createReservationRepository(config: StorageConfig): Promis
   if (config.driver === "postgres") {
     const { PostgresReservationRepository } = await import("./PostgresReservationRepository.js");
     const { PostgresApiKeyRepository } = await import("./PostgresApiKeyRepository.js");
+    const { PostgresReservationProfileRepository } = await import("./PostgresReservationProfileRepository.js");
     const { PostgresAuthMethodRepository } = await import("./PostgresAuthMethodRepository.js");
     const { PostgresCapacityProviderRepository } = await import("./PostgresCapacityProviderRepository.js");
     const { PostgresCapacityTargetRepository } = await import("./PostgresCapacityTargetRepository.js");
@@ -70,6 +76,7 @@ export async function createReservationRepository(config: StorageConfig): Promis
     const { PostgresTargetProvisioningJobRepository } = await import("./PostgresTargetProvisioningJobRepository.js");
     const { PostgresTargetActivationRepository } = await import("./PostgresTargetActivationRepository.js");
     const repository = new PostgresReservationRepository(config.connectionString);
+    const reservationProfiles = new PostgresReservationProfileRepository(config.connectionString);
     const apiKeys = new PostgresApiKeyRepository(config.connectionString);
     const authMethods = new PostgresAuthMethodRepository(config.connectionString);
     const capacityProviders = new PostgresCapacityProviderRepository(config.connectionString);
@@ -78,6 +85,7 @@ export async function createReservationRepository(config: StorageConfig): Promis
     const targetModelDiscoveries = new PostgresTargetModelDiscoveryRepository(config.connectionString);
     const targetActivations = new PostgresTargetActivationRepository(config.connectionString);
     await repository.initialize();
+    await reservationProfiles.initialize();
     await apiKeys.initialize();
     await authMethods.initialize();
     await capacityProviders.initialize();
@@ -87,6 +95,7 @@ export async function createReservationRepository(config: StorageConfig): Promis
     await targetActivations.initialize();
     return {
       repository,
+      reservationProfiles,
       apiKeys,
       authMethods,
       capacityProviders,
@@ -96,6 +105,7 @@ export async function createReservationRepository(config: StorageConfig): Promis
       targetActivations,
       close: async () => {
         await repository.close();
+        await reservationProfiles.close();
         await apiKeys.close();
         await authMethods.close();
         await capacityProviders.close();
@@ -108,6 +118,8 @@ export async function createReservationRepository(config: StorageConfig): Promis
   }
 
   const repository = new InMemoryReservationRepository();
+  const { InMemoryReservationProfileRepository } = await import("./InMemoryReservationProfileRepository.js");
+  const reservationProfiles = new InMemoryReservationProfileRepository();
   const apiKeys = new InMemoryApiKeyRepository();
   const authMethods = new InMemoryAuthMethodRepository();
   const capacityProviders = new InMemoryCapacityProviderRepository();
@@ -115,5 +127,5 @@ export async function createReservationRepository(config: StorageConfig): Promis
   const targetProvisioningJobs = new InMemoryTargetProvisioningJobRepository();
   const targetModelDiscoveries = new InMemoryTargetModelDiscoveryRepository();
   const targetActivations = new InMemoryTargetActivationRepository();
-  return { repository, apiKeys, authMethods, capacityProviders, capacityTargets, targetProvisioningJobs, targetModelDiscoveries, targetActivations, close: async () => undefined };
+  return { repository, reservationProfiles, apiKeys, authMethods, capacityProviders, capacityTargets, targetProvisioningJobs, targetModelDiscoveries, targetActivations, close: async () => undefined };
 }

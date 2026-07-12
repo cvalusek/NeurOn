@@ -1,4 +1,4 @@
-import type { ApiKey, AppConfig, AuthenticatedUser, CapacityTarget, ModelDefinition, Reservation, RuntimeProfile, TargetStatus } from "../domain/types.js";
+import type { ApiKey, AppConfig, AuthenticatedUser, CapacityTarget, ModelDefinition, Reservation, ReservationProfile, RuntimeProfile, TargetStatus } from "../domain/types.js";
 import type { AuthMethodView } from "../services/AuthMethodService.js";
 import type { ProviderView } from "../services/ProviderService.js";
 import type { TargetView } from "../services/TargetService.js";
@@ -13,14 +13,50 @@ export function layout(title: string, user: AuthenticatedUser | undefined, body:
   <style>
     body { font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif; margin: 0; background: #f7f7f4; color: #1f2933; }
     header { background: #17202a; color: white; }
-    .topbar { padding: 16px 24px; display: grid; grid-template-columns: 1fr minmax(0, 980px) 1fr; gap: 20px; align-items: center; }
-    .topbar .brand { justify-self: start; }
-    .topbar .user { justify-self: end; }
-    header nav { display: flex; gap: 14px; align-items: center; }
-    header a { color: white; }
-    main { max-width: 980px; margin: 0 auto; padding: 24px; }
+    .topbar { max-width: 1180px; margin: 0 auto; padding: 12px 24px; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 16px; align-items: center; }
+    .brand { color: white; text-decoration: none; font-weight: 800; }
+    .nav-link { color: white; text-decoration: none; border-radius: 6px; padding: 7px 9px; font-weight: 650; }
+    .nav-link:hover, .nav-link:focus-visible { background: rgba(255, 255, 255, 0.12); outline: none; }
+    .topbar .user { justify-self: end; color: #d8ddd7; font-size: 13px; }
+    .menu-button { display: inline-grid; place-items: center; width: 38px; height: 38px; background: #334155; padding: 0; justify-self: start; }
+    .hamburger { position: relative; display: block; width: 18px; height: 2px; border-radius: 999px; background: currentColor; }
+    .hamburger::before, .hamburger::after { content: ""; position: absolute; left: 0; width: 18px; height: 2px; border-radius: 999px; background: currentColor; }
+    .hamburger::before { top: -6px; }
+    .hamburger::after { top: 6px; }
+    .nav-drawer[hidden], .drawer-scrim[hidden] { display: none; }
+    .drawer-scrim { position: fixed; inset: 0; background: rgba(23, 32, 42, 0.45); border: 0; border-radius: 0; padding: 0; z-index: 20; }
+    .nav-drawer { position: fixed; top: 0; right: 0; bottom: 0; z-index: 21; width: min(320px, calc(100vw - 48px)); background: white; color: #1f2933; border-left: 1px solid #d8ddd7; box-shadow: -16px 0 48px rgba(23, 32, 42, 0.22); padding: 18px; overflow: auto; }
+    .drawer-head { display: flex; gap: 12px; align-items: center; margin-bottom: 12px; }
+    .drawer-nav { display: grid; gap: 8px; }
+    .drawer-tree { border: 1px solid #e2e7e1; border-radius: 8px; background: #fbfcfb; overflow: hidden; }
+    .drawer-tree summary { display: flex; align-items: center; gap: 8px; padding: 10px 12px; color: #334155; font-size: 13px; font-weight: 800; text-transform: uppercase; letter-spacing: 0; cursor: pointer; list-style: none; }
+    .drawer-tree summary::-webkit-details-marker { display: none; }
+    .drawer-tree summary::before { content: ">"; color: #657266; font: 13px ui-monospace, SFMono-Regular, Menlo, monospace; transition: transform 120ms ease; }
+    .drawer-tree[open] summary::before { transform: rotate(90deg); }
+    .drawer-tree summary:hover, .drawer-tree summary:focus-visible { background: #eef2f0; outline: none; }
+    .drawer-branch { display: grid; gap: 2px; padding: 0 8px 8px 28px; }
+    .drawer-branch a { display: block; color: #1f2933; text-decoration: none; border-radius: 6px; padding: 8px 10px; font-weight: 700; }
+    .drawer-branch a:hover, .drawer-branch a:focus-visible { background: #eef2f0; outline: none; }
+    main { max-width: 1180px; margin: 0 auto; padding: 24px; }
     a { color: #0f766e; } form { margin: 0; }
     .panel { background: white; border: 1px solid #d8ddd7; border-radius: 8px; padding: 18px; margin-bottom: 16px; }
+    .home-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(300px, 360px); gap: 16px; align-items: start; }
+    .home-grid .panel { margin-bottom: 0; }
+    .profile-strip { display: grid; grid-template-columns: minmax(180px, 1fr) auto; gap: 10px; align-items: end; margin-bottom: 14px; }
+    .profile-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+    .profile-picker { position: relative; }
+    .profile-picker summary { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 12px; align-items: center; border: 1px solid #aab4ad; border-radius: 8px; padding: 12px; background: #fbfcfb; cursor: pointer; list-style: none; }
+    .profile-picker summary::-webkit-details-marker { display: none; }
+    .profile-picker summary::after { content: "Change"; color: #0f766e; font-weight: 800; }
+    .profile-picker[open] summary::after { content: "Close"; }
+    .profile-menu { display: grid; gap: 8px; margin-top: 8px; border: 1px solid #d8ddd7; border-radius: 8px; background: white; padding: 8px; box-shadow: 0 14px 32px rgba(23, 32, 42, 0.16); }
+    .profile-card-button { display: block; width: 100%; text-align: left; border: 1px solid #d8ddd7; border-radius: 8px; padding: 12px; background: #fbfcfb; color: #1f2933; }
+    .profile-card-button[aria-pressed="true"] { border-color: #0f766e; background: #e7f5f2; box-shadow: inset 0 0 0 1px #0f766e; }
+    .profile-card-title { display: flex; flex-wrap: wrap; gap: 8px; justify-content: space-between; align-items: center; }
+    .quick-start { display: grid; gap: 14px; }
+    .compact-summary { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 8px; }
+    .status-details { margin-top: 10px; }
+    .status-details summary { cursor: pointer; color: #334155; font-weight: 700; }
     .models, .targets { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; margin: 14px 0; }
     .family { margin-top: 14px; }
     .family h3 { margin: 0 0 8px; font-size: 15px; }
@@ -47,6 +83,7 @@ export function layout(title: string, user: AuthenticatedUser | undefined, body:
     .target-status-meta, .reservation-meta { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
     .reservation-list { display: grid; gap: 8px; margin-top: 12px; }
     .reservation-card { border-top: 1px solid #e2e7e1; padding-top: 10px; }
+    .reservation-card.compact { align-items: center; }
     .reservation-cost { margin-top: 4px; color: #334155; font-size: 13px; }
     .reservation-cost strong { color: #1f2933; }
     .start-cost { border: 1px solid #d8ddd7; border-radius: 6px; background: #fbfcfb; padding: 10px; margin-top: 14px; }
@@ -83,11 +120,85 @@ export function layout(title: string, user: AuthenticatedUser | undefined, body:
     .modal-dialog { width: min(720px, 100%); max-height: calc(100vh - 40px); overflow: auto; background: white; border-radius: 8px; border: 1px solid #d8ddd7; padding: 18px; box-shadow: 0 16px 48px rgba(23, 32, 42, 0.22); }
     .field-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
     .hidden { display: none; }
+    @media (min-width: 1024px) {
+      .topbar { max-width: none; }
+      .nav-drawer { top: 62px; left: 0; right: auto; width: 260px; border-left: 0; border-right: 1px solid #d8ddd7; box-shadow: none; padding: 14px; }
+      body.drawer-open .drawer-scrim { display: none; }
+      body.drawer-open main { max-width: none; margin: 0 0 0 288px; }
+    }
+    @media (max-width: 820px) {
+      .home-grid { grid-template-columns: 1fr; }
+      .profile-strip { grid-template-columns: 1fr; }
+      .topbar { grid-template-columns: auto 1fr; gap: 12px; }
+      .topbar .user { display: none; }
+    }
   </style>
 </head>
 <body>
-  <header><div class="topbar"><strong class="brand">NeurOn</strong><nav><a href="/">Home</a><a href="/api-keys">API keys</a><a href="/admin/activations">Activations</a><a href="/admin">Admin</a><a href="/admin/auth">Auth</a><a href="/admin/providers">Providers</a><a href="/admin/targets">Targets</a></nav><span class="user">${user ? escapeHtml(user.username) : ""}</span></div></header>
+  <header>
+    <div class="topbar">
+      <button class="menu-button" type="button" data-nav-toggle aria-label="Open menu" aria-controls="nav-drawer" aria-expanded="false"><span class="hamburger" aria-hidden="true"></span></button>
+      <a class="brand" href="/">NeurOn</a>
+      <span class="user">${user ? escapeHtml(user.username) : ""}</span>
+    </div>
+  </header>
+  <button class="drawer-scrim" type="button" data-nav-close hidden></button>
+  <aside id="nav-drawer" class="nav-drawer" hidden>
+    <div class="drawer-head"><strong>NeurOn</strong></div>
+    <nav class="drawer-nav" aria-label="Side navigation">
+      <details class="drawer-tree" open>
+        <summary>Workspace</summary>
+        <div class="drawer-branch">
+          <a href="/">Home</a>
+          <a href="/profiles">Profiles</a>
+          <a href="/api-keys">API keys</a>
+        </div>
+      </details>
+      <details class="drawer-tree" open>
+        <summary>Admin</summary>
+        <div class="drawer-branch">
+          <a href="/admin/auth">Authentication</a>
+        </div>
+      </details>
+      <details class="drawer-tree" open>
+        <summary>Configuration</summary>
+        <div class="drawer-branch">
+          <a href="/admin/auth">Auth</a>
+          <a href="/admin/providers">Providers</a>
+          <a href="/admin/targets">Targets</a>
+        </div>
+      </details>
+      <details class="drawer-tree">
+        <summary>History</summary>
+        <div class="drawer-branch">
+          <a href="/admin/reservations">Reservations</a>
+          <a href="/admin/activations">Activations</a>
+        </div>
+      </details>
+    </nav>
+  </aside>
   <main>${body}</main>
+  <script>
+    (() => {
+      const drawer = document.querySelector('#nav-drawer');
+      const scrim = document.querySelector('[data-nav-close].drawer-scrim');
+      const toggle = document.querySelector('[data-nav-toggle]');
+      const desktopQuery = window.matchMedia('(min-width: 1024px)');
+      const setOpen = (open) => {
+        drawer.hidden = !open;
+        scrim.hidden = !open || desktopQuery.matches;
+        document.body.classList.toggle('drawer-open', open);
+        toggle?.setAttribute('aria-expanded', String(open));
+      };
+      setOpen(desktopQuery.matches);
+      toggle?.addEventListener('click', () => setOpen(drawer.hidden));
+      document.querySelectorAll('[data-nav-close]').forEach((button) => button.addEventListener('click', () => setOpen(false)));
+      desktopQuery.addEventListener('change', (event) => setOpen(event.matches));
+      document.addEventListener('keydown', (event) => {
+        if (event.key === 'Escape') setOpen(false);
+      });
+    })();
+  </script>
 </body>
 </html>`;
 }
@@ -108,67 +219,48 @@ export function loginPage(error = "", githubMethods: Array<{ id: string; display
   </section>`);
 }
 
-export function startPage(user: AuthenticatedUser, targets: Array<{ target: CapacityTarget; models: ModelDefinition[] }>, error = "", costEstimates: Record<string, { hourlyUsd: number }> = {}): string {
+export function startPage(user: AuthenticatedUser, targets: Array<{ target: CapacityTarget; models: ModelDefinition[] }>, profiles: ReservationProfile[] = [], error = "", costEstimates: Record<string, { hourlyUsd: number }> = {}): string {
   const initialTargetId = targets[0]?.target.id ?? "";
-  return layout("NeurOn", user, `<section class="panel">
+  return layout("NeurOn", user, `<div class="home-grid"><div><section class="panel">
     <h2>Your reservation</h2>
     <div id="current-reservation"><p class="muted">Loading...</p></div>
   </section>
   <section class="panel">
     <h1>Start capacity</h1>
     ${error ? `<p class="status">${escapeHtml(error)}</p>` : ""}
-    <form id="start-form" method="post" action="/reservations">
+    <form id="start-form" class="quick-start" method="post" action="/reservations">
       <input id="duration-minutes" type="hidden" name="durationMinutes" value="2">
       <input id="keepalive-minutes" type="hidden" name="keepaliveMinutes" value="2">
-      <h2>Target</h2>
-      <div class="targets">${targets
-        .map(({ target }, index) => targetOption(target, index === 0))
-        .join("")}</div>
-      <h2>Models</h2>
-      ${targets
-        .map(
-          ({ target, models }) =>
-            `<div class="model-group" data-target-models="${escapeHtml(target.id)}" ${target.id === initialTargetId ? "" : "hidden"}>${modelFamilySections(models)}</div>`
-        )
-        .join("")}
-      <h2>Duration</h2>
-      <div class="row" aria-label="Duration">
-        <button class="choice" type="button" data-duration="1" aria-pressed="false">1 min</button>
-        <button class="choice" type="button" data-duration="2" aria-pressed="true">2 min</button>
-        <button class="choice" type="button" data-duration="5" aria-pressed="false">5 min</button>
-        <button class="choice" type="button" data-duration="15" aria-pressed="false">15 min</button>
-        <button class="choice" type="button" data-duration="30" aria-pressed="false">30 min</button>
-        <button class="choice" type="button" data-duration="60" aria-pressed="false">1 hour</button>
-        <button class="choice" type="button" data-duration="120" aria-pressed="false">2 hours</button>
+      <input id="reservation-profile-id" type="hidden" name="profileId" value="">
+      <div class="profile-strip">
+        <div><strong>Reservation profile</strong></div>
+        <div class="profile-actions">
+          <button class="secondary" type="button" data-review-profile>Review</button>
+          <button class="secondary" type="button" data-open-modal="profile-modal">New</button>
+        </div>
       </div>
-      <div class="row" style="margin-top: 12px;">
-        <button class="choice" type="button" data-custom-duration="true" aria-pressed="false">Custom</button>
-        <label id="custom-duration-wrap" class="hidden">Minutes <input id="custom-duration" type="number" min="1" max="720" value="120"></label>
-      </div>
-      <h2>Keepalive</h2>
-      <div class="row" aria-label="Keepalive">
-        <button class="choice" type="button" data-keepalive="1" aria-pressed="false">1 min</button>
-        <button class="choice" type="button" data-keepalive="2" aria-pressed="true">2 min</button>
-        <button class="choice" type="button" data-keepalive="5" aria-pressed="false">5 min</button>
-        <button class="choice" type="button" data-keepalive="15" aria-pressed="false">15 min</button>
-      </div>
-      <div class="row" style="margin-top: 12px;">
-        <button class="choice" type="button" data-custom-keepalive="true" aria-pressed="false">Custom</button>
-        <label id="custom-keepalive-wrap" class="hidden">Minutes <input id="custom-keepalive" type="number" min="1" max="60" value="2"></label>
-      </div>
+      ${profilePicker(profiles, targets)}
+      <p id="profile-selection-error" class="status" hidden></p>
+      ${durationControls()}
+      ${keepaliveControls()}
       <div id="start-cost-estimate" class="start-cost">Estimated cost: Not available</div>
       <div class="actions">
         <button type="submit">Reserve</button>
       </div>
     </form>
   </section>
+  </div><aside>
   <section class="panel">
     <h2>Server status</h2>
     <div id="server-status"><p class="muted">Loading...</p></div>
   </section>
+  </aside></div>
+  ${profileReviewModal(profiles, targets)}
+  ${profileCreateModal(targets, initialTargetId)}
   <script type="module">
     const modelLookup = ${safeJson(modelLookupForTargets(targets))};
     const targetLookup = ${safeJson(targetLookupForTargets(targets))};
+    const profiles = ${safeJson(profilesForClient(profiles, targets))};
     const costLookup = ${safeJson(costEstimates)};
     const form = document.querySelector('#start-form');
     const duration = document.querySelector('#duration-minutes');
@@ -176,13 +268,44 @@ export function startPage(user: AuthenticatedUser, targets: Array<{ target: Capa
     const custom = document.querySelector('#custom-duration');
     const customKeepalive = document.querySelector('#custom-keepalive');
     const modelInputs = [...document.querySelectorAll('input[name="modelIds"]')];
-    const targetInputs = [...document.querySelectorAll('input[name="targetId"]')];
+    const targetInputs = [...document.querySelectorAll('input[name="profileTargetChoice"]')];
     const durationButtons = [...document.querySelectorAll('[data-duration], [data-custom-duration]')];
     const keepaliveButtons = [...document.querySelectorAll('[data-keepalive], [data-custom-keepalive]')];
     const customWrap = document.querySelector('#custom-duration-wrap');
     const customKeepaliveWrap = document.querySelector('#custom-keepalive-wrap');
     const startCostEstimate = document.querySelector('#start-cost-estimate');
+    const profileSelectionError = document.querySelector('#profile-selection-error');
+    const profileSelectInput = document.querySelector('#reservation-profile-id');
+    const profilePicker = document.querySelector('#profile-picker');
+    const profilePickerSummary = document.querySelector('#profile-picker-summary');
+    const profileTargetInput = document.querySelector('#profile-target-id');
+    const profileDurationInput = document.querySelector('#profile-duration-minutes');
+    const profileKeepaliveInput = document.querySelector('#profile-keepalive-minutes');
+    const profileDurationButtons = [...document.querySelectorAll('[data-profile-duration], [data-profile-custom-duration]')];
+    const profileKeepaliveButtons = [...document.querySelectorAll('[data-profile-keepalive], [data-profile-custom-keepalive]')];
+    const profileCustomDuration = document.querySelector('#profile-custom-duration');
+    const profileCustomKeepalive = document.querySelector('#profile-custom-keepalive');
+    const profileCustomDurationWrap = document.querySelector('#profile-custom-duration-wrap');
+    const profileCustomKeepaliveWrap = document.querySelector('#profile-custom-keepalive-wrap');
     document.addEventListener('click', async (event) => {
+      const profileButton = event.target.closest('[data-profile-id]');
+      if (profileButton) {
+        event.preventDefault();
+        const modal = document.querySelector('#profile-review-modal');
+        document.querySelector('#profile-review-body').innerHTML = profileDetailHtml(profiles.find(profile => profile.id === profileButton.dataset.profileId));
+        modal.hidden = false;
+        return;
+      }
+      const profileChoice = event.target.closest('[data-select-profile]');
+      if (profileChoice) {
+        event.preventDefault();
+        profileSelectInput.value = profileChoice.dataset.selectProfile ?? '';
+        document.querySelectorAll('[data-select-profile]').forEach(candidate => candidate.setAttribute('aria-pressed', String(candidate === profileChoice)));
+        applyProfile(selectedProfile());
+        if (profilePickerSummary) profilePickerSummary.innerHTML = profileSummaryHtml(selectedProfile());
+        if (profilePicker) profilePicker.open = false;
+        return;
+      }
       const button = event.target.closest('[data-copy]');
       if (!button) return;
       event.preventDefault();
@@ -199,6 +322,13 @@ export function startPage(user: AuthenticatedUser, targets: Array<{ target: Capa
     const modelChipRow = (modelIds) => modelIds.length
       ? '<span class="chip-row">' + modelIds.map((id, index) => copyButton(modelLookup[id]?.recommendedAlias ?? id, index === 0) + ((modelLookup[id]?.recommendedAlias && modelLookup[id].recommendedAlias !== id) ? copyButton(id) : '')).join('') + '</span>'
       : '<span class="chip-row"><span class="pill">All models</span></span>';
+    const profileSummaryHtml = (profile) => {
+      if (!profile) return '<span class="muted">Choose a profile</span>';
+      const targetNames = profile.selections.map(selection => targetLookup[selection.targetId]?.displayName ?? selection.targetId).join(', ');
+      const aliases = [...new Set(profile.selections.flatMap(selection => selection.modelIds.map(modelId => modelLookup[modelId]?.recommendedAlias ?? modelId)))].slice(0, 6);
+      const defaults = [profile.defaultDurationMinutes ? profile.defaultDurationMinutes + ' min' : '', profile.defaultKeepaliveMinutes ? profile.defaultKeepaliveMinutes + ' min keepalive' : ''].filter(Boolean).join(' | ');
+      return '<span><span class="profile-card-title"><strong>' + escapeText(profile.name) + '</strong>' + (defaults ? '<span class="pill">' + escapeText(defaults) + '</span>' : '') + '</span>' + (profile.description ? '<span class="muted">' + escapeText(profile.description) + '</span>' : '') + '<span class="compact-summary"><span class="pill">' + escapeText(targetNames || 'No target') + '</span>' + (aliases.length ? aliases.map(alias => '<span class="copy-chip">' + escapeText(alias) + '</span>').join('') : '<span class="pill">All models</span>') + '</span></span>';
+    };
     const statusPill = (value) => '<span class="pill ' + escapeText(value) + '">' + escapeText(value) + '</span>';
     const durationShort = (seconds) => {
       if (seconds < 60) return seconds + 's';
@@ -213,8 +343,11 @@ export function startPage(user: AuthenticatedUser, targets: Array<{ target: Capa
     const formatDateTime = (iso) => new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(iso));
     const formatUsd = (value) => '$' + new Intl.NumberFormat(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(value ?? 0);
     const selectedTargetId = () => targetInputs.find(input => input.checked)?.value ?? targetInputs[0]?.value;
+    const selectedProfile = () => profiles.find(profile => profile.id === profileSelectInput?.value);
+    const selectedProfileTargetId = () => selectedProfile()?.selections[0]?.targetId;
     const updateStartCostEstimate = () => {
-      const targetCost = costLookup[selectedTargetId()];
+      const targetId = selectedProfileTargetId();
+      const targetCost = costLookup[targetId];
       if (!targetCost?.hourlyUsd && targetCost?.hourlyUsd !== 0) {
         startCostEstimate.textContent = 'Estimated cost: Not available';
         return;
@@ -224,6 +357,68 @@ export function startPage(user: AuthenticatedUser, targets: Array<{ target: Capa
       const estimatedMinutes = durationMinutes + keepaliveMinutes;
       const estimatedCost = targetCost.hourlyUsd * estimatedMinutes / 60;
       startCostEstimate.textContent = 'Estimated cost: ' + formatUsd(estimatedCost) + ' for ' + estimatedMinutes + ' min (duration + keepalive)';
+    };
+    const updateSelectedProfileSummary = () => {
+      if (profileSelectionError) profileSelectionError.hidden = true;
+    };
+    const syncProfileTarget = () => {
+      profileTargetInput.value = selectedTargetId() ?? '';
+    };
+    const syncProfileDefaultButtons = (value, buttons, customButton, customInput, customWrap, attr) => {
+      const matching = buttons.find(button => button.dataset[attr] === String(value));
+      buttons.forEach(button => button.setAttribute('aria-pressed', String(button === (matching ?? customButton))));
+      customWrap.classList.toggle('hidden', Boolean(matching));
+      if (!matching) customInput.value = String(value);
+    };
+    const syncProfileDefaultsFromStart = () => {
+      profileDurationInput.value = duration.value;
+      profileKeepaliveInput.value = keepalive.value;
+      syncProfileDefaultButtons(profileDurationInput.value, profileDurationButtons, document.querySelector('[data-profile-custom-duration]'), profileCustomDuration, profileCustomDurationWrap, 'profileDuration');
+      syncProfileDefaultButtons(profileKeepaliveInput.value, profileKeepaliveButtons, document.querySelector('[data-profile-custom-keepalive]'), profileCustomKeepalive, profileCustomKeepaliveWrap, 'profileKeepalive');
+    };
+    const selectProfileDuration = (button) => {
+      const isCustom = Boolean(button?.dataset.profileCustomDuration);
+      profileDurationButtons.forEach(candidate => candidate.setAttribute('aria-pressed', String(candidate === button)));
+      profileCustomDurationWrap.classList.toggle('hidden', !isCustom);
+      profileDurationInput.value = isCustom ? profileCustomDuration.value : button?.dataset.profileDuration ?? profileDurationInput.value;
+      if (isCustom) profileCustomDuration.focus();
+    };
+    const selectProfileKeepalive = (button) => {
+      const isCustom = Boolean(button?.dataset.profileCustomKeepalive);
+      profileKeepaliveButtons.forEach(candidate => candidate.setAttribute('aria-pressed', String(candidate === button)));
+      profileCustomKeepaliveWrap.classList.toggle('hidden', !isCustom);
+      profileKeepaliveInput.value = isCustom ? profileCustomKeepalive.value : button?.dataset.profileKeepalive ?? profileKeepaliveInput.value;
+      if (isCustom) profileCustomKeepalive.focus();
+    };
+    const applyProfile = (profile) => {
+      if (!profile) return;
+      const firstSelection = profile.selections[0];
+      if (firstSelection) {
+        const targetInput = targetInputs.find(input => input.value === firstSelection.targetId);
+        if (targetInput) {
+          targetInput.checked = true;
+          selectTarget(firstSelection.targetId);
+        }
+        modelInputs.forEach(input => {
+          input.checked = !input.disabled && firstSelection.modelIds.includes(input.value);
+        });
+      }
+      if (profile.defaultDurationMinutes) duration.value = String(profile.defaultDurationMinutes);
+      if (profile.defaultKeepaliveMinutes) keepalive.value = String(profile.defaultKeepaliveMinutes);
+      syncProfileTarget();
+      updateSelectedProfileSummary();
+      updateStartCostEstimate();
+    };
+    const profileDetailHtml = (profile, options = {}) => {
+      if (!profile) return '<p class="muted">Pick a reservation profile to review it.</p>';
+      const selections = profile.selections.map(selection => {
+        const targetName = targetLookup[selection.targetId]?.displayName ?? selection.targetId;
+        const modelCount = selection.modelIds.length ? selection.modelIds.length + ' models' : 'All models';
+        const models = options.compact ? '<span class="pill">' + escapeText(modelCount) + '</span>' : (selection.modelIds.length ? modelChipRow(selection.modelIds) : '<span class="chip-row"><span class="pill">All models</span></span>');
+        return '<div class="' + (options.compact ? 'compact-summary' : 'target-status-card') + '"><strong>' + escapeText(targetName) + '</strong>' + models + '</div>';
+      }).join('');
+      const defaults = [profile.defaultDurationMinutes ? profile.defaultDurationMinutes + ' min duration' : '', profile.defaultKeepaliveMinutes ? profile.defaultKeepaliveMinutes + ' min keepalive' : ''].filter(Boolean).join(' | ');
+      return '<h3>' + escapeText(profile.name) + '</h3>' + (profile.description ? '<p class="muted">' + escapeText(profile.description) + '</p>' : '') + (defaults ? '<p class="muted">' + escapeText(defaults) + '</p>' : '') + selections;
     };
     const timeLeft = (iso) => {
       const ms = new Date(iso).getTime() - Date.now();
@@ -250,16 +445,25 @@ export function startPage(user: AuthenticatedUser, targets: Array<{ target: Capa
     };
     const reservationTargets = (reservation) => reservation.targets.map(target => targetLookup[target.id]?.displayName ?? target.id).join(', ');
     const reservationCard = (reservation, includeActions = false) => {
+      const profileButton = reservation.profileName ? '<button class="copy-chip primary" type="button" data-profile-id="' + escapeText(reservation.profileId ?? '') + '">' + escapeText(reservation.profileName) + '</button>' : '';
       const actions = includeActions
-        ? '<div class="reservation-actions"><form method="post" action="/reservations/' + reservation.reservationId + '/extend"><button class="secondary" name="durationMinutes" value="1" type="submit">+1 min</button></form><form method="post" action="/reservations/' + reservation.reservationId + '/extend"><button class="secondary" name="durationMinutes" value="2" type="submit">+2 min</button></form><form method="post" action="/reservations/' + reservation.reservationId + '/extend"><button class="secondary" name="durationMinutes" value="5" type="submit">+5 min</button></form><form method="post" action="/reservations/' + reservation.reservationId + '/extend"><button class="secondary" name="durationMinutes" value="15" type="submit">+15 min</button></form><form method="post" action="/reservations/' + reservation.reservationId + '/extend"><button class="secondary" name="durationMinutes" value="30" type="submit">+30 min</button></form><form method="post" action="/reservations/' + reservation.reservationId + '/extend"><button class="secondary" name="durationMinutes" value="60" type="submit">+1 hour</button></form><form method="post" action="/reservations/' + reservation.reservationId + '/done"><button class="danger" type="submit">I\\'m done</button></form></div>'
+        ? '<div class="reservation-actions"><form method="post" action="/reservations/' + reservation.reservationId + '/extend"><button class="secondary" name="durationMinutes" value="1" type="submit">+1 min</button></form><form method="post" action="/reservations/' + reservation.reservationId + '/extend"><button class="secondary" name="durationMinutes" value="2" type="submit">+2 min</button></form><form method="post" action="/reservations/' + reservation.reservationId + '/extend"><button class="secondary" name="durationMinutes" value="5" type="submit">+5 min</button></form><form method="post" action="/reservations/' + reservation.reservationId + '/extend"><button class="secondary" name="durationMinutes" value="15" type="submit">+15 min</button></form><form method="post" action="/reservations/' + reservation.reservationId + '/extend"><button class="secondary" name="durationMinutes" value="30" type="submit">+30 min</button></form><form method="post" action="/reservations/' + reservation.reservationId + '/done"><button class="danger" type="submit">I\\'m done</button></form></div>'
         : '';
-      return '<div class="reservation-card"><div><div class="reservation-meta">' + statusBadge(reservation.status) + '<strong>' + escapeText(reservation.displayUsername ?? reservation.username) + '</strong><span class="muted">' + reservationTimeHtml(reservation) + '</span></div><div class="muted">' + escapeText(reservationTargets(reservation)) + '</div>' + reservationCostLine(reservation.costEstimate) + modelChipRow(reservation.modelIds) + '</div>' + actions + '</div>';
+      return '<div class="reservation-card"><div><div class="reservation-meta">' + statusBadge(reservation.status) + '<strong>' + escapeText(reservation.displayUsername ?? reservation.username) + '</strong><span class="muted">' + reservationTimeHtml(reservation) + '</span>' + profileButton + '</div><div class="muted">' + escapeText(reservationTargets(reservation)) + '</div>' + reservationCostLine(reservation.costEstimate) + modelChipRow(reservation.modelIds) + '</div>' + actions + '</div>';
     };
+    const compactReservationCard = (reservation) => '<div class="reservation-card compact"><div><div class="reservation-meta">' + statusBadge(reservation.status) + '<strong>' + escapeText(reservation.displayUsername ?? reservation.username) + '</strong><span class="muted">' + reservationTimeHtml(reservation) + '</span></div><div class="muted">' + escapeText(reservationTargets(reservation)) + ' | ' + (reservation.modelIds.length ? reservation.modelIds.length + ' models' : 'All models') + '</div></div></div>';
     const targetStatusCard = (target, reservations) => {
       const relevant = reservations.filter(reservation => reservation.targets.some(candidate => candidate.id === target.id));
-      const rows = relevant.length ? relevant.map(reservation => reservationCard(reservation)).join('') : '<p class="muted">No reservations for this server</p>';
-      const users = target.activeUsers?.length ? '<span class="muted">Users: ' + escapeText(target.activeUsers.join(', ')) + '</span>' : '<span class="muted">No active users</span>';
-      return '<section class="target-status-card"><div class="target-status-head"><div><h3>' + escapeText(target.displayName) + '</h3><div class="target-status-meta">' + statusPill(target.desired) + statusPill(target.observed) + users + startupEstimate(target) + '</div></div><div class="muted">' + escapeText(target.provider) + '</div></div><p class="muted">' + escapeText(target.message) + '</p><div class="reservation-list">' + rows + '</div></section>';
+      const currentUser = ${JSON.stringify(user.username)};
+      const mine = relevant.filter(reservation => reservation.username === currentUser);
+      const others = relevant.filter(reservation => reservation.username !== currentUser);
+      const modelCount = new Set(relevant.flatMap(reservation => reservation.modelIds)).size;
+      const summary = '<span class="muted">' + relevant.length + ' active reservations</span><span class="muted">' + (target.activeUsers?.length ?? 0) + ' users</span><span class="muted">' + (modelCount || 'All') + ' models</span>';
+      const userLine = target.activeUsers?.length ? '<span class="muted">Users: ' + escapeText(target.activeUsers.join(', ')) + '</span>' : '<span class="muted">No active users</span>';
+      const mineRows = mine.length ? mine.map(reservation => reservationCard(reservation)).join('') : '';
+      const otherRows = others.length ? '<details class="status-details"><summary>' + others.length + ' other reservations</summary><div class="reservation-list">' + others.map(compactReservationCard).join('') + '</div></details>' : '';
+      const rows = relevant.length ? mineRows + otherRows : '<p class="muted">No reservations for this server</p>';
+      return '<section class="target-status-card"><div class="target-status-head"><div><h3>' + escapeText(target.displayName) + '</h3><div class="target-status-meta">' + statusPill(target.desired) + statusPill(target.observed) + summary + startupEstimate(target) + '</div></div><div class="muted">' + escapeText(target.provider) + '</div></div><p class="muted">' + escapeText(target.message) + '</p><div class="target-status-meta">' + userLine + '</div><div class="reservation-list">' + rows + '</div></section>';
     };
     const selectDuration = (button) => {
       durationButtons.forEach(candidate => candidate.setAttribute('aria-pressed', candidate === button ? 'true' : 'false'));
@@ -288,13 +492,31 @@ export function startPage(user: AuthenticatedUser, targets: Array<{ target: Capa
           if (!active) input.checked = false;
         });
       });
+      syncProfileTarget();
     };
     targetInputs.forEach(input => input.addEventListener('change', () => {
       selectTarget(input.value);
-      updateStartCostEstimate();
     }));
     selectTarget(targetInputs.find(input => input.checked)?.value ?? targetInputs[0]?.value);
-    updateStartCostEstimate();
+    modelInputs.forEach(input => input.addEventListener('change', () => {
+      syncProfileTarget();
+    }));
+    profileSelectInput?.addEventListener('change', () => applyProfile(selectedProfile()));
+    document.querySelector('[data-review-profile]')?.addEventListener('click', () => {
+      const modal = document.querySelector('#profile-review-modal');
+      document.querySelector('#profile-review-body').innerHTML = profileDetailHtml(selectedProfile());
+      modal.hidden = false;
+    });
+    document.addEventListener('click', (event) => {
+      const opener = event.target.closest('[data-open-modal]');
+      if (opener) {
+        document.getElementById(opener.dataset.openModal).hidden = false;
+        syncProfileTarget();
+        syncProfileDefaultsFromStart();
+      }
+      if (event.target.closest('[data-close-modal]')) event.target.closest('.modal').hidden = true;
+      if (event.target.classList?.contains('modal')) event.target.hidden = true;
+    });
     custom.addEventListener('input', () => {
       const customButton = document.querySelector('[data-custom-duration]');
       selectDuration(customButton);
@@ -303,16 +525,26 @@ export function startPage(user: AuthenticatedUser, targets: Array<{ target: Capa
       const customButton = document.querySelector('[data-custom-keepalive]');
       selectKeepalive(customButton);
     });
+    profileDurationButtons.forEach(button => button.addEventListener('click', () => selectProfileDuration(button)));
+    profileKeepaliveButtons.forEach(button => button.addEventListener('click', () => selectProfileKeepalive(button)));
+    profileCustomDuration.addEventListener('input', () => selectProfileDuration(document.querySelector('[data-profile-custom-duration]')));
+    profileCustomKeepalive.addEventListener('input', () => selectProfileKeepalive(document.querySelector('[data-profile-custom-keepalive]')));
     form.addEventListener('submit', (event) => {
-      const activeModelInputs = modelInputs.filter(input => !input.disabled);
-      if (activeModelInputs.length > 0 && !activeModelInputs.some(input => input.checked)) {
+      if (!profileSelectInput.value) {
         event.preventDefault();
-        modelInputs[0]?.setCustomValidity('Select at least one model');
-        modelInputs[0]?.reportValidity();
-        modelInputs[0]?.setCustomValidity('');
+        if (profileSelectionError) {
+          profileSelectionError.textContent = 'Choose or create a reservation profile.';
+          profileSelectionError.hidden = false;
+        }
         return;
       }
     });
+    if (!profileSelectInput.value && profiles[0]) profileSelectInput.value = profiles[0].id;
+    document.querySelectorAll('[data-select-profile]').forEach(candidate => candidate.setAttribute('aria-pressed', String(candidate.dataset.selectProfile === profileSelectInput.value)));
+    applyProfile(selectedProfile());
+    if (profilePickerSummary) profilePickerSummary.innerHTML = profileSummaryHtml(selectedProfile());
+    syncProfileTarget();
+    syncProfileDefaultsFromStart();
     async function refreshServerStatus() {
       const res = await fetch('/api/status');
       if (!res.ok) return;
@@ -411,51 +643,135 @@ export function apiKeysPage(user: AuthenticatedUser, apiKeys: ApiKey[], createdT
   </script>`);
 }
 
-export function adminPage(user: AuthenticatedUser, config: AppConfig): string {
-  return layout("NeurOn Admin", user, `<section class="panel">
-    <h1>Admin</h1>
-    <p><a href="/admin/auth">Manage authentication</a> | <a href="/admin/providers">Manage providers</a> | <a href="/admin/targets">Manage targets</a></p>
-    <div id="admin-status"></div>
+export function profilesPage(user: AuthenticatedUser, profiles: ReservationProfile[], targets: Array<{ target: CapacityTarget; models: ModelDefinition[] }>): string {
+  const initialTargetId = targets[0]?.target.id ?? "";
+  const rows = profiles.length
+    ? profiles.map((profile) => profileListCard(profile, targets)).join("")
+    : `<p class="muted">No reservation profiles yet.</p>`;
+  return layout("NeurOn Profiles", user, `<section class="panel">
+    <div class="target-status-head"><h1>Profiles</h1><button type="button" data-open-modal="profile-modal">New profile</button></div>
+    <div class="summary-list">${rows}</div>
+  </section>
+  ${profileCreateModal(targets, initialTargetId, "/profiles")}
+  <script type="module">
+    const form = document.querySelector('#profile-form');
+    const targetInputs = [...form.querySelectorAll('input[name="profileTargetChoice"]')];
+    const targetIdInput = form.querySelector('#profile-target-id');
+    const profileDurationInput = form.querySelector('#profile-duration-minutes');
+    const profileKeepaliveInput = form.querySelector('#profile-keepalive-minutes');
+    const profileDurationButtons = [...form.querySelectorAll('[data-profile-duration], [data-profile-custom-duration]')];
+    const profileKeepaliveButtons = [...form.querySelectorAll('[data-profile-keepalive], [data-profile-custom-keepalive]')];
+    const profileCustomDuration = form.querySelector('#profile-custom-duration');
+    const profileCustomKeepalive = form.querySelector('#profile-custom-keepalive');
+    const profileCustomDurationWrap = form.querySelector('#profile-custom-duration-wrap');
+    const profileCustomKeepaliveWrap = form.querySelector('#profile-custom-keepalive-wrap');
+    const selectTarget = (targetId) => {
+      targetIdInput.value = targetId ?? '';
+      form.querySelectorAll('[data-target-models]').forEach(group => {
+        const active = group.dataset.targetModels === targetId;
+        group.hidden = !active;
+        group.querySelectorAll('input[name="modelIds"]').forEach(input => {
+          input.disabled = !active;
+          if (!active) input.checked = false;
+        });
+      });
+    };
+    const selectProfileDuration = (button) => {
+      const isCustom = Boolean(button?.dataset.profileCustomDuration);
+      profileDurationButtons.forEach(candidate => candidate.setAttribute('aria-pressed', String(candidate === button)));
+      profileCustomDurationWrap.classList.toggle('hidden', !isCustom);
+      profileDurationInput.value = isCustom ? profileCustomDuration.value : button?.dataset.profileDuration ?? profileDurationInput.value;
+      if (isCustom) profileCustomDuration.focus();
+    };
+    const selectProfileKeepalive = (button) => {
+      const isCustom = Boolean(button?.dataset.profileCustomKeepalive);
+      profileKeepaliveButtons.forEach(candidate => candidate.setAttribute('aria-pressed', String(candidate === button)));
+      profileCustomKeepaliveWrap.classList.toggle('hidden', !isCustom);
+      profileKeepaliveInput.value = isCustom ? profileCustomKeepalive.value : button?.dataset.profileKeepalive ?? profileKeepaliveInput.value;
+      if (isCustom) profileCustomKeepalive.focus();
+    };
+    targetInputs.forEach(input => input.addEventListener('change', () => selectTarget(input.value)));
+    profileDurationButtons.forEach(button => button.addEventListener('click', () => selectProfileDuration(button)));
+    profileKeepaliveButtons.forEach(button => button.addEventListener('click', () => selectProfileKeepalive(button)));
+    profileCustomDuration.addEventListener('input', () => selectProfileDuration(form.querySelector('[data-profile-custom-duration]')));
+    profileCustomKeepalive.addEventListener('input', () => selectProfileKeepalive(form.querySelector('[data-profile-custom-keepalive]')));
+    selectTarget(targetInputs.find(input => input.checked)?.value ?? targetInputs[0]?.value);
+    document.addEventListener('click', async (event) => {
+      const copy = event.target.closest('[data-copy]');
+      if (copy) {
+        event.preventDefault();
+        event.stopPropagation();
+        const value = copy.dataset.copy;
+        if (!value) return;
+        await navigator.clipboard?.writeText(value);
+        const previous = copy.textContent;
+        copy.textContent = 'copied';
+        setTimeout(() => { copy.textContent = previous; }, 900);
+        return;
+      }
+      const opener = event.target.closest('[data-open-modal]');
+      if (opener) document.getElementById(opener.dataset.openModal).hidden = false;
+      if (event.target.closest('[data-close-modal]')) event.target.closest('.modal').hidden = true;
+      if (event.target.classList?.contains('modal')) event.target.hidden = true;
+    });
+  </script>`);
+}
+
+function profileListCard(profile: ReservationProfile, targets: Array<{ target: CapacityTarget; models: ModelDefinition[] }>): string {
+  const targetLookup = targetLookupForTargets(targets);
+  const modelLookup = modelLookupForTargets(targets);
+  const defaults = [profile.defaultDurationMinutes ? `${profile.defaultDurationMinutes} min duration` : "", profile.defaultKeepaliveMinutes ? `${profile.defaultKeepaliveMinutes} min keepalive` : ""].filter(Boolean).join(" | ");
+  const selections = profile.selections.map((selection) => {
+    const aliases = selection.modelIds.map((modelId) => modelLookup[modelId]?.recommendedAlias ?? modelId);
+    const modelSummary = aliases.length ? aliases.map((alias) => `<span class="copy-chip">${escapeHtml(alias)}</span>`).join("") : `<span class="pill">All models</span>`;
+    return `<div class="target-status-card"><div class="target-status-head"><strong>${escapeHtml(targetLookup[selection.targetId]?.displayName ?? selection.targetId)}</strong><span class="muted"><code>${escapeHtml(selection.targetId)}</code></span></div><div class="chip-row">${modelSummary}</div></div>`;
+  }).join("");
+  return `<details class="drilldown"><summary><div><strong>${escapeHtml(profile.name)}</strong>${profile.description ? `<div class="muted">${escapeHtml(profile.description)}</div>` : ""}<div class="target-status-meta">${defaults ? `<span class="pill">${escapeHtml(defaults)}</span>` : ""}<span class="muted">${profile.selections.length} target selection${profile.selections.length === 1 ? "" : "s"}</span></div></div><form method="post" action="/reservation-profiles/${escapeHtml(profile.id)}/delete"><button class="danger" type="submit">Delete</button></form></summary><div class="drilldown-body">${selections}</div></details>`;
+}
+
+export function reservationHistoryPage(user: AuthenticatedUser): string {
+  return layout("Reservations", user, `<section class="panel">
+    <h1>Reservations</h1>
+    <div id="reservation-history"><p class="muted">Loading...</p></div>
   </section>
   <script type="module">
-    const formatDateTime = (iso) => new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(iso));
-    const timeLeft = (iso) => {
-      const ms = new Date(iso).getTime() - Date.now();
-      if (ms <= 0) return 'expired';
-      if (ms < 60000) return '<1m left';
-      const minutes = Math.floor(ms / 60000);
-      if (minutes < 60) return minutes + 'm left';
-      const hours = Math.floor(minutes / 60);
-      const rest = minutes % 60;
-      return rest ? hours + 'h ' + rest + 'm left' : hours + 'h left';
-    };
-    const friendlyExpiration = (iso) => formatDateTime(iso) + ' (' + timeLeft(iso) + ')';
-    const statusBadge = (status) => '<span class="badge ' + status + '">' + status + '</span>';
+    const escapeText = (value) => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' }[char]));
+    const formatDateTime = (iso) => iso ? new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(iso)) : '';
     const formatUsd = (value) => '$' + new Intl.NumberFormat(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(value ?? 0);
-    const reservationCost = (reservation) => reservation.costEstimate ? formatUsd(reservation.costEstimate.estimatedCostUsd) : '';
+    const statusBadge = (status) => '<span class="badge ' + escapeText(status) + '">' + escapeText(status) + '</span>';
+    const pageSize = 20;
+    const params = new URLSearchParams(window.location.search);
+    let page = Math.max(1, Number(params.get('page') ?? '1') || 1);
     const reservationTime = (reservation) => {
-      if (reservation.status === 'active') return 'until ' + friendlyExpiration(reservation.expiresAt);
-      if (reservation.endedAt) return reservation.status === 'done' ? 'ended ' + formatDateTime(reservation.endedAt) : reservation.status + ' ' + formatDateTime(reservation.endedAt);
-      return reservation.status + ' at ' + formatDateTime(reservation.expiresAt);
+      const expires = 'expires ' + formatDateTime(reservation.expiresAt);
+      if (!reservation.endedAt) return expires;
+      return expires + '<br><span class="muted">ended ' + formatDateTime(reservation.endedAt) + '</span>';
     };
-    async function post(url) { await fetch(url, { method: 'POST' }); refresh(); }
-    window.provisionTarget = (id) => post('/api/admin/targets/' + id + '/provision');
-    window.discoverTarget = (id) => post('/api/admin/targets/' + id + '/discover');
-    window.forceStop = (id) => post('/api/admin/targets/' + id + '/force-stop');
-    window.reconcileTarget = (id) => post('/api/admin/targets/' + id + '/reconcile');
-    async function refresh() {
-      const res = await fetch('/api/admin/status');
-      if (!res.ok) return;
-      const data = await res.json();
-      const targets = data.capacityTargets.map(t => {
-        const provision = t.needsProvisioning ? '<button onclick="provisionTarget(\\'' + t.id + '\\')">Provision</button> ' : '';
-        return '<tr><td>' + t.id + '</td><td>' + t.desired + '</td><td>' + t.observed + '</td><td>' + t.message + '</td><td>' + t.activeUsers.join(', ') + '</td><td>' + provision + '<button onclick="discoverTarget(\\'' + t.id + '\\')">Discover</button> <button onclick="reconcileTarget(\\'' + t.id + '\\')">Reconcile</button> <button class="danger" onclick="forceStop(\\'' + t.id + '\\')">Force stop</button></td></tr>';
-      }).join('');
-      const reservations = data.reservations.map(r => '<tr><td>' + r.reservationId + '</td><td>' + (r.displayUsername ?? r.username) + '</td><td>' + statusBadge(r.status) + '</td><td>' + reservationTime(r) + '</td><td>' + reservationCost(r) + '</td><td>' + r.modelIds.join(', ') + '</td></tr>').join('');
-      document.querySelector('#admin-status').innerHTML = '<h2>Targets</h2><table><thead><tr><th>Target</th><th>Desired</th><th>Observed</th><th>Message</th><th>Users</th><th></th></tr></thead><tbody>' + targets + '</tbody></table><h2>Reservations</h2><table><thead><tr><th>ID</th><th>User</th><th>Status</th><th>Expires</th><th>Cost</th><th>Models</th></tr></thead><tbody>' + reservations + '</tbody></table>';
+    const row = (reservation) => '<tr><td><a href="/reservations/' + escapeText(reservation.reservationId) + '">' + escapeText(reservation.reservationId) + '</a></td><td>' + escapeText(reservation.displayUsername ?? reservation.username) + '</td><td>' + statusBadge(reservation.status) + '</td><td>' + reservationTime(reservation) + '</td><td>' + escapeText(reservation.targets.map(target => target.id).join(', ')) + '</td><td>' + escapeText(reservation.modelIds.length ? reservation.modelIds.join(', ') : 'All models') + '</td><td>' + (reservation.costEstimate ? formatUsd(reservation.costEstimate.estimatedCostUsd) : '') + '</td></tr>';
+    const render = (data) => {
+      const totalPages = Math.max(1, Math.ceil(data.total / data.pageSize));
+      const controls = '<div class="target-status-head"><div class="muted">' + data.total + ' reservations | expires newest first</div><div class="inline-actions"><button class="secondary" type="button" data-page="' + (data.page - 1) + '" ' + (data.page <= 1 ? 'disabled' : '') + '>Previous</button><span class="muted">Page ' + data.page + ' of ' + totalPages + '</span><button class="secondary" type="button" data-page="' + (data.page + 1) + '" ' + (data.page >= totalPages ? 'disabled' : '') + '>Next</button></div></div>';
+      const table = data.reservations.length
+        ? '<table><thead><tr><th>ID</th><th>User</th><th>Status</th><th>Time</th><th>Targets</th><th>Models</th><th>Cost</th></tr></thead><tbody>' + data.reservations.map(row).join('') + '</tbody></table>'
+        : '<p class="muted">No reservations recorded yet.</p>';
+      document.querySelector('#reservation-history').innerHTML = controls + table;
+    };
+    async function load() {
+      const response = await fetch('/api/admin/reservations?page=' + page + '&pageSize=' + pageSize + '&sort=expires_desc');
+      if (!response.ok) return;
+      const data = await response.json();
+      page = data.page;
+      params.set('page', String(page));
+      window.history.replaceState(null, '', window.location.pathname + '?' + params.toString());
+      render(data);
     }
-    refresh();
-    setInterval(refresh, ${config.adminStatusPollSeconds * 1000});
+    document.addEventListener('click', (event) => {
+      const button = event.target.closest('[data-page]');
+      if (!button || button.disabled) return;
+      page = Number(button.dataset.page);
+      load();
+    });
+    load();
   </script>`);
 }
 
@@ -651,6 +967,20 @@ function targetAdminScript(providers: ProviderView[], runtimeProfiles: RuntimePr
       await refreshTargetStatus();
       setTimeout(() => { button.disabled = false; button.textContent = previous; }, 1400);
     });
+    document.addEventListener('click', async (event) => {
+      const button = event.target.closest('[data-target-action]');
+      if (!button) return;
+      event.preventDefault();
+      const targetId = button.dataset.targetId;
+      const action = button.dataset.targetAction;
+      button.disabled = true;
+      const previous = button.textContent;
+      button.textContent = 'Working...';
+      const response = await fetch('/api/admin/targets/' + encodeURIComponent(targetId) + '/' + action, { method: 'POST' });
+      button.textContent = response.ok ? 'Done' : 'Failed';
+      await refreshTargetStatus();
+      setTimeout(() => { button.disabled = false; button.textContent = previous; }, 1400);
+    });
     document.addEventListener('click', (event) => {
       const opener = event.target.closest('[data-open-modal]');
       if (opener) document.getElementById(opener.dataset.openModal).hidden = false;
@@ -738,7 +1068,7 @@ function targetAdminScript(providers: ProviderView[], runtimeProfiles: RuntimePr
       editSync();
     });
     const statusPill = (value) => '<span class="pill ' + String(value ?? '').replace(/[^a-z0-9_-]/gi, '') + '">' + escapeText(value) + '</span>';
-    const statusCard = (target) => '<div class="target-status-meta">' + statusPill(target.desired) + statusPill(target.observed) + '<span class="muted">' + escapeText(target.message) + '</span>' + (target.activeUsers?.length ? '<span class="muted">Users: ' + escapeText(target.activeUsers.join(', ')) + '</span>' : '') + '</div>';
+    const statusCard = (target) => '<div class="target-status-meta">' + statusPill(target.desired) + statusPill(target.observed) + '<span class="muted">' + escapeText(target.message) + '</span>' + (target.activeUsers?.length ? '<span class="muted">Users: ' + escapeText(target.activeUsers.join(', ')) + '</span>' : '<span class="muted">No active users</span>') + (target.needsProvisioning ? '<button type="button" data-provision-target="' + escapeText(target.id) + '">Provision</button>' : '') + '</div>';
     async function refreshTargetStatus() {
       const response = await fetch('/api/admin/targets');
       if (!response.ok) return;
@@ -760,7 +1090,7 @@ function targetRow(target: TargetView, providers: ProviderView[], runtimeProfile
     : `<form method="post" action="/admin/targets/${escapeHtml(target.id)}/copy-to-db"><button class="secondary" type="submit">Copy to DB</button></form>`;
   const deleteAction = target.editable ? targetDeletePanel(target) : `<p class="muted">This target is loaded from declarative config. Remove it from configuration or copy it to the database before deleting it here.</p>`;
   const users = target.modelIds.length > 0 ? `${target.modelIds.length} configured models` : "Discovery";
-  return `<details class="drilldown"><summary><div><strong>${escapeHtml(target.displayName)}</strong><div class="target-status-meta"><span class="pill off">${escapeHtml(target.provider)}</span><span class="muted"><code>${escapeHtml(target.id)}</code></span><span class="muted">${escapeHtml(users)}</span></div></div><span class="badge ${target.source === "persisted" ? "active" : "done"}">${escapeHtml(target.source)}</span></summary><div class="drilldown-body" data-tabs><div class="tabbar"><button type="button" data-tab="view" aria-selected="true">View</button><button type="button" data-tab="status" aria-selected="false">Status</button><button type="button" data-tab="json" aria-selected="false">JSON</button><button type="button" data-tab="env" aria-selected="false">ENV</button><button type="button" data-tab="edit" aria-selected="false">Edit</button><button type="button" data-tab="delete" aria-selected="false">Delete</button></div>${details}<section class="tab-panel" data-tab-panel="edit" hidden><p class="muted">${target.editable ? "This target is stored in the database." : "This target is loaded from declarative config."}</p>${editAction}</section><section class="tab-panel" data-tab-panel="delete" hidden>${deleteAction}</section></div></details>`;
+  return `<details class="drilldown"><summary><div><strong>${escapeHtml(target.displayName)}</strong><div class="target-status-meta"><span class="pill off">${escapeHtml(target.provider)}</span><span class="muted"><code>${escapeHtml(target.id)}</code></span><span class="muted">${escapeHtml(users)}</span></div><div data-target-status="${escapeHtml(target.id)}"><p class="muted">Loading status...</p></div></div><span class="badge ${target.source === "persisted" ? "active" : "done"}">${escapeHtml(target.source)}</span></summary><div class="drilldown-body" data-tabs><div class="tabbar"><button type="button" data-tab="view" aria-selected="true">View</button><button type="button" data-tab="json" aria-selected="false">JSON</button><button type="button" data-tab="env" aria-selected="false">ENV</button><button type="button" data-tab="edit" aria-selected="false">Edit</button><button type="button" data-tab="delete" aria-selected="false">Delete</button></div>${details}<section class="tab-panel" data-tab-panel="edit" hidden><p class="muted">${target.editable ? "This target is stored in the database." : "This target is loaded from declarative config."}</p>${editAction}</section><section class="tab-panel" data-tab-panel="delete" hidden>${deleteAction}</section></div></details>`;
 }
 
 function targetEditPanel(target: TargetView, providers: ProviderView[], runtimeProfiles: RuntimeProfile[]): string {
@@ -829,7 +1159,8 @@ function targetDetails(target: CapacityTarget): string {
     ["Remote NeurOn target", target.neuron?.targetId]
   ].filter((entry): entry is [string, string] => entry[1] !== undefined && entry[1] !== "");
   const view = `<table><tbody>${viewRows.map(([label, value]) => `<tr><th>${escapeHtml(label)}</th><td>${escapeHtml(String(value))}</td></tr>`).join("")}</tbody></table>`;
-  return `<section class="tab-panel" data-tab-panel="view">${view}</section><section class="tab-panel" data-tab-panel="status" hidden><div data-target-status="${escapeHtml(target.id)}"><p class="muted">Loading status...</p></div></section><section class="tab-panel" data-tab-panel="json" hidden><div class="inline-actions"><button type="button" data-copy="${escapeHtml(declarative)}">Copy JSON</button></div><pre>${escapeHtml(declarative)}</pre></section><section class="tab-panel" data-tab-panel="env" hidden><p class="muted">Profiles are create-time templates; ENV shows the expanded target config.</p><div class="inline-actions"><button type="button" data-copy="${escapeHtml(env)}">Copy ENV</button></div><pre>${escapeHtml(env)}</pre></section>`;
+  const operations = `<div class="inline-actions" style="margin-top: 12px;"><button type="button" data-target-action="discover" data-target-id="${escapeHtml(target.id)}">Discover</button><button class="secondary" type="button" data-target-action="reconcile" data-target-id="${escapeHtml(target.id)}">Reconcile</button><button class="danger" type="button" data-target-action="force-stop" data-target-id="${escapeHtml(target.id)}">Force stop</button></div>`;
+  return `<section class="tab-panel" data-tab-panel="view">${view}${operations}</section><section class="tab-panel" data-tab-panel="json" hidden><div class="inline-actions"><button type="button" data-copy="${escapeHtml(declarative)}">Copy JSON</button></div><pre>${escapeHtml(declarative)}</pre></section><section class="tab-panel" data-tab-panel="env" hidden><p class="muted">Profiles are create-time templates; ENV shows the expanded target config.</p><div class="inline-actions"><button type="button" data-copy="${escapeHtml(env)}">Copy ENV</button></div><pre>${escapeHtml(env)}</pre></section>`;
 }
 
 function targetProviderSelect(providers: ProviderView[], _includeDirectTypes = false, selected = "", selectedType = ""): string {
@@ -1240,7 +1571,168 @@ function escapeHtml(value: string): string {
 function targetOption(target: CapacityTarget, checked: boolean): string {
   const details = [`Provider: ${target.provider}`, `${target.modelIds.length} models`];
   if (target.modelsMax) details.push(`models-max: ${target.modelsMax}`);
-  return `<label class="option"><input type="radio" name="targetId" value="${escapeHtml(target.id)}" ${checked ? "checked" : ""}><span><strong>${escapeHtml(target.displayName)}</strong><br><span class="muted">${escapeHtml(details.join(" | "))}</span></span></label>`;
+  return `<label class="option"><input type="radio" name="profileTargetChoice" value="${escapeHtml(target.id)}" ${checked ? "checked" : ""}><span><strong>${escapeHtml(target.displayName)}</strong><br><span class="muted">${escapeHtml(details.join(" | "))}</span></span></label>`;
+}
+
+function profilePicker(profiles: ReservationProfile[], targets: Array<{ target: CapacityTarget; models: ModelDefinition[] }>): string {
+  if (profiles.length === 0) return `<div class="target-status-card"><p class="muted">No reservation profiles yet.</p></div>`;
+  return `<details class="profile-picker" id="profile-picker"><summary id="profile-picker-summary">${profilePickerSummary(profiles[0], targets)}</summary><div class="profile-menu">${profiles.map((profile) => profilePickerCard(profile, targets)).join("")}</div></details>`;
+}
+
+function profilePickerSummary(profile: ReservationProfile, targets: Array<{ target: CapacityTarget; models: ModelDefinition[] }>): string {
+  const targetLookup = targetLookupForTargets(targets);
+  const modelLookup = modelLookupForTargets(targets);
+  const targetNames = profile.selections.map((selection) => targetLookup[selection.targetId]?.displayName ?? selection.targetId).join(", ");
+  const aliases = primaryAliasesForProfile(profile, modelLookup);
+  const defaults = [profile.defaultDurationMinutes ? `${profile.defaultDurationMinutes} min` : "", profile.defaultKeepaliveMinutes ? `${profile.defaultKeepaliveMinutes} min keepalive` : ""].filter(Boolean).join(" | ");
+  return `<span><span class="profile-card-title"><strong>${escapeHtml(profile.name)}</strong>${defaults ? `<span class="pill">${escapeHtml(defaults)}</span>` : ""}</span>${profile.description ? `<span class="muted">${escapeHtml(profile.description)}</span>` : ""}<span class="compact-summary"><span class="pill">${escapeHtml(targetNames || "No target")}</span>${aliases.length ? aliases.map((alias) => `<span class="copy-chip">${escapeHtml(alias)}</span>`).join("") : `<span class="pill">All models</span>`}</span></span>`;
+}
+
+function profilePickerCard(profile: ReservationProfile, targets: Array<{ target: CapacityTarget; models: ModelDefinition[] }>): string {
+  const targetLookup = targetLookupForTargets(targets);
+  const modelLookup = modelLookupForTargets(targets);
+  const targetNames = profile.selections.map((selection) => targetLookup[selection.targetId]?.displayName ?? selection.targetId).join(", ");
+  const aliases = primaryAliasesForProfile(profile, modelLookup);
+  const defaults = [profile.defaultDurationMinutes ? `${profile.defaultDurationMinutes} min` : "", profile.defaultKeepaliveMinutes ? `${profile.defaultKeepaliveMinutes} min keepalive` : ""].filter(Boolean).join(" | ");
+  return `<button class="profile-card-button" type="button" data-select-profile="${escapeHtml(profile.id)}" aria-pressed="false">
+    <span class="profile-card-title"><strong>${escapeHtml(profile.name)}</strong>${defaults ? `<span class="pill">${escapeHtml(defaults)}</span>` : ""}</span>
+    ${profile.description ? `<span class="muted">${escapeHtml(profile.description)}</span>` : ""}
+    <span class="compact-summary"><span class="pill">${escapeHtml(targetNames || "No target")}</span>${aliases.length ? aliases.map((alias) => `<span class="copy-chip">${escapeHtml(alias)}</span>`).join("") : `<span class="pill">All models</span>`}</span>
+  </button>`;
+}
+
+function durationControls(): string {
+  return `<div>
+    <h2>Duration</h2>
+    <div class="row" aria-label="Duration">
+      <button class="choice" type="button" data-duration="1" aria-pressed="false">1 min</button>
+      <button class="choice" type="button" data-duration="2" aria-pressed="true">2 min</button>
+      <button class="choice" type="button" data-duration="5" aria-pressed="false">5 min</button>
+      <button class="choice" type="button" data-duration="15" aria-pressed="false">15 min</button>
+      <button class="choice" type="button" data-duration="30" aria-pressed="false">30 min</button>
+      <button class="choice" type="button" data-duration="60" aria-pressed="false">1 hour</button>
+      <button class="choice" type="button" data-duration="120" aria-pressed="false">2 hours</button>
+    </div>
+    <div class="row" style="margin-top: 12px;">
+      <button class="choice" type="button" data-custom-duration="true" aria-pressed="false">Custom</button>
+      <label id="custom-duration-wrap" class="hidden">Minutes <input id="custom-duration" type="number" min="1" max="720" value="120"></label>
+    </div>
+  </div>`;
+}
+
+function keepaliveControls(): string {
+  return `<div>
+    <h2>Keepalive</h2>
+    <div class="row" aria-label="Keepalive">
+      <button class="choice" type="button" data-keepalive="1" aria-pressed="false">1 min</button>
+      <button class="choice" type="button" data-keepalive="2" aria-pressed="true">2 min</button>
+      <button class="choice" type="button" data-keepalive="5" aria-pressed="false">5 min</button>
+      <button class="choice" type="button" data-keepalive="15" aria-pressed="false">15 min</button>
+    </div>
+    <div class="row" style="margin-top: 12px;">
+      <button class="choice" type="button" data-custom-keepalive="true" aria-pressed="false">Custom</button>
+      <label id="custom-keepalive-wrap" class="hidden">Minutes <input id="custom-keepalive" type="number" min="1" max="60" value="2"></label>
+    </div>
+  </div>`;
+}
+
+function profileDefaultControls(): string {
+  return `<div class="field-grid">
+    <div>
+      <h2>Default duration</h2>
+      <div class="row" aria-label="Profile default duration">
+        <button class="choice" type="button" data-profile-duration="1" aria-pressed="false">1 min</button>
+        <button class="choice" type="button" data-profile-duration="2" aria-pressed="true">2 min</button>
+        <button class="choice" type="button" data-profile-duration="5" aria-pressed="false">5 min</button>
+        <button class="choice" type="button" data-profile-duration="15" aria-pressed="false">15 min</button>
+        <button class="choice" type="button" data-profile-duration="30" aria-pressed="false">30 min</button>
+        <button class="choice" type="button" data-profile-duration="60" aria-pressed="false">1 hour</button>
+        <button class="choice" type="button" data-profile-duration="120" aria-pressed="false">2 hours</button>
+      </div>
+      <div class="row" style="margin-top: 12px;">
+        <button class="choice" type="button" data-profile-custom-duration="true" aria-pressed="false">Custom</button>
+        <label id="profile-custom-duration-wrap" class="hidden">Minutes <input id="profile-custom-duration" type="number" min="1" max="720" value="2"></label>
+      </div>
+    </div>
+    <div>
+      <h2>Default keepalive</h2>
+      <div class="row" aria-label="Profile default keepalive">
+        <button class="choice" type="button" data-profile-keepalive="1" aria-pressed="false">1 min</button>
+        <button class="choice" type="button" data-profile-keepalive="2" aria-pressed="true">2 min</button>
+        <button class="choice" type="button" data-profile-keepalive="5" aria-pressed="false">5 min</button>
+        <button class="choice" type="button" data-profile-keepalive="15" aria-pressed="false">15 min</button>
+      </div>
+      <div class="row" style="margin-top: 12px;">
+        <button class="choice" type="button" data-profile-custom-keepalive="true" aria-pressed="false">Custom</button>
+        <label id="profile-custom-keepalive-wrap" class="hidden">Minutes <input id="profile-custom-keepalive" type="number" min="1" max="60" value="2"></label>
+      </div>
+    </div>
+  </div>`;
+}
+
+function profileCreateModal(targets: Array<{ target: CapacityTarget; models: ModelDefinition[] }>, initialTargetId: string, returnTo = "/"): string {
+  return `<div id="profile-modal" class="modal" hidden>
+    <div class="modal-dialog">
+      <div class="target-status-head"><h2>New reservation profile</h2><button class="secondary" type="button" data-close-modal>Close</button></div>
+      <form id="profile-form" method="post" action="/reservation-profiles">
+        <input type="hidden" name="returnTo" value="${escapeHtml(returnTo)}">
+        <input id="profile-target-id" type="hidden" name="targetId" value="${escapeHtml(initialTargetId)}">
+        <input id="profile-duration-minutes" type="hidden" name="defaultDurationMinutes" value="2">
+        <input id="profile-keepalive-minutes" type="hidden" name="defaultKeepaliveMinutes" value="2">
+        <div class="field-grid">
+          <p><label>Name<br><input name="name" type="text" placeholder="Daily coding" required></label></p>
+          <p><label>Description<br><input name="description" type="text" placeholder="Target and models for this workflow"></label></p>
+        </div>
+        ${profileDefaultControls()}
+        <h2>Target</h2>
+        <div class="targets">${targets.map(({ target }, index) => targetOption(target, index === 0)).join("")}</div>
+        <h2>Models</h2>
+        ${targets.map(({ target, models }) => `<div class="model-group" data-target-models="${escapeHtml(target.id)}" ${target.id === initialTargetId ? "" : "hidden"}>${modelFamilySections(models)}</div>`).join("")}
+        <div class="actions"><button type="submit">Save profile</button></div>
+      </form>
+    </div>
+  </div>`;
+}
+
+function profileReviewModal(profiles: ReservationProfile[], targets: Array<{ target: CapacityTarget; models: ModelDefinition[] }>): string {
+  return `<div id="profile-review-modal" class="modal" hidden>
+    <div class="modal-dialog">
+      <div class="target-status-head"><h2>Reservation profile</h2><button class="secondary" type="button" data-close-modal>Close</button></div>
+      <div id="profile-review-body">${profiles.length ? profileReviewBody(profiles[0], targets) : `<p class="muted">No reservation profiles saved yet.</p>`}</div>
+    </div>
+  </div>`;
+}
+
+function profileReviewBody(profile: ReservationProfile, targets: Array<{ target: CapacityTarget; models: ModelDefinition[] }>): string {
+  const targetLookup = targetLookupForTargets(targets);
+  const modelLookup = modelLookupForTargets(targets);
+  const defaults = [profile.defaultDurationMinutes ? `${profile.defaultDurationMinutes} min duration` : "", profile.defaultKeepaliveMinutes ? `${profile.defaultKeepaliveMinutes} min keepalive` : ""].filter(Boolean).join(" | ");
+  const selections = profile.selections.map((selection) => {
+    const models = selection.modelIds.length
+      ? `<span class="chip-row">${selection.modelIds.map((id) => `<span class="copy-chip">${escapeHtml(modelLookup[id]?.displayName ?? id)}</span>`).join("")}</span>`
+      : `<span class="chip-row"><span class="pill">All models</span></span>`;
+    return `<div class="target-status-card"><strong>${escapeHtml(targetLookup[selection.targetId]?.displayName ?? selection.targetId)}</strong>${models}</div>`;
+  }).join("");
+  return `<h3>${escapeHtml(profile.name)}</h3>${profile.description ? `<p class="muted">${escapeHtml(profile.description)}</p>` : ""}${defaults ? `<p class="muted">${escapeHtml(defaults)}</p>` : ""}${selections}`;
+}
+
+function profilesForClient(profiles: ReservationProfile[], targets: Array<{ target: CapacityTarget; models: ModelDefinition[] }>): Array<Record<string, unknown>> {
+  const targetIds = new Set(targets.map(({ target }) => target.id));
+  const modelIds = new Set(targets.flatMap(({ models }) => models.map((model) => model.id)));
+  return profiles.map((profile) => ({
+    id: profile.id,
+    name: profile.name,
+    description: profile.description,
+    defaultDurationMinutes: profile.defaultDurationMinutes,
+    defaultKeepaliveMinutes: profile.defaultKeepaliveMinutes,
+    selections: profile.selections
+      .filter((selection) => targetIds.has(selection.targetId))
+      .map((selection) => ({ targetId: selection.targetId, modelIds: selection.modelIds.filter((modelId) => modelIds.has(modelId)) }))
+  }));
+}
+
+function primaryAliasesForProfile(profile: ReservationProfile, modelLookup: Record<string, { displayName: string; recommendedAlias: string }>): string[] {
+  return Array.from(new Set(profile.selections.flatMap((selection) => selection.modelIds.map((modelId) => modelLookup[modelId]?.recommendedAlias ?? modelId)))).slice(0, 6);
 }
 
 function modelOption(model: ModelDefinition): string {

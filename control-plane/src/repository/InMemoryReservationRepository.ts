@@ -50,6 +50,8 @@ export class InMemoryReservationRepository implements ReservationRepository {
 function cloneReservation(reservation: Reservation): Reservation {
   return {
     ...reservation,
+    profileId: reservation.profileId,
+    profileName: reservation.profileName,
     modelIds: [...reservation.modelIds],
     targetIds: [...reservation.targetIds],
     createdAt: new Date(reservation.createdAt),

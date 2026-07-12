@@ -15,7 +15,8 @@ const jsonRpcRequestSchema = z.object({
 const createReservationParamsSchema = z.object({
   modelIds: z.array(z.string()).optional(),
   targetIds: z.array(z.string()).optional(),
-  durationMinutes: z.number(),
+  profileId: z.string().optional(),
+  durationMinutes: z.number().optional(),
   keepaliveMinutes: z.number().optional()
 });
 
@@ -150,13 +151,13 @@ function mcpTools() {
     },
     {
       name: "create_reservation",
-      description: "Create a reservation for models or explicit capacity targets.",
+      description: "Create a reservation for models, explicit capacity targets, or a reservation profile.",
       inputSchema: {
         type: "object",
-        required: ["durationMinutes"],
         properties: {
           modelIds: { type: "array", items: { type: "string" } },
           targetIds: { type: "array", items: { type: "string" } },
+          profileId: { type: "string" },
           durationMinutes: { type: "number" },
           keepaliveMinutes: { type: "number" }
         }

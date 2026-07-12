@@ -1,13 +1,14 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import type { CapacityProvider, ReservationRepository, TargetActivationRepository, TargetStatusRepository } from "../domain/interfaces.js";
-import type { CapacityTarget, Reservation, TargetActivation, TargetActivationReservation } from "../domain/types.js";
+import type { CapacityTarget, Reservation, ReservationProfile, TargetActivation, TargetActivationReservation } from "../domain/types.js";
 import { HealthChecker } from "../reconciler/HealthChecker.js";
 import { Reconciler } from "../reconciler/Reconciler.js";
 import { ApiKeyService } from "../services/ApiKeyService.js";
 import { CostEstimationService } from "../services/CostEstimationService.js";
 import { ModelCatalog } from "../services/ModelCatalog.js";
 import { ReservationService } from "../services/ReservationService.js";
+import { ReservationProfileService } from "../services/ReservationProfileService.js";
 import { RuntimeModelDiscovery } from "../services/RuntimeModelDiscovery.js";
 import { shouldBootstrapRuntimeModels } from "../services/RuntimeModelDiscovery.js";
 import { TargetProvisioningService } from "../services/TargetProvisioningService.js";
@@ -22,6 +23,7 @@ export function registerApiRoutes(
   statuses: TargetStatusRepository,
   apiKeyService: ApiKeyService,
   reservationService: ReservationService,
+  reservationProfileService: ReservationProfileService,
   trafficKeepalive: TrafficKeepaliveService,
   reconciler: Reconciler,
   capacityProvider: CapacityProvider,
@@ -110,6 +112,51 @@ export function registerApiRoutes(
     }
   );
 
+  app.get(
+    "/api/reservation-profiles",
+    {
+      schema: {
+        tags: ["reservation-profiles"],
+        summary: "List reservation profiles for the current user",
+        security: authSecurity(),
+        response: { 200: { type: "object", properties: { reservationProfiles: { type: "array", items: reservationProfileSchema } }, required: ["reservationProfiles"] } }
+      }
+    },
+    async (request) => ({ reservationProfiles: (await reservationProfileService.listForUser(requireUser(request))).map(reservationProfileJson) })
+  );
+
+  app.post(
+    "/api/reservation-profiles",
+    {
+      schema: {
+        tags: ["reservation-profiles"],
+        summary: "Create a reservation profile",
+        security: authSecurity(),
+        body: reservationProfileCreateSchema,
+        response: { 201: reservationProfileSchema, 400: errorSchema }
+      }
+    },
+    async (request, reply) => {
+      try {
+        const body = reservationProfileBodySchema.parse(request.body ?? {});
+        const profile = await reservationProfileService.createForUser(requireUser(request), body);
+        return reply.code(201).send(reservationProfileJson(profile));
+      } catch (error) {
+        return sendError(reply, error);
+      }
+    }
+  );
+
+  app.delete("/api/reservation-profiles/:id", async (request, reply) => {
+    try {
+      const { id } = z.object({ id: z.string() }).parse(request.params);
+      const deleted = await reservationProfileService.deleteForUser(id, requireUser(request));
+      return reply.code(deleted ? 204 : 404).send(deleted ? undefined : { error: "Reservation profile not found" });
+    } catch (error) {
+      return sendError(reply, error);
+    }
+  });
+
   app.post(
     "/api/reservations",
     {
@@ -123,7 +170,7 @@ export function registerApiRoutes(
     },
     async (request, reply) => {
       try {
-        const body = z.object({ modelIds: z.array(z.string()).default([]), targetIds: z.array(z.string()).default([]), durationMinutes: z.number(), keepaliveMinutes: z.number().optional() }).parse(request.body);
+        const body = z.object({ modelIds: z.array(z.string()).default([]), targetIds: z.array(z.string()).default([]), profileId: z.string().optional(), durationMinutes: z.number().optional(), keepaliveMinutes: z.number().optional() }).parse(request.body);
         const reservation = await reservationService.createForUser(requireUser(request), body);
         return reply.code(201).send(await reservationPayload(reservation, statuses, costEstimation, catalog));
       } catch (error) {
@@ -181,7 +228,26 @@ export function registerApiRoutes(
     },
     async () => statusPayload(catalog, reservations, statuses, costEstimation)
   );
-  app.get("/api/admin/reservations", async () => ({ reservations: await reservationPayloads(await reservations.list(), statuses, costEstimation, catalog) }));
+  app.get("/api/admin/reservations", async (request) => {
+    const query = z
+      .object({
+        page: z.coerce.number().int().min(1).default(1),
+        pageSize: z.coerce.number().int().min(1).max(100).default(20),
+        sort: z.enum(["expires_desc", "expires_asc", "created_desc", "created_asc"]).default("expires_desc")
+      })
+      .parse(request.query);
+    const allReservations = await reservations.list();
+    const sortedReservations = sortReservations(allReservations, query.sort);
+    const offset = (query.page - 1) * query.pageSize;
+    const pageReservations = sortedReservations.slice(offset, offset + query.pageSize);
+    return {
+      reservations: await reservationPayloads(pageReservations, statuses, costEstimation, catalog),
+      page: query.page,
+      pageSize: query.pageSize,
+      total: sortedReservations.length,
+      sort: query.sort
+    };
+  });
   app.get("/api/admin/targets", async () => ({ capacityTargets: await targetsPayload(catalog, reservations, statuses) }));
   app.get("/api/admin/activations", async () => activationPayload(catalog, reservations, targetActivations));
   app.get("/api/admin/status", async () => statusPayload(catalog, reservations, statuses, costEstimation, { includeReservationHistory: true }));
@@ -366,6 +432,30 @@ function activationReservationJson(allocation: TargetActivationReservation, rese
   };
 }
 
+function sortReservations(reservations: Reservation[], sort: "expires_desc" | "expires_asc" | "created_desc" | "created_asc"): Reservation[] {
+  return [...reservations].sort((left, right) => {
+    const leftTime = sort.startsWith("expires") ? left.expiresAt.getTime() : left.createdAt.getTime();
+    const rightTime = sort.startsWith("expires") ? right.expiresAt.getTime() : right.createdAt.getTime();
+    const direction = sort.endsWith("desc") ? -1 : 1;
+    const byTime = (leftTime - rightTime) * direction;
+    return byTime || left.id.localeCompare(right.id);
+  });
+}
+
+function reservationProfileJson(profile: ReservationProfile) {
+  return {
+    id: profile.id,
+    username: profile.username,
+    name: profile.name,
+    description: profile.description,
+    selections: profile.selections,
+    defaultDurationMinutes: profile.defaultDurationMinutes,
+    defaultKeepaliveMinutes: profile.defaultKeepaliveMinutes,
+    createdAt: profile.createdAt.toISOString(),
+    updatedAt: profile.updatedAt.toISOString()
+  };
+}
+
 function authSecurity(): Array<Record<string, string[]>> {
   return [{ bearerAuth: [] }, { basicAuth: [] }];
 }
@@ -387,6 +477,51 @@ const apiKeySchema = {
   },
   required: ["id", "name", "prefix", "createdAt"]
 } as const;
+
+const reservationProfileSelectionSchema = {
+  type: "object",
+  properties: {
+    targetId: { type: "string" },
+    modelIds: { type: "array", items: { type: "string" } }
+  },
+  required: ["targetId", "modelIds"]
+} as const;
+
+const reservationProfileSchema = {
+  type: "object",
+  properties: {
+    id: { type: "string" },
+    username: { type: "string" },
+    name: { type: "string" },
+    description: { type: "string" },
+    selections: { type: "array", items: reservationProfileSelectionSchema },
+    defaultDurationMinutes: { type: "number" },
+    defaultKeepaliveMinutes: { type: "number" },
+    createdAt: { type: "string", format: "date-time" },
+    updatedAt: { type: "string", format: "date-time" }
+  },
+  required: ["id", "username", "name", "selections", "createdAt", "updatedAt"]
+} as const;
+
+const reservationProfileCreateSchema = {
+  type: "object",
+  properties: {
+    name: { type: "string" },
+    description: { type: "string" },
+    selections: { type: "array", items: reservationProfileSelectionSchema },
+    defaultDurationMinutes: { type: "number" },
+    defaultKeepaliveMinutes: { type: "number" }
+  },
+  required: ["name", "selections"]
+} as const;
+
+const reservationProfileBodySchema = z.object({
+  name: z.string(),
+  description: z.string().optional(),
+  selections: z.array(z.object({ targetId: z.string(), modelIds: z.array(z.string()).default([]) })),
+  defaultDurationMinutes: z.number().optional(),
+  defaultKeepaliveMinutes: z.number().optional()
+});
 
 const modelSchema = {
   type: "object",
@@ -426,6 +561,8 @@ const reservationSchema = {
     status: { type: "string", enum: ["active", "done", "expired", "failed"] },
     expiresAt: { type: "string", format: "date-time" },
     keepaliveMinutes: { type: "number" },
+    profileId: { type: "string" },
+    profileName: { type: "string" },
     endedAt: { type: "string", format: "date-time" },
     modelIds: { type: "array", items: { type: "string" } },
     targets: { type: "array", items: targetRefSchema },
@@ -450,10 +587,10 @@ const reservationCreateSchema = {
   properties: {
     modelIds: { type: "array", items: { type: "string" }, default: [] },
     targetIds: { type: "array", items: { type: "string" }, default: [] },
+    profileId: { type: "string" },
     durationMinutes: { type: "number" },
     keepaliveMinutes: { type: "number" }
-  },
-  required: ["durationMinutes"]
+  }
 } as const;
 
 const reservationExtendSchema = {
