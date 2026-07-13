@@ -17,11 +17,25 @@ targets.
 
 ```text
 control-plane/        Fastify/TypeScript app, examples, and product docs
+hassleoff/            Separately deployable dead-man watchdog
 .github/workflows/    Control-plane build workflow
 ```
 
 Detailed design and operations notes live in
 [control-plane/docs](control-plane/docs/index.md).
+
+## Safe HassleOff Stack
+
+Run NeurOn plus HassleOff with fake providers only, without loading a default
+`.env` file:
+
+```bash
+docker compose --env-file control-plane/examples/compose-hassleoff.properties -f docker-compose.hassleoff.yml up --build
+```
+
+NeurOn is at `http://localhost:18090`; HassleOff health/readiness is at
+`http://localhost:18091/healthz` and `http://localhost:18091/readyz`. See the
+[HassleOff operating guide](control-plane/docs/hassleoff.md).
 
 ## Quick Start
 

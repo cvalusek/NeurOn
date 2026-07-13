@@ -1,0 +1,16 @@
+[
+  {
+    "id": "rented-fake",
+    "displayName": "Safe Rented Capacity Simulation",
+    "provider": "fake",
+    "modelIds": ["fake-rented-model"],
+    "hassleOff": {
+      "protected": true,
+      "leaseDurationSeconds": 30,
+      "staleTripTestShutdown": {
+        "enabled": true,
+        "maxAgeSeconds": 60
+      }
+    }
+  }
+]

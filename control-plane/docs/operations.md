@@ -14,6 +14,10 @@ Run NeurOn separately from the LLM host capacity it controls. ECS/Fargate is a
 good fit for the control plane itself. The app must not run on the EC2 capacity
 that it scales down.
 
+Run HassleOff as a separate service that also does not depend on the rented
+inference host. Its SQLite file and narrowly scoped provider stop credential
+must survive NeurOn restarts. See [HassleOff](hassleoff.md).
+
 ## Networking
 
 NeurOn is designed for internal/Tailscale-style access. v1 authentication is
@@ -112,3 +116,10 @@ Docker. Set `USE_FAKE_PROVIDER=true` for
 app-only development or tests. The Docker Compose provider remains available
 for bring-your-own local runtime projects. Netskope/corporate CA builds are
 supported through the compose overlay and `.netskope` Dockerfile.
+
+For the fake-only NeurOn plus HassleOff stack, use the explicit properties file
+so Docker Compose does not load a default `.env` file:
+
+```bash
+docker compose --env-file control-plane/examples/compose-hassleoff.properties -f docker-compose.hassleoff.yml up --build
+```

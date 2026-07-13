@@ -85,6 +85,7 @@ Important fields:
 - `healthUrl`
 - optional LiteLLM backend config
 - optional runtime model discovery config
+- optional HassleOff protection and activate-or-reprovision policy
 
 ### ModelDefinition
 
@@ -137,6 +138,11 @@ into AWS, Docker, LiteLLM, or a concrete repository from unrelated code.
   IDs to model definitions and targets.
 - `Reconciler`: computes desired target state from aggregate reservations and
   applies that state through a capacity provider.
+- `HassleOffCapacityProvider`: decorates provider lifecycle calls with the
+  opt-in exact-target start/provision interlock and stale-test shutdown route.
+- `ActivateOrReprovisionCapacityProvider`: recognizes only the typed
+  recoverable-unavailable condition and applies a policy-gated durable
+  replacement binding before retrying activation.
 - `TrafficKeepaliveService`: records recent traffic as a short-lived synthetic
   reservation when the target is already healthy or has real user demand.
 - `TrafficPoller`: polls a `TrafficSource` and records keepalive traffic.

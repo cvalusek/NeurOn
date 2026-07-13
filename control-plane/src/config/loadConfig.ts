@@ -104,6 +104,23 @@ const targetSchema = z.object({
     .object({
       hourlyUsd: z.number().nonnegative().optional()
     })
+    .optional(),
+  hassleOff: z
+    .object({
+      protected: z.boolean(),
+      leaseDurationSeconds: z.number().int().positive().optional(),
+      staleTripTestShutdown: z
+        .object({
+          enabled: z.boolean().optional(),
+          maxAgeSeconds: z.number().int().positive().optional()
+        })
+        .optional()
+    })
+    .optional(),
+  activationPolicy: z
+    .object({
+      reprovisionOnRecoverableUnavailable: z.boolean().optional()
+    })
     .optional()
 });
 
@@ -241,7 +258,8 @@ export async function loadConfig(): Promise<{ config: AppConfig; models: ModelDe
         .split(",")
         .map((user) => user.trim())
         .filter(Boolean),
-      authMethods: loadAuthMethods()
+      authMethods: loadAuthMethods(),
+      hassleOff: loadHassleOffClientConfig()
     },
     models: Array.from(modelsById.values()).sort((a, b) => a.id.localeCompare(b.id))
   };
@@ -467,9 +485,34 @@ function loadTargetsFromEnv(providers: CapacityProviderDefinition[]): unknown[] 
         : undefined,
       costEstimate: compactObject({
         hourlyUsd: numberOptionalEnv(`${prefix}_ESTIMATED_HOURLY_COST_USD`)
-      })
+      }),
+      hassleOff: boolEnv(`${prefix}_HASSLEOFF_PROTECTED`) === true
+        ? compactObject({
+            protected: true,
+            leaseDurationSeconds: intOptionalEnv(`${prefix}_HASSLEOFF_LEASE_DURATION_SECONDS`),
+            staleTripTestShutdown: compactObject({
+              enabled: boolEnv(`${prefix}_HASSLEOFF_SHUTDOWN_ON_STALE_TRIP_TEST`),
+              maxAgeSeconds: intOptionalEnv(`${prefix}_HASSLEOFF_TRIP_TEST_MAX_AGE_SECONDS`)
+            })
+          })
+        : undefined,
+      activationPolicy: boolEnv(`${prefix}_REPROVISION_ON_RECOVERABLE_UNAVAILABLE`) === true
+        ? { reprovisionOnRecoverableUnavailable: true }
+        : undefined
     });
   });
+}
+
+function loadHassleOffClientConfig(): AppConfig["hassleOff"] {
+  const baseUrl = env("HASSLEOFF_URL");
+  const controllerToken = env("HASSLEOFF_CONTROLLER_TOKEN");
+  if (!baseUrl || !controllerToken) return undefined;
+  return {
+    baseUrl,
+    controllerToken,
+    controllerId: env("HASSLEOFF_CONTROLLER_ID") ?? "neuron",
+    requestTimeoutSeconds: intEnv("HASSLEOFF_REQUEST_TIMEOUT_SECONDS", 5)
+  };
 }
 
 function loadModelsFromEnv(targetPrefix: string): unknown[] | undefined {

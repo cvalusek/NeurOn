@@ -11,6 +11,7 @@
 * [Targets](targets.md) - Target config, provider relationships, and runtime profiles.
 * [PreFer](prefer.md) - PreFer runtime config, presets, and plugin direction.
 * [Provisioning](provisioning.md) - Explicit resource creation and persisted jobs.
+* [HassleOff](hassleoff.md) - Dead-man leases, start interlock, trip tests, and scoped shutdowns.
 * [Discovery](discovery.md) - Runtime model discovery and bootstrap behavior.
 * [UI](ui.md) - Target-first interaction model and server-rendered pages.
 * [Operations](operations.md) - Deployment, IAM, runtime behavior, and limits.

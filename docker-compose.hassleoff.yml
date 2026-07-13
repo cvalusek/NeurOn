@@ -1,0 +1,57 @@
+name: neuron-safety-local
+
+services:
+  hassleoff:
+    build:
+      context: ./hassleoff
+      dockerfile: Dockerfile
+    image: neuron-hassleoff:local
+    container_name: neuron-hassleoff-local
+    restart: on-failure
+    ports:
+      - "18091:8091"
+    volumes:
+      - ./data/hassleoff-local:/app/data
+    environment:
+      PORT: "8091"
+      HASSLEOFF_CONTROLLER_TOKEN: local-development-controller-token
+      HASSLEOFF_SQLITE_PATH: /app/data/hassleoff.db
+      HASSLEOFF_CHECK_INTERVAL_MS: "1000"
+      HASSLEOFF_MIN_LEASE_MS: "5000"
+      HASSLEOFF_MAX_LEASE_MS: "120000"
+      HASSLEOFF_TARGETS_JSON: >-
+        [{"targetId":"rented-fake","registrationId":"rented-fake-local-v1","displayName":"Safe rented-target simulation","action":{"type":"fake"}},{"targetId":"hassleoff-gfci","registrationId":"hassleoff-gfci-local-v1","displayName":"HassleOff synthetic trip target","testOnly":true,"action":{"type":"fake"}}]
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:8091/readyz"]
+      interval: 2s
+      timeout: 1s
+      retries: 20
+
+  neuron-safety:
+    build:
+      context: ./control-plane
+      dockerfile: Dockerfile
+    image: neuron-control-plane:local
+    container_name: neuron-safety-local
+    restart: on-failure
+    depends_on:
+      hassleoff:
+        condition: service_healthy
+    ports:
+      - "18090:8090"
+    volumes:
+      - ./data/neuron-safety-local:/app/data
+    environment:
+      NODE_ENV: production
+      PORT: "8090"
+      SHARED_PASSWORD: local-safety-password
+      COOKIE_SECRET: local-safety-cookie-secret
+      STORAGE_DRIVER: sqlite
+      SQLITE_PATH: /app/data/neuron.db
+      USE_FAKE_PROVIDER: "true"
+      CAPACITY_TARGETS_FILE: /app/examples/capacity-targets.hassleoff-local.json
+      HASSLEOFF_URL: http://hassleoff:8091
+      HASSLEOFF_CONTROLLER_TOKEN: local-development-controller-token
+      HASSLEOFF_CONTROLLER_ID: neuron-safety-local
+      HASSLEOFF_REQUEST_TIMEOUT_SECONDS: "2"
+      RECONCILER_INTERVAL_SECONDS: "2"

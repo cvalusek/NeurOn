@@ -20,6 +20,17 @@ export class CompositeCapacityProvider implements CapacityProvider {
     return resolved.provider.provisionTarget(resolved.target);
   }
 
+  async reprovisionTarget(target: CapacityTarget): Promise<Partial<CapacityTarget>> {
+    const resolved = this.resolve(target);
+    if (!resolved.definition.provisioning?.enabled) {
+      throw new Error(`Provider ${resolved.definition.id} does not allow replacement provisioning`);
+    }
+    if (!resolved.provider.reprovisionTarget) {
+      throw new Error(`Provider adapter ${resolved.definition.type} does not implement replacement provisioning`);
+    }
+    return resolved.provider.reprovisionTarget(resolved.target);
+  }
+
   async ensureTargetOn(target: CapacityTarget): Promise<void> {
     const resolved = this.resolve(target);
     await resolved.provider.ensureTargetOn(resolved.target);

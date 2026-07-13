@@ -39,6 +39,7 @@ The capacity provider interface is:
 
 ```ts
 provisionTarget(target)
+reprovisionTarget?(target)
 ensureTargetOn(target)
 ensureTargetOff(target)
 getTargetStatus(target)
@@ -51,6 +52,12 @@ the reconciler can catch. They should not crash the app process.
 Provisioning is not part of normal lifecycle reconciliation. Providers only
 create resources when an admin explicitly runs provisioning and the provider has
 resource creation enabled. Start/stop/status operate known resources.
+
+`reprovisionTarget` is an optional, narrower replacement contract. NeurOn calls
+it only after `ensureTargetOn` throws `RecoverableTargetUnavailableError`, the
+target explicitly enables `activationPolicy.reprovisionOnRecoverableUnavailable`,
+the provider permits provisioning, and the replacement binding can be stored
+durably. Generic provider errors never enter this path.
 
 Credentials are not a separate first-class record yet. Until that exists,
 providers should prefer environment-variable references such as `apiKeyEnv`
@@ -133,6 +140,13 @@ GET /v1/pods/{podId}
 Cost estimation uses the same Pod detail endpoint. The RunPod API exposes
 `adjustedCostPerHr` for the effective hourly cost after Savings Plans and
 `costPerHr` for the base hourly cost.
+
+The RunPod adapter does not yet implement `reprovisionTarget`. Replacement
+semantics require confirmed production facts about which fields should be
+copied, what happens to the unavailable Pod, and how cleanup is proven. The
+provider-neutral boundary and fake-provider contract tests are complete; a
+future RunPod adapter must return the new durable Pod binding and remain behind
+both policy gates.
 
 ## NeurOn
 

@@ -2,6 +2,7 @@ import type { ApiKey, AuthenticatedUser, AuthMethod, CapacityProviderDefinition,
 
 export interface CapacityProvider {
   provisionTarget(target: CapacityTarget): Promise<Partial<CapacityTarget> | void>;
+  reprovisionTarget?(target: CapacityTarget): Promise<Partial<CapacityTarget>>;
   ensureTargetOn(target: CapacityTarget): Promise<void>;
   ensureTargetOff(target: CapacityTarget): Promise<void>;
   getTargetStatus(target: CapacityTarget): Promise<CapacityProviderStatus>;

@@ -20,14 +20,16 @@ On every reconciliation pass:
 3. Compute desired-on target IDs from active reservation target IDs.
 4. Before turning off a previously-on target, poll LiteLLM traffic once when a
    traffic poller is configured.
-5. Apply desired state through the `CapacityProvider`.
-6. Record or close the target activation and update cost allocation records.
-7. Read provider status.
-8. Run the target health check when provider status says the target is running.
-9. Store simple target status.
-10. Sync LiteLLM when a target first becomes healthy.
-11. Refresh runtime model IDs when a target is healthy.
-12. Mark relevant active reservations failed if target starting fails.
+5. For a HassleOff-protected desired-on target, require acceptance of the exact
+   target lease before any provider start or provisioning call.
+6. Apply desired state through the decorated `CapacityProvider`.
+7. Record or close the target activation and update cost allocation records.
+8. Read provider status.
+9. Run the target health check when provider status says the target is running.
+10. Store simple target status.
+11. Sync LiteLLM when a target first becomes healthy.
+12. Refresh runtime model IDs when a target is healthy.
+13. Mark relevant active reservations failed if target starting fails.
 
 ## Desired State
 
@@ -96,3 +98,8 @@ The estimate is intentionally observational:
 
 Provider errors must not crash the app. The reconciler catches provider errors,
 marks the target failed, and fails active reservations that need the target.
+
+HassleOff interlock failures use the same visible path and include the target
+and reason in the status message. They are never converted into a direct
+provider start. On desired-off transitions, an unavailable HassleOff instance
+does not block the normal provider stop.

@@ -102,12 +102,23 @@ export class TargetService {
     const runtime = this.runtimeTargets.find((target) => target.id === id);
     if (!runtime) return undefined;
     const updated = mergeTarget(runtime, patch);
+    if (await this.repository.get(id)) {
+      await this.repository.update(id, updated);
+    }
     Object.assign(runtime, updated);
     this.catalog.upsertTarget(runtime);
-    if (!this.configuredTargets.some((target) => target.id === id) && (await this.repository.get(id))) {
-      await this.repository.update(id, runtime);
-    }
     return cloneTarget(runtime);
+  }
+
+  async canPersistReplacementPatch(id: string): Promise<boolean> {
+    return Boolean(await this.repository.get(id));
+  }
+
+  async applyReplacementPatch(id: string, patch: Partial<CapacityTarget>): Promise<CapacityTarget | undefined> {
+    if (!(await this.canPersistReplacementPatch(id))) {
+      throw new Error(`Target ${id} must be persisted before replacement provisioning can update its provider binding`);
+    }
+    return this.applyProvisioningPatch(id, patch);
   }
 }
 

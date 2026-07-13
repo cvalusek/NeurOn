@@ -44,6 +44,17 @@ For app-only development, set `USE_FAKE_PROVIDER=true` and optionally
 Without target configuration, NeurOn starts with no providers or targets. Add
 them from Admin or supply declarative config.
 
+For a fake-only dead-man safety stack with the separate HassleOff service:
+
+```bash
+docker compose --env-file control-plane/examples/compose-hassleoff.properties -f docker-compose.hassleoff.yml up --build
+```
+
+This explicit properties file prevents Compose from loading a default `.env`.
+NeurOn is at `http://localhost:18090`, HassleOff is at
+`http://localhost:18091`, and both registered provider actions are fake. See
+[docs/hassleoff.md](docs/hassleoff.md).
+
 ## Runtime Targets
 
 NeurOn does not include an inference container. Configure the targets it should
@@ -117,6 +128,9 @@ Environment variables:
 | `LITELLM_TRAFFIC_POLL_SECONDS` | `60` | Poll `/spend/logs/v2`; set `0` to disable |
 | `LITELLM_TRAFFIC_LOOKBACK_SECONDS` | `300` | Recent traffic window |
 | `USE_FAKE_PROVIDER` | `false` | Local fake provider for app development |
+| `HASSLEOFF_URL` | unset | HassleOff base URL for protected targets |
+| `HASSLEOFF_CONTROLLER_TOKEN` | unset | Authenticates controller lease calls |
+| `HASSLEOFF_CONTROLLER_ID` | `neuron` | Stable deployment identity in leases |
 
 Model choices are configuration-first. Put the user-facing choices in each
 target's `models` array with display names, aliases, backend model IDs, and

@@ -11,12 +11,13 @@ export class FakeCapacityProvider implements CapacityProvider {
 
   async ensureTargetOn(target: CapacityTarget): Promise<void> {
     this.desired.set(target.id, "on");
-    if (!this.statuses.has(target.id)) this.statuses.set(target.id, { observed: "starting", message: "starting" });
+    const current = this.statuses.get(target.id);
+    if (!current || current.observed === "stopped") this.statuses.set(target.id, { observed: "starting", message: "Starting fake target" });
   }
 
   async ensureTargetOff(target: CapacityTarget): Promise<void> {
     this.desired.set(target.id, "off");
-    if (!this.statuses.has(target.id)) this.statuses.set(target.id, { observed: "stopped", message: "Stopped" });
+    this.statuses.set(target.id, { observed: "stopped", message: "Stopped" });
   }
 
   async getTargetStatus(target: CapacityTarget): Promise<CapacityProviderStatus> {

@@ -116,6 +116,26 @@ export interface RunPodTargetConfig {
   create?: Record<string, unknown>;
 }
 
+export interface HassleOffTargetPolicy {
+  protected: boolean;
+  leaseDurationSeconds?: number;
+  staleTripTestShutdown?: {
+    enabled?: boolean;
+    maxAgeSeconds?: number;
+  };
+}
+
+export interface TargetActivationPolicy {
+  reprovisionOnRecoverableUnavailable?: boolean;
+}
+
+export interface HassleOffClientConfig {
+  baseUrl: string;
+  controllerToken: string;
+  controllerId: string;
+  requestTimeoutSeconds: number;
+}
+
 export interface NeuronTargetConfig {
   targetId: string;
 }
@@ -241,6 +261,8 @@ export interface CapacityTarget {
   apiUrl?: string;
   litellm?: LiteLlmTargetConfig;
   costEstimate?: TargetCostEstimateConfig;
+  hassleOff?: HassleOffTargetPolicy;
+  activationPolicy?: TargetActivationPolicy;
 }
 
 export interface TargetCostEstimateConfig {
@@ -355,6 +377,7 @@ export interface AppConfig {
   healthCheckIntervalSeconds: number;
   adminUsers: string[];
   authMethods: AuthMethod[];
+  hassleOff?: HassleOffClientConfig;
 }
 
 export type StorageConfig =

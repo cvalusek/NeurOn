@@ -139,6 +139,10 @@ RUNTIME_PROFILES_JSON=[{"id":"prefer-nightly","name":"PreFer Nightly","type":"do
 - `HEALTH_CHECK_TIMEOUT_SECONDS`
 - `LITELLM_TRAFFIC_POLL_SECONDS`
 - `LITELLM_TRAFFIC_LOOKBACK_SECONDS`
+- `HASSLEOFF_URL`
+- `HASSLEOFF_CONTROLLER_TOKEN`
+- `HASSLEOFF_CONTROLLER_ID`
+- `HASSLEOFF_REQUEST_TIMEOUT_SECONDS`
 
 Production-friendly defaults are intentionally calmer than local development:
 
@@ -250,6 +254,34 @@ CAPACITY_TARGET_MULTIPLE_MOE_96GB_PROVIDER=aws-ecs
 CAPACITY_TARGET_MULTIPLE_MOE_96GB_HEALTH_URL=http://llm-96gb.internal:8080/health
 CAPACITY_TARGET_MULTIPLE_MOE_96GB_ESTIMATED_HOURLY_COST_USD=4.25
 ```
+
+Opt a rented target into the HassleOff start/provision interlock:
+
+```env
+CAPACITY_TARGET_MULTIPLE_MOE_96GB_HASSLEOFF_PROTECTED=true
+CAPACITY_TARGET_MULTIPLE_MOE_96GB_HASSLEOFF_LEASE_DURATION_SECONDS=120
+```
+
+Existing targets remain unprotected unless this flag is explicitly true. A
+protected start fails explicitly when the configured HassleOff instance cannot
+accept the exact target lease. Optional stale-test shutdown routing is also
+off by default:
+
+```env
+CAPACITY_TARGET_MULTIPLE_MOE_96GB_HASSLEOFF_SHUTDOWN_ON_STALE_TRIP_TEST=true
+CAPACITY_TARGET_MULTIPLE_MOE_96GB_HASSLEOFF_TRIP_TEST_MAX_AGE_SECONDS=86400
+```
+
+Replacement provisioning after a typed recoverable availability failure is a
+separate opt-in and still requires provider provisioning permission plus a
+durable target record:
+
+```env
+CAPACITY_TARGET_MULTIPLE_MOE_96GB_REPROVISION_ON_RECOVERABLE_UNAVAILABLE=true
+```
+
+See [HassleOff](hassleoff.md) and [Provisioning](provisioning.md) for failure
+and recovery semantics.
 
 Use `PROVIDER_ID` when the target should reference a reusable provider
 definition:

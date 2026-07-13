@@ -5,6 +5,7 @@ import swaggerUi from "@fastify/swagger-ui";
 import Fastify from "fastify";
 import { SharedPasswordAuthProvider } from "./auth/SharedPasswordAuthProvider.js";
 import { AwsEcsAsgCapacityProvider } from "./capacity/AwsEcsAsgCapacityProvider.js";
+import { ActivateOrReprovisionCapacityProvider } from "./capacity/ActivateOrReprovisionCapacityProvider.js";
 import { CompositeCapacityProvider } from "./capacity/CompositeCapacityProvider.js";
 import { DockerContainerCapacityProvider } from "./capacity/DockerContainerCapacityProvider.js";
 import { DockerComposeCapacityProvider } from "./capacity/DockerComposeCapacityProvider.js";
@@ -35,6 +36,8 @@ import { TargetProvisioningService } from "./services/TargetProvisioningService.
 import { TargetService } from "./services/TargetService.js";
 import { TrafficKeepaliveService } from "./services/TrafficKeepaliveService.js";
 import { TrafficPoller } from "./services/TrafficPoller.js";
+import { HassleOffCapacityProvider } from "./safety/HassleOffCapacityProvider.js";
+import { HassleOffClient } from "./safety/HassleOffClient.js";
 
 export async function buildApp(config: AppConfig, models: ModelDefinition[]) {
   const app = Fastify({ logger: true });
@@ -51,7 +54,7 @@ export async function buildApp(config: AppConfig, models: ModelDefinition[]) {
   const targetProvisioningService = new TargetProvisioningService(reservationRepository.targetProvisioningJobs);
   const reservations = reservationRepository.repository;
   const statuses = new InMemoryTargetStatusRepository();
-  const capacityProvider =
+  const providerAdapter =
     process.env.USE_FAKE_PROVIDER === "true"
       ? new FakeCapacityProvider()
         : new CompositeCapacityProvider({
@@ -61,6 +64,12 @@ export async function buildApp(config: AppConfig, models: ModelDefinition[]) {
           neuron: new NeuronCapacityProvider(),
           runpod: new RunPodCapacityProvider()
         }, providerCatalog);
+  const hassleOffClient = config.hassleOff ? new HassleOffClient(config.hassleOff) : undefined;
+  const interlockedProvider = new HassleOffCapacityProvider(providerAdapter, hassleOffClient);
+  const capacityProvider = new ActivateOrReprovisionCapacityProvider(interlockedProvider, {
+    canPersistReplacement: (targetId) => targetService.canPersistReplacementPatch(targetId),
+    applyReplacementPatch: (targetId, patch) => targetService.applyReplacementPatch(targetId, patch)
+  });
   const backendConfigSync = config.litellmApiBaseUrl && config.litellmApiKey ? new LiteLlmBackendConfigSync(config.litellmApiBaseUrl, config.litellmApiKey) : new NoopBackendConfigSync();
   const reservationProfileService = new ReservationProfileService(reservationRepository.reservationProfiles, catalog);
   const reservationService = new ReservationService(reservations, catalog, reservationRepository.reservationProfiles);
