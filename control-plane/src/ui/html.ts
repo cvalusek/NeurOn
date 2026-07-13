@@ -1012,7 +1012,12 @@ function targetAdminScript(providers: ProviderView[], runtimeProfiles: RuntimePr
       const previous = button.textContent;
       button.textContent = 'Working...';
       const response = await fetch('/api/admin/targets/' + encodeURIComponent(targetId) + '/' + action, { method: 'POST' });
+      const result = await response.json().catch(() => ({}));
       button.textContent = response.ok ? 'Done' : 'Failed';
+      if (!response.ok) {
+        const message = result.error || 'The target operation failed without a detailed response.';
+        window.alert(message);
+      }
       await refreshTargetStatus();
       setTimeout(() => { button.disabled = false; button.textContent = previous; }, 1400);
     });

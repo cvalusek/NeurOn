@@ -494,8 +494,10 @@ Explicit model config is the normal source of truth. Runtime discovery enriches
 models with IDs reported by the backend. It should not be treated as a solver.
 When a target has no configured or cached models, NeurOn bootstraps discovery
 on startup by starting the target, waiting for health, reading `/v1/models`,
-persisting the discovered models with a discovery timestamp, and stopping the
-target again. Set `bootstrapOnStartup=false` to opt out.
+persisting the discovered models with a discovery timestamp, and releasing its
+target-scoped operation lease. Capacity started only for discovery is stopped
+when no reservation or traffic demand exists. Set `bootstrapOnStartup=false`
+to opt out.
 
 Optional bootstrap:
 
@@ -506,7 +508,7 @@ CAPACITY_TARGET_MULTIPLE_MOE_96GB_MODEL_DISCOVERY_BOOTSTRAP_TIMEOUT_SECONDS=600
 
 When enabled, NeurOn starts the target once before accepting requests, waits for
 health, reads `/v1/models`, records runtime IDs, persists the discovery result,
-and stops the target again.
+and reconciles discovery-started capacity against current demand.
 
 ## Model Warmup
 

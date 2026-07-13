@@ -12,6 +12,7 @@ import { ReservationProfileService } from "../services/ReservationProfileService
 import { RuntimeModelDiscovery } from "../services/RuntimeModelDiscovery.js";
 import { shouldBootstrapRuntimeModels } from "../services/RuntimeModelDiscovery.js";
 import { TargetProvisioningService } from "../services/TargetProvisioningService.js";
+import { TargetOperationConflictError, TargetOperationCoordinator } from "../services/TargetOperationCoordinator.js";
 import { TargetService } from "../services/TargetService.js";
 import { TrafficKeepaliveService } from "../services/TrafficKeepaliveService.js";
 import { apiKeyJson, requireUser, reservationDisplayUsername, reservationJson, sendError, targetJson } from "../utils/http.js";
@@ -32,7 +33,8 @@ export function registerApiRoutes(
   targetService: TargetService,
   targetProvisioningService: TargetProvisioningService,
   costEstimation: CostEstimationService,
-  targetActivations: TargetActivationRepository
+  targetActivations: TargetActivationRepository,
+  targetOperations: TargetOperationCoordinator
 ) {
   app.get("/healthz", async () => ({ ok: true }));
   app.get(
@@ -268,13 +270,13 @@ export function registerApiRoutes(
       const target = catalog.getTarget(id);
       if (!target) throw new Error("Target not found");
       await targetProvisioningService.beginProvision(target);
-      const patch = await capacityProvider.provisionTarget(target);
+      const patch = await targetOperations.withLifecycleTransition(target.id, () => capacityProvider.provisionTarget(target));
       const updatedTarget = await targetService.applyProvisioningPatch(id, patch) ?? target;
       await targetProvisioningService.completeProvision(updatedTarget, patch);
       const providerStatus = await capacityProvider.getTargetStatus(updatedTarget);
       statuses.set({ targetId: id, desired: "off", observed: providerStatus.observed, message: providerStatus.message, lastCheckedAt: new Date() });
       if (shouldBootstrapRuntimeModels(updatedTarget)) {
-        runDiscoveryBootstrapInBackground(updatedTarget, capacityProvider, runtimeModelDiscovery, healthChecker, statuses);
+        runDiscoveryBootstrapInBackground(updatedTarget, capacityProvider, runtimeModelDiscovery, healthChecker);
       }
       return { ok: true };
     } catch (error) {
@@ -289,19 +291,10 @@ export function registerApiRoutes(
       const { id } = z.object({ id: z.string() }).parse(request.params);
       const target = catalog.getTarget(id);
       if (!target) throw new Error("Target not found");
-      const previous = statuses.get(id);
-      const providerStatus = await capacityProvider.getTargetStatus(target);
-      if (providerStatus.observed === "healthy") {
-        await runtimeModelDiscovery.refreshTarget(target);
-        statuses.set({ targetId: id, desired: previous?.desired ?? "on", observed: "healthy", message: "Runtime model discovery refreshed", lastCheckedAt: new Date(), lastHealthyAt: new Date() });
-      } else {
-        statuses.set({ targetId: id, desired: "on", observed: "starting", message: "Runtime model discovery starting", lastCheckedAt: new Date() });
-        await runtimeModelDiscovery.bootstrapTarget(target, capacityProvider, healthChecker);
-        statuses.set({ targetId: id, desired: "off", observed: "stopped", message: "Runtime model discovery complete", lastCheckedAt: new Date() });
-      }
+      await runtimeModelDiscovery.bootstrapTarget(target, capacityProvider, healthChecker);
       return { ok: true, models: catalog.listModelsForTarget(id) };
     } catch (error) {
-      return sendError(reply, error);
+      return sendError(reply, error, operationStatusCode(error));
     }
   });
 
@@ -310,11 +303,11 @@ export function registerApiRoutes(
       const { id } = z.object({ id: z.string() }).parse(request.params);
       const target = catalog.getTarget(id);
       if (!target) throw new Error("Target not found");
-      await capacityProvider.forceStopTarget(target);
+      await targetOperations.runForceStop(id, () => capacityProvider.forceStopTarget(target));
       statuses.set({ targetId: id, desired: "off", observed: "stopped", message: "Force stopped", lastCheckedAt: new Date() });
       return { ok: true };
     } catch (error) {
-      return sendError(reply, error);
+      return sendError(reply, error, operationStatusCode(error));
     }
   });
 
@@ -334,19 +327,15 @@ function runDiscoveryBootstrapInBackground(
   target: CapacityTarget,
   capacityProvider: CapacityProvider,
   runtimeModelDiscovery: RuntimeModelDiscovery,
-  healthChecker: HealthChecker,
-  statuses: TargetStatusRepository
+  healthChecker: HealthChecker
 ): void {
-  statuses.set({ targetId: target.id, desired: "on", observed: "starting", message: "Runtime model discovery starting", lastCheckedAt: new Date() });
   void runtimeModelDiscovery
     .bootstrapTarget(target, capacityProvider, healthChecker)
-    .then(() => {
-      statuses.set({ targetId: target.id, desired: "off", observed: "stopped", message: "Runtime model discovery complete", lastCheckedAt: new Date() });
-    })
-    .catch((error) => {
-      const message = error instanceof Error ? error.message : String(error);
-      statuses.set({ targetId: target.id, desired: "off", observed: "failed", message: `Runtime model discovery failed: ${message}`, lastCheckedAt: new Date() });
-    });
+    .catch(() => undefined);
+}
+
+function operationStatusCode(error: unknown): number {
+  return error instanceof TargetOperationConflictError ? 409 : 400;
 }
 
 async function reservationEndpoint(request: { params: unknown }, reply: { code: (code: number) => { send: (body: unknown) => unknown } }, service: ReservationService, statuses: TargetStatusRepository, costEstimation: CostEstimationService, catalog: ModelCatalog) {

@@ -155,6 +155,10 @@ into AWS, Docker, LiteLLM, or a concrete repository from unrelated code.
   discovery timestamp and hydrated into the catalog on startup. A later
   discovery pass can enrich an already discovered model after the runtime has
   loaded it.
+- `TargetOperationCoordinator`: owns in-memory target-scoped discovery leases,
+  coalesces duplicate discovery, rejects force-stop/discovery conflicts, and
+  serializes provider lifecycle mutations per target. The reconciler consumes
+  operation leases as non-attributable desired-on demand.
 
 ## Request Flow
 

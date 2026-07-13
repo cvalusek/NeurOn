@@ -32,6 +32,7 @@ import { CostEstimationService } from "./services/CostEstimationService.js";
 import { ReservationService } from "./services/ReservationService.js";
 import { ReservationProfileService } from "./services/ReservationProfileService.js";
 import { RuntimeModelDiscovery, shouldBootstrapRuntimeModels } from "./services/RuntimeModelDiscovery.js";
+import { TargetOperationCoordinator } from "./services/TargetOperationCoordinator.js";
 import { TargetProvisioningService } from "./services/TargetProvisioningService.js";
 import { TargetService } from "./services/TargetService.js";
 import { TrafficKeepaliveService } from "./services/TrafficKeepaliveService.js";
@@ -76,7 +77,8 @@ export async function buildApp(config: AppConfig, models: ModelDefinition[]) {
   const apiKeyService = new ApiKeyService(apiKeys);
   const trafficKeepalive = new TrafficKeepaliveService(reservations, statuses);
   const healthChecker = new HealthChecker(config.healthCheckTimeoutSeconds);
-  const runtimeModelDiscovery = new RuntimeModelDiscovery(catalog, reservationRepository.targetModelDiscoveries);
+  const targetOperations = new TargetOperationCoordinator();
+  const runtimeModelDiscovery = new RuntimeModelDiscovery(catalog, reservationRepository.targetModelDiscoveries, targetOperations, statuses);
   await runtimeModelDiscovery.hydrateCachedTargets();
   const modelWarmup = new ModelWarmupService(catalog);
   const costEstimation = new CostEstimationService(reservationRepository.targetActivations, capacityProvider);
@@ -94,8 +96,13 @@ export async function buildApp(config: AppConfig, models: ModelDefinition[]) {
     runtimeModelDiscovery,
     modelWarmup,
     trafficPoller,
-    costEstimation
+    costEstimation,
+    targetOperations
   );
+  targetOperations.setDemandController({
+    hasDemand: (targetId) => reconciler.hasDemand(targetId),
+    reconcileTarget: (targetId) => reconciler.reconcileTarget(targetId)
+  });
 
   await app.register(cookie);
   await app.register(formbody);
@@ -133,26 +140,23 @@ export async function buildApp(config: AppConfig, models: ModelDefinition[]) {
     request.user = user;
   });
 
-  registerApiRoutes(app, catalog, reservations, statuses, apiKeyService, reservationService, reservationProfileService, trafficKeepalive, reconciler, capacityProvider, runtimeModelDiscovery, healthChecker, targetService, targetProvisioningService, costEstimation, reservationRepository.targetActivations);
+  registerApiRoutes(app, catalog, reservations, statuses, apiKeyService, reservationService, reservationProfileService, trafficKeepalive, reconciler, capacityProvider, runtimeModelDiscovery, healthChecker, targetService, targetProvisioningService, costEstimation, reservationRepository.targetActivations, targetOperations);
   registerMcpRoutes(app, catalog, reservations, statuses, reservationService);
   registerUiRoutes(app, config, authProvider, authMethodService, catalog, apiKeyService, reservationService, reservationProfileService, providerService, targetService, targetProvisioningService, costEstimation, hassleOffClient);
 
   const bootstrapRuntimeModels = async () => {
     for (const target of catalog.listTargets().filter(shouldBootstrapRuntimeModels)) {
       try {
-        statuses.set({ targetId: target.id, desired: "on", observed: "starting", message: "Runtime model discovery bootstrap starting", lastCheckedAt: new Date() });
         await runtimeModelDiscovery.bootstrapTarget(target, capacityProvider, healthChecker);
-        statuses.set({ targetId: target.id, desired: "off", observed: "stopped", message: "Runtime model discovery bootstrap complete", lastCheckedAt: new Date() });
         app.log.info({ targetId: target.id }, "runtime model discovery bootstrap complete");
       } catch (error) {
         const loggedError = errorForLog(error);
-        statuses.set({ targetId: target.id, desired: "off", observed: "failed", message: `Runtime model discovery bootstrap failed: ${loggedError.message}`, lastCheckedAt: new Date() });
         app.log.warn({ targetId: target.id, error: loggedError }, "runtime model discovery bootstrap failed");
       }
     }
   };
 
-  return { app, reconciler, trafficPoller, bootstrapRuntimeModels };
+  return { app, reconciler, trafficPoller, bootstrapRuntimeModels, runtimeModelDiscovery, targetOperations };
 }
 
 function errorForLog(error: unknown): { message: string; name?: string; stack?: string } {

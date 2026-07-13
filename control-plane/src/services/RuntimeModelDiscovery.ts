@@ -1,7 +1,8 @@
-import type { CapacityProvider, TargetModelDiscoveryRepository } from "../domain/interfaces.js";
+import type { CapacityProvider, TargetModelDiscoveryRepository, TargetStatusRepository } from "../domain/interfaces.js";
 import type { CapacityTarget, RuntimeDiscoveredModel } from "../domain/types.js";
 import type { HealthChecker } from "../reconciler/HealthChecker.js";
 import { ModelCatalog } from "./ModelCatalog.js";
+import type { TargetOperationCoordinator } from "./TargetOperationCoordinator.js";
 
 interface OpenAiModelsResponse {
   data?: RuntimeModelInfo[];
@@ -10,9 +11,13 @@ interface OpenAiModelsResponse {
 export interface RuntimeModelInfo extends RuntimeDiscoveredModel {}
 
 export class RuntimeModelDiscovery {
+  private readonly refreshes = new Map<string, Promise<void>>();
+
   constructor(
     private readonly catalog: ModelCatalog,
-    private readonly repository?: TargetModelDiscoveryRepository
+    private readonly repository?: TargetModelDiscoveryRepository,
+    private readonly targetOperations?: TargetOperationCoordinator,
+    private readonly statuses?: TargetStatusRepository
   ) {}
 
   async hydrateCachedTargets(): Promise<void> {
@@ -25,6 +30,18 @@ export class RuntimeModelDiscovery {
   }
 
   async refreshTarget(target: CapacityTarget): Promise<void> {
+    const existing = this.refreshes.get(target.id);
+    if (existing) return existing;
+    const refresh = Promise.resolve().then(() => this.readTargetCatalog(target));
+    this.refreshes.set(target.id, refresh);
+    try {
+      await refresh;
+    } finally {
+      if (this.refreshes.get(target.id) === refresh) this.refreshes.delete(target.id);
+    }
+  }
+
+  private async readTargetCatalog(target: CapacityTarget): Promise<void> {
     const url = modelsUrlForTarget(target);
     if (!url) throw new Error(`Target ${target.id} is missing apiUrl, litellm.apiBaseUrl, or healthUrl for model discovery`);
     const response = await fetch(url, { signal: AbortSignal.timeout(5000) });
@@ -36,35 +53,60 @@ export class RuntimeModelDiscovery {
   }
 
   async bootstrapTarget(target: CapacityTarget, capacityProvider: CapacityProvider, healthChecker: HealthChecker): Promise<void> {
+    if (!this.targetOperations) throw new Error("Target operation coordinator is not configured for runtime model discovery");
     const timeoutMs = (target.modelDiscovery?.bootstrapTimeoutSeconds ?? 600) * 1000;
     const startedAt = Date.now();
-    let lastError: string | undefined;
-    await capacityProvider.ensureTargetOn(target);
     try {
-      while (Date.now() - startedAt < timeoutMs) {
-        const providerStatus = await capacityProvider.getTargetStatus(target);
-        if (providerStatus.observed === "healthy") {
-          const health = await healthChecker.check(target);
-          if (health.ok) {
-            try {
-              await this.refreshTarget(target);
-              return;
-            } catch (error) {
-              // Runtime may be running before the OpenAI-compatible API is ready.
-              lastError = error instanceof Error ? error.message : String(error);
+      await this.targetOperations.runRuntimeModelDiscovery(
+        target.id,
+        async () => {
+          const status = await capacityProvider.getTargetStatus(target);
+          return { wasRunning: status.observed === "healthy" || status.observed === "starting" };
+        },
+        async () => {
+          let lastError: string | undefined;
+          while (Date.now() - startedAt < timeoutMs) {
+            const providerStatus = await capacityProvider.getTargetStatus(target);
+            if (providerStatus.observed === "healthy") {
+              const health = await healthChecker.check(target);
+              if (health.ok) {
+                try {
+                  await this.refreshTarget(target);
+                  return;
+                } catch (error) {
+                  // Runtime may be running before the OpenAI-compatible API is ready.
+                  lastError = error instanceof Error ? error.message : String(error);
+                }
+              } else {
+                lastError = health.message;
+              }
+            } else {
+              lastError = providerStatus.message;
             }
-          } else {
-            lastError = health.message;
+            await sleep(5000);
           }
-        } else {
-          lastError = providerStatus.message;
+          throw new Error(`Timed out waiting for ${target.id} runtime model discovery${lastError ? `: ${lastError}` : ""}`);
         }
-        await sleep(5000);
-      }
-      throw new Error(`Timed out waiting for ${target.id} runtime model discovery${lastError ? `: ${lastError}` : ""}`);
-    } finally {
-      await capacityProvider.ensureTargetOff(target);
+      );
+      this.recordStatus(target.id, "Runtime model discovery complete");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.recordStatus(target.id, `Runtime model discovery failed: ${message}`);
+      throw error;
     }
+  }
+
+  private recordStatus(targetId: string, message: string): void {
+    if (!this.statuses) return;
+    const current = this.statuses.get(targetId);
+    this.statuses.set({
+      ...current,
+      targetId,
+      desired: current?.desired ?? "off",
+      observed: current?.observed ?? "stopped",
+      message,
+      lastCheckedAt: new Date()
+    });
   }
 }
 

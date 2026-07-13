@@ -157,9 +157,10 @@ When a target becomes healthy, NeurOn polls the target's OpenAI-compatible
 `backendModelIds`/`aliases`. That enriches status and traffic mapping without
 creating surprise UI options or changing capacity decisions.
 If a target has no configured models, NeurOn bootstraps runtime discovery on
-startup by briefly starting the target, reading `/v1/models`, and stopping it
-again. Set `modelDiscovery.bootstrapOnStartup=false` to disable that behavior,
-or `true` to force it for a target with configured models.
+startup by briefly holding the exact target on, reading `/v1/models`, and then
+stopping discovery-started capacity only when no reservation or traffic demand
+needs it. Set `modelDiscovery.bootstrapOnStartup=false` to disable that
+behavior, or `true` to force it for a target with configured models.
 If discovery has not populated models yet, users can still reserve the target
 itself; NeurOn treats that as keeping the full runtime available.
 

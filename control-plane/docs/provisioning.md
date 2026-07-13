@@ -27,7 +27,9 @@ place to resume, inspect, or abort multi-step flows as provider adapters grow.
 After a target is provisioned, NeurOn records the provider-observed status. If
 the target has discovery enabled and no configured models, NeurOn starts a
 background bootstrap discovery pass. That pass starts the target, waits for
-health, reads `/v1/models`, records discovered models, and stops the target.
+health, reads `/v1/models`, and records discovered models. It stops capacity
+that it started only when no reservation or traffic demand exists at operation
+release; it never stops a target that another owner still needs.
 
 Provisioning should remain provider-specific:
 

@@ -17,7 +17,8 @@ On every reconciliation pass:
 
 1. Expire old reservations.
 2. List active reservations.
-3. Compute desired-on target IDs from active reservation target IDs.
+3. Compute desired-on target IDs from active reservation target IDs plus
+   target-scoped operational leases such as runtime discovery.
 4. Before turning off a previously-on target, poll LiteLLM traffic once when a
    traffic poller is configured.
 5. For a HassleOff-protected desired-on target, require acceptance of the exact
@@ -36,15 +37,32 @@ On every reconciliation pass:
 Desired capacity is aggregate state:
 
 - If at least one active reservation references a target, desired state is `on`.
+- If a target-scoped operation holds explicit desired-on demand, desired state
+  is `on` for the lifetime of that operation.
 - Otherwise desired state is `off`.
 
 Ending one user's reservation only removes that user's contribution. It must not
 stop a target that another active reservation still needs.
 
+Operational leases are in-memory coordination state, not reservations. They do
+not have a username, are not returned in reservation APIs, and do not receive
+cost allocation. The reconciler re-reads reservation demand and the operation
+lease inside the target's serialized lifecycle transition immediately before a
+provider start or stop. This prevents a stale no-reservation decision from
+stopping a target after discovery has begun.
+
+When discovery releases a lease for capacity that it started, it requests an
+immediate reconciliation pass. That pass performs the existing last-minute
+traffic poll and converges to current reservation/traffic demand. Lifecycle
+state is serialized per target, so reconciliation and force-stop cannot mutate
+the same provider target concurrently.
+
 ## Cost Estimates
 
 When a target has `costEstimate.hourlyUsd`, or a provider can discover an hourly
-rate, the reconciler records a `TargetActivation` for each desired-on period.
+rate, the reconciler records a `TargetActivation` for each reservation/traffic
+desired-on period. Operation-only discovery time does not open an attributable
+activation.
 The activation snapshots the hourly cost when it opens. Manual target config
 wins; RunPod targets can otherwise read the Pod's hourly cost from the RunPod
 Pod detail API. On each pass, elapsed target cost since the previous pass is

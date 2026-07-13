@@ -783,6 +783,79 @@ describe("HassleOff admin safety UI", () => {
 });
 
 describe("runtime model bootstrap selection", () => {
+  it("uses the coordinated bootstrap path for startup, explicit discovery, and post-provision discovery", async () => {
+    process.env.USE_FAKE_PROVIDER = "true";
+    const discoveryConfig: AppConfig = {
+      ...config,
+      capacityTargets: [{
+        id: "t1",
+        displayName: "T1",
+        provider: "aws-ecs",
+        modelIds: [],
+        apiUrl: "http://runtime.invalid/v1",
+        modelDiscovery: { bootstrapOnStartup: true }
+      }]
+    };
+    const { app, bootstrapRuntimeModels, runtimeModelDiscovery } = await buildApp(discoveryConfig, models);
+    const bootstrap = vi.spyOn(runtimeModelDiscovery, "bootstrapTarget").mockResolvedValue(undefined);
+    const auth = { authorization: `Basic ${Buffer.from("actual:secret").toString("base64")}` };
+    try {
+      await bootstrapRuntimeModels();
+      const explicit = await app.inject({ method: "POST", url: "/api/admin/targets/t1/discover", headers: auth });
+      const provisioned = await app.inject({ method: "POST", url: "/api/admin/targets/t1/provision", headers: auth });
+
+      expect(explicit.statusCode).toBe(200);
+      expect(provisioned.statusCode).toBe(200);
+      expect(bootstrap).toHaveBeenCalledTimes(3);
+    } finally {
+      await app.close();
+    }
+  });
+
+  it("returns the concrete discovery failure and exposes it through the admin UI action", async () => {
+    process.env.USE_FAKE_PROVIDER = "true";
+    const { app, runtimeModelDiscovery } = await buildApp(config, models);
+    vi.spyOn(runtimeModelDiscovery, "bootstrapTarget").mockRejectedValue(new Error("runtime catalog authentication failed"));
+    const auth = { authorization: `Basic ${Buffer.from("actual:secret").toString("base64")}` };
+    try {
+      const response = await app.inject({ method: "POST", url: "/api/admin/targets/t1/discover", headers: auth });
+      const page = await app.inject({ method: "GET", url: "/admin/targets", headers: auth });
+
+      expect(response.statusCode).toBe(400);
+      expect(response.json()).toEqual({ error: "runtime catalog authentication failed" });
+      expect(page.body).toContain("window.alert(message)");
+    } finally {
+      await app.close();
+    }
+  });
+
+  it("returns HTTP 409 when force-stop is requested during discovery", async () => {
+    process.env.USE_FAKE_PROVIDER = "true";
+    const { app, targetOperations } = await buildApp(config, models);
+    const auth = { authorization: `Basic ${Buffer.from("actual:secret").toString("base64")}` };
+    let finishOperation: (() => void) | undefined;
+    const pendingDiscovery = targetOperations.runRuntimeModelDiscovery(
+      "t1",
+      async () => ({ wasRunning: true }),
+      () => new Promise<void>((resolve) => {
+        finishOperation = resolve;
+      })
+    );
+    try {
+      const response = await app.inject({ method: "POST", url: "/api/admin/targets/t1/force-stop", headers: auth });
+      expect(response.statusCode).toBe(409);
+      expect(response.json().error).toContain("runtime model discovery in progress");
+      await vi.waitFor(() => expect(finishOperation).toBeTypeOf("function"));
+      finishOperation!();
+      await pendingDiscovery;
+      expect(targetOperations.activeDiscoveryCount()).toBe(0);
+    } finally {
+      finishOperation?.();
+      await pendingDiscovery.catch(() => undefined);
+      await app.close();
+    }
+  });
+
   it("discovers models by default when a target has no configured models unless disabled", () => {
     expect(shouldBootstrapRuntimeModels({ modelIds: [] })).toBe(true);
     expect(shouldBootstrapRuntimeModels({ modelIds: [], modelDiscovery: { bootstrapOnStartup: false } })).toBe(false);
