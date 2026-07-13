@@ -163,7 +163,7 @@ export class HassleOffService {
       throw new HassleOffRequestError("Trip test target has an active maintenance hold", 409);
     }
     const issuedAt = new Date(now.getTime() - this.config.minLeaseMs);
-    const leaseId = `gfci-${randomUUID()}`;
+    const leaseId = `failsafe-test-${randomUUID()}`;
     this.acceptLease(targetId, {
       protocolVersion: HASSLEOFF_PROTOCOL_VERSION,
       targetId,

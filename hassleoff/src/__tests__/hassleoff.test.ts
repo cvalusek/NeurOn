@@ -1,9 +1,10 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { RegisteredStopActionExecutor } from "../actions.js";
 import { buildHassleOffApp } from "../app.js";
+import { loadHassleOffConfig } from "../config.js";
 import type { HassleOffConfig, RegisteredTarget, StopActionExecutor } from "../types.js";
 
 const token = "test-controller-token-123";
@@ -12,6 +13,10 @@ const createdDirectories: string[] = [];
 afterEach(() => {
   vi.restoreAllMocks();
   delete process.env.HASSLEOFF_TEST_RUNPOD_KEY;
+  delete process.env.HASSLEOFF_CONTROLLER_TOKEN;
+  delete process.env.HASSLEOFF_TARGETS_JSON;
+  delete process.env.HASSLEOFF_TARGETS_FILE;
+  delete process.env.HASSLEOFF_SQLITE_PATH;
   for (const directory of createdDirectories.splice(0)) rmSync(directory, { recursive: true, force: true });
 });
 
@@ -52,9 +57,9 @@ describe("HassleOff safety path", () => {
     await acceptLease(harness, "rented-a", 2_000);
     await harness.app.close();
 
-    const restarted = createHarness([fakeTarget("gfci", true)], { databasePath: harness.databasePath });
+    const restarted = createHarness([fakeTarget("hassleoff-failsafe-test", true)], { databasePath: harness.databasePath });
     expect(restarted.service.ready).toBe(false);
-    expect(restarted.service.status().service.registrationIssues).toContain("Durable registration rented-a is missing from HASSLEOFF_TARGETS_JSON");
+    expect(restarted.service.status().service.registrationIssues).toContain("Durable registration rented-a is missing from the configured target registrations");
     restarted.advance(2_000);
     await restarted.service.tick();
     expect(restarted.stop).toHaveBeenCalledTimes(1);
@@ -140,23 +145,23 @@ describe("HassleOff safety path", () => {
     await harness.app.close();
   });
 
-  it("runs the complete synthetic GFCI path and records its last durable success", async () => {
-    const harness = createHarness([fakeTarget("gfci", true)]);
+  it("runs the complete synthetic fail-safe path and records its last durable success", async () => {
+    const harness = createHarness([fakeTarget("hassleoff-failsafe-test", true)]);
     const response = await harness.app.inject({
       method: "POST",
-      url: "/v1/targets/gfci/trip-test",
+      url: "/v1/targets/hassleoff-failsafe-test/trip-test",
       headers: authHeaders(),
-      payload: { protocolVersion: "1", targetId: "gfci" }
+      payload: { protocolVersion: "1", targetId: "hassleoff-failsafe-test" }
     });
     expect(response.statusCode).toBe(200);
-    expect(response.json()).toMatchObject({ targetId: "gfci", succeeded: true });
+    expect(response.json()).toMatchObject({ targetId: "hassleoff-failsafe-test", succeeded: true });
     expect(harness.stop).toHaveBeenCalledTimes(1);
     expect(harness.service.status().lastFullTripTestSucceededAt).toBe(harness.now().toISOString());
     await harness.app.close();
 
-    const restarted = createHarness([fakeTarget("gfci", true)], { databasePath: harness.databasePath });
+    const restarted = createHarness([fakeTarget("hassleoff-failsafe-test", true)], { databasePath: harness.databasePath });
     expect(restarted.service.status().lastFullTripTestSucceededAt).toBe(harness.now().toISOString());
-    expect(restarted.service.audit("gfci").map((event) => event.eventType)).toEqual(expect.arrayContaining([
+    expect(restarted.service.audit("hassleoff-failsafe-test").map((event) => event.eventType)).toEqual(expect.arrayContaining([
       "lease_expiry_trip_decided",
       "provider_stop_succeeded",
       "trip_test_succeeded"
@@ -207,6 +212,48 @@ describe("HassleOff safety path", () => {
     expect(second.json()).toMatchObject({ stopped: true, replayed: true });
     expect(harness.stop).toHaveBeenCalledTimes(1);
     await harness.app.close();
+  });
+});
+
+describe("HassleOff target registration configuration", () => {
+  it("keeps inline JSON registrations backward-compatible", () => {
+    process.env.HASSLEOFF_CONTROLLER_TOKEN = token;
+    process.env.HASSLEOFF_TARGETS_JSON = JSON.stringify([fakeTarget("hassleoff-failsafe-test", true)]);
+
+    expect(loadHassleOffConfig().targets).toMatchObject([{
+      targetId: "hassleoff-failsafe-test",
+      registrationId: "hassleoff-failsafe-test-v1",
+      testOnly: true,
+      action: { type: "fake" }
+    }]);
+  });
+
+  it("loads registrations from a file without requiring JSON inside an environment variable", () => {
+    const directory = mkdtempSync(path.join(tmpdir(), "hassleoff-config-test-"));
+    createdDirectories.push(directory);
+    const targetsFile = path.join(directory, "targets.json");
+    writeFileSync(targetsFile, JSON.stringify([fakeTarget("hassleoff-failsafe-test", true)]), "utf8");
+    process.env.HASSLEOFF_CONTROLLER_TOKEN = token;
+    process.env.HASSLEOFF_TARGETS_FILE = targetsFile;
+    process.env.HASSLEOFF_SQLITE_PATH = path.join(directory, "configured.db");
+
+    expect(loadHassleOffConfig()).toMatchObject({
+      controllerToken: token,
+      targets: [{
+        targetId: "hassleoff-failsafe-test",
+        registrationId: "hassleoff-failsafe-test-v1",
+        testOnly: true,
+        action: { type: "fake" }
+      }]
+    });
+  });
+
+  it("rejects ambiguous file and inline registration sources", () => {
+    process.env.HASSLEOFF_CONTROLLER_TOKEN = token;
+    process.env.HASSLEOFF_TARGETS_FILE = "targets.json";
+    process.env.HASSLEOFF_TARGETS_JSON = JSON.stringify([fakeTarget("hassleoff-failsafe-test", true)]);
+
+    expect(() => loadHassleOffConfig()).toThrow("Set only one of HASSLEOFF_TARGETS_JSON or HASSLEOFF_TARGETS_FILE");
   });
 });
 

@@ -135,7 +135,7 @@ export async function buildApp(config: AppConfig, models: ModelDefinition[]) {
 
   registerApiRoutes(app, catalog, reservations, statuses, apiKeyService, reservationService, reservationProfileService, trafficKeepalive, reconciler, capacityProvider, runtimeModelDiscovery, healthChecker, targetService, targetProvisioningService, costEstimation, reservationRepository.targetActivations);
   registerMcpRoutes(app, catalog, reservations, statuses, reservationService);
-  registerUiRoutes(app, config, authProvider, authMethodService, catalog, apiKeyService, reservationService, reservationProfileService, providerService, targetService, targetProvisioningService, costEstimation);
+  registerUiRoutes(app, config, authProvider, authMethodService, catalog, apiKeyService, reservationService, reservationProfileService, providerService, targetService, targetProvisioningService, costEstimation, hassleOffClient);
 
   const bootstrapRuntimeModels = async () => {
     for (const target of catalog.listTargets().filter(shouldBootstrapRuntimeModels)) {

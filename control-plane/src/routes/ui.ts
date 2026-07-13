@@ -12,8 +12,10 @@ import { ReservationProfileService } from "../services/ReservationProfileService
 import { CostEstimationService } from "../services/CostEstimationService.js";
 import { TargetService } from "../services/TargetService.js";
 import { TargetProvisioningService } from "../services/TargetProvisioningService.js";
-import { activationPage, adminAuthPage, apiKeysPage, loginPage, profilesPage, providerAdminPage, reservationHistoryPage, reservationPage, startPage, targetAdminPage } from "../ui/html.js";
+import type { HassleOffSafetyView } from "../ui/html.js";
+import { activationPage, adminAuthPage, apiKeysPage, hassleOffSafetyPage, loginPage, profilesPage, providerAdminPage, reservationHistoryPage, reservationPage, startPage, targetAdminPage } from "../ui/html.js";
 import { requireUser } from "../utils/http.js";
+import type { HassleOffClient } from "../safety/HassleOffClient.js";
 
 export function registerUiRoutes(
   app: FastifyInstance,
@@ -27,7 +29,8 @@ export function registerUiRoutes(
   providerService: ProviderService,
   targetService: TargetService,
   targetProvisioningService: TargetProvisioningService,
-  costEstimation: CostEstimationService
+  costEstimation: CostEstimationService,
+  hassleOffClient?: HassleOffClient
 ) {
   app.get("/login", async (_request, reply) => reply.type("text/html").send(loginPage("", await authMethodService.listEnabled("github"))));
   app.post("/login", async (request, reply) => {
@@ -172,6 +175,101 @@ export function registerUiRoutes(
   app.get("/admin", async (_request, reply) => reply.redirect("/admin/auth"));
   app.get("/admin/reservations", async (request, reply) => reply.type("text/html").send(reservationHistoryPage(requireUser(request))));
   app.get("/admin/activations", async (request, reply) => reply.type("text/html").send(activationPage(requireUser(request))));
+  app.get("/admin/hassleoff", async (request, reply) => {
+    const query = z.object({ error: z.string().optional(), success: z.string().optional() }).parse(request.query);
+    const user = requireUser(request);
+    const targets = await targetService.list();
+    let status: Awaited<ReturnType<HassleOffClient["getStatus"]>> | undefined;
+    let diagnostic: string | undefined;
+    if (hassleOffClient) {
+      try {
+        status = await hassleOffClient.getStatus();
+      } catch (error) {
+        diagnostic = error instanceof Error ? error.message : "HassleOff status request failed";
+      }
+    }
+    const configuredTargetId = hassleOffClient?.failSafeTestTargetId ?? config.hassleOff?.failSafeTestTargetId ?? "hassleoff-failsafe-test";
+    const registration = status?.targets.find((target) => target.targetId === configuredTargetId);
+    const failSafeTest = status?.tripTests?.find((result) => result.targetId === configuredTargetId);
+    const eligible = Boolean(registration?.testOnly && registration.actionType === "fake");
+    const canRun = Boolean(status?.service.ready && status.service.armed && eligible && config.cookieSecret);
+    const csrfToken = canRun
+      ? authProvider.createState({
+          purpose: "hassleoff-fail-safe-test",
+          username: user.username,
+          targetId: configuredTargetId,
+          expiresAt: Date.now() + 10 * 60 * 1000,
+          nonce: crypto.randomBytes(16).toString("base64url")
+        })
+      : undefined;
+    const registrations = new Map(status?.targets.map((target) => [target.targetId, target]) ?? []);
+    const view: HassleOffSafetyView = {
+      configured: Boolean(hassleOffClient),
+      baseUrl: hassleOffClient?.baseUrl,
+      reachable: Boolean(status),
+      healthy: status?.service.healthy,
+      ready: status?.service.ready,
+      armed: status?.service.armed,
+      registrationIssues: status?.service.registrationIssues ?? [],
+      diagnostic,
+      lastSuccessfulFailSafeTestAt: failSafeTest?.lastSucceededAt,
+      lastSuccessfulFailSafeTestAuditEventId: failSafeTest?.auditEventId,
+      failSafeTestTarget: {
+        targetId: configuredTargetId,
+        registered: Boolean(registration),
+        eligible,
+        actionType: registration?.actionType,
+        testOnly: registration?.testOnly,
+        armed: registration?.armed
+      },
+      targets: targets.map((target) => {
+        const registered = registrations.get(target.id);
+        return {
+          id: target.id,
+          displayName: target.displayName,
+          protected: target.hassleOff?.protected === true,
+          leaseDurationSeconds: target.hassleOff?.leaseDurationSeconds,
+          registered: Boolean(registered),
+          registrationActionType: registered?.actionType,
+          registrationTestOnly: registered?.testOnly,
+          registrationArmed: registered?.armed
+        };
+      }),
+      csrfToken,
+      success: query.success,
+      error: query.error
+    };
+    return reply.type("text/html").send(hassleOffSafetyPage(user, view));
+  });
+  app.post("/admin/hassleoff/fail-safe-test", async (request, reply) => {
+    try {
+      const user = requireUser(request);
+      if (!hassleOffClient || !config.hassleOff) throw new Error("HassleOff is not configured in NeurOn");
+      const body = z.object({ csrfToken: z.string().min(1), confirm: z.string().optional() }).parse(request.body ?? {});
+      if (body.confirm !== "yes") throw new Error("Confirm the synthetic fail-safe test before running it");
+      const state = authProvider.verifyState<{
+        purpose?: string;
+        username?: string;
+        targetId?: string;
+        expiresAt?: number;
+      }>(body.csrfToken);
+      if (
+        state?.purpose !== "hassleoff-fail-safe-test" ||
+        state?.username !== user.username ||
+        state?.targetId !== hassleOffClient.failSafeTestTargetId ||
+        !Number.isSafeInteger(state?.expiresAt) ||
+        (state?.expiresAt ?? 0) <= Date.now()
+      ) {
+        throw new Error("The fail-safe test confirmation is invalid or expired; reload the page and try again");
+      }
+      const result = await hassleOffClient.runFailSafeTest();
+      const message = `HassleOff fail-safe test succeeded for ${result.targetId} at ${result.lastFullTripTestSucceededAt}`;
+      return reply.redirect(`/admin/hassleoff?success=${encodeURIComponent(message)}`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "HassleOff fail-safe test failed";
+      return reply.redirect(`/admin/hassleoff?error=${encodeURIComponent(message)}`);
+    }
+  });
   app.get("/admin/auth", async (request, reply) => {
     const query = z.object({ error: z.string().optional() }).parse(request.query);
     return reply.type("text/html").send(adminAuthPage(requireUser(request), await authMethodService.list(), query.error));

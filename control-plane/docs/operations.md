@@ -117,8 +117,14 @@ app-only development or tests. The Docker Compose provider remains available
 for bring-your-own local runtime projects. Netskope/corporate CA builds are
 supported through the compose overlay and `.netskope` Dockerfile.
 
-For the fake-only NeurOn plus HassleOff stack, use the explicit properties file
-so Docker Compose does not load a default `.env` file:
+The normal root Compose file keeps HassleOff behind the optional `hassleoff`
+profile. Follow the exact registration and protection sequence in
+[hassleoff.md](hassleoff.md), then start HassleOff before NeurOn. Use
+**Admin > HassleOff safety** to verify readiness and run the synthetic
+fail-safe test.
+
+For the isolated fake-only NeurOn plus HassleOff stack, use the explicit
+properties file so Docker Compose does not load a default `.env` file:
 
 ```bash
 docker compose --env-file control-plane/examples/compose-hassleoff.properties -f docker-compose.hassleoff.yml up --build

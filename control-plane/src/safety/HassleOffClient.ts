@@ -8,10 +8,43 @@ interface LeaseClientState {
   sequence: number;
 }
 
-interface HassleOffStatus {
+export interface HassleOffTargetStatus {
+  targetId: string;
+  registrationId: string;
+  displayName?: string;
+  actionType: "fake" | "runpod-stop" | string;
+  testOnly: boolean;
+  armed: boolean;
+  lease?: {
+    acceptedUntil?: string;
+    expired?: boolean;
+  };
+  lastTripResult?: {
+    at: string;
+    trigger: string;
+    outcome: string;
+    message?: string;
+  };
+}
+
+export interface HassleOffStatus {
   protocolVersion: string;
-  service: { armed: boolean; ready: boolean };
+  service: {
+    healthy: boolean;
+    armed: boolean;
+    ready: boolean;
+    registrationIssues?: string[];
+  };
   lastFullTripTestSucceededAt?: string;
+  tripTests?: Array<{ targetId: string; lastSucceededAt: string; auditEventId: number }>;
+  targets: HassleOffTargetStatus[];
+}
+
+export interface HassleOffFailSafeTestResult {
+  targetId: string;
+  succeeded: true;
+  lastFullTripTestSucceededAt: string;
+  auditEventId: number;
 }
 
 export class HassleOffClient {
@@ -23,6 +56,57 @@ export class HassleOffClient {
     private readonly fetchImplementation: typeof fetch = fetch,
     private readonly clock: () => Date = () => new Date()
   ) {}
+
+  get baseUrl(): string {
+    return this.config.baseUrl;
+  }
+
+  get failSafeTestTargetId(): string {
+    return this.config.failSafeTestTargetId;
+  }
+
+  async getStatus(): Promise<HassleOffStatus> {
+    return this.readStatus("Could not read HassleOff safety status");
+  }
+
+  async runFailSafeTest(): Promise<HassleOffFailSafeTestResult> {
+    const status = await this.readStatus("Could not verify the HassleOff fail-safe test target");
+    if (!status.service.ready || !status.service.armed) {
+      throw new Error("HassleOff must be ready and armed before running the fail-safe test");
+    }
+    const targetId = this.config.failSafeTestTargetId;
+    const target = status.targets.find((candidate) => candidate.targetId === targetId);
+    if (!target) throw new Error(`HassleOff fail-safe test target is not registered: ${targetId}`);
+    if (!target.testOnly || target.actionType !== "fake") {
+      throw new Error(`HassleOff fail-safe test target ${targetId} must be registered as testOnly with a fake action`);
+    }
+    const result = await this.request<{
+      protocolVersion: string;
+      targetId: string;
+      succeeded: boolean;
+      lastFullTripTestSucceededAt: string;
+      auditEventId: number;
+    }>(`/v1/targets/${encodeURIComponent(targetId)}/trip-test`, {
+      method: "POST",
+      body: JSON.stringify({ protocolVersion, targetId })
+    }, `HassleOff fail-safe test failed for ${targetId}`);
+    const succeededAt = new Date(result.lastFullTripTestSucceededAt);
+    if (
+      result.protocolVersion !== protocolVersion ||
+      result.targetId !== targetId ||
+      result.succeeded !== true ||
+      !Number.isFinite(succeededAt.getTime()) ||
+      !Number.isSafeInteger(result.auditEventId)
+    ) {
+      throw new Error(`HassleOff fail-safe test returned a mismatched result for ${targetId}`);
+    }
+    return {
+      targetId,
+      succeeded: true,
+      lastFullTripTestSucceededAt: succeededAt.toISOString(),
+      auditEventId: result.auditEventId
+    };
+  }
 
   async acceptExactTargetLease(target: CapacityTarget): Promise<void> {
     if (!target.hassleOff?.protected) return;
@@ -73,7 +157,7 @@ export class HassleOffClient {
   async shutdownThroughHassleOffIfTripTestStale(target: CapacityTarget, now = this.clock()): Promise<boolean> {
     const policy = target.hassleOff?.staleTripTestShutdown;
     if (!target.hassleOff?.protected || !policy?.enabled) return false;
-    const status = await this.request<HassleOffStatus>("/v1/status", { method: "GET" }, `Could not read HassleOff trip-test status for ${target.id}`);
+    const status = await this.readStatus(`Could not read HassleOff trip-test status for ${target.id}`);
     if (status.protocolVersion !== protocolVersion || !status.service.armed || !status.service.ready) {
       throw new Error(`HassleOff is not armed and ready for intentional shutdown of ${target.id}`);
     }
@@ -102,6 +186,14 @@ export class HassleOffClient {
       throw new Error(`HassleOff intentional shutdown returned a mismatched result for ${target.id}`);
     }
     return true;
+  }
+
+  private async readStatus(context: string): Promise<HassleOffStatus> {
+    const status = await this.request<HassleOffStatus>("/v1/status", { method: "GET" }, context);
+    if (status.protocolVersion !== protocolVersion || !status.service || !Array.isArray(status.targets)) {
+      throw new Error(`${context}: watchdog returned an unsupported status response`);
+    }
+    return status;
   }
 
   private async request<T>(path: string, init: RequestInit, context: string): Promise<T> {

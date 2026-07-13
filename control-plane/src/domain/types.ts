@@ -134,6 +134,7 @@ export interface HassleOffClientConfig {
   controllerToken: string;
   controllerId: string;
   requestTimeoutSeconds: number;
+  failSafeTestTargetId: string;
 }
 
 export interface NeuronTargetConfig {

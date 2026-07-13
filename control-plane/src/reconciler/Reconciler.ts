@@ -82,12 +82,12 @@ export class Reconciler {
             await this.runtimeModelDiscovery?.refreshTarget(target).catch(() => undefined);
           }
           if (next.observed === "failed") {
-            await this.failActiveReservationsForTarget(target.id, next.message);
+            await this.failActiveReservationsForTarget(target.id, next.message, now);
           }
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error);
           this.statuses.set(targetStatus(target.id, desired, "failed", message, now, previous));
-          await this.failActiveReservationsForTarget(target.id, message);
+          await this.failActiveReservationsForTarget(target.id, message, now);
         }
       }
     } finally {
@@ -105,15 +105,15 @@ export class Reconciler {
     if (!this.targets.some((target) => target.id === targetId)) throw new Error("Target not found");
   }
 
-  private async failActiveReservationsForTarget(targetId: string, message: string): Promise<void> {
-    const active = await this.reservations.listActive(new Date());
+  private async failActiveReservationsForTarget(targetId: string, message: string, now: Date): Promise<void> {
+    const active = await this.reservations.listActive(now);
     await Promise.all(
       active
         .filter((reservation) => reservation.targetIds.includes(targetId))
         .map((reservation) =>
           this.reservations.update(reservation.id, {
             status: "failed",
-            endedAt: new Date(),
+            endedAt: now,
             failureMessage: message
           })
         )

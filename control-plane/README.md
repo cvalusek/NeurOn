@@ -35,7 +35,7 @@ restarting NeurOn does not forget active demand, configured providers/targets,
 or API keys:
 
 ```bash
-docker compose up --build control-plane
+docker compose up --build neuron
 ```
 
 For app-only development, set `USE_FAKE_PROVIDER=true` and optionally
@@ -44,7 +44,20 @@ For app-only development, set `USE_FAKE_PROVIDER=true` and optionally
 Without target configuration, NeurOn starts with no providers or targets. Add
 them from Admin or supply declarative config.
 
-For a fake-only dead-man safety stack with the separate HassleOff service:
+The normal Compose file also has an opt-in HassleOff profile. Configure the
+shared token, internal `http://hassleoff:8091` URL, and registration file first,
+then start the services in this order:
+
+```bash
+docker compose --profile hassleoff up -d hassleoff
+docker compose up -d neuron
+```
+
+The default NeurOn command does not start HassleOff. The status and synthetic
+test are at **Admin > HassleOff safety**. See [docs/hassleoff.md](docs/hassleoff.md)
+for the exact safe enablement order.
+
+For an isolated fake-only dead-man safety stack:
 
 ```bash
 docker compose --env-file control-plane/examples/compose-hassleoff.properties -f docker-compose.hassleoff.yml up --build
@@ -131,6 +144,8 @@ Environment variables:
 | `HASSLEOFF_URL` | unset | HassleOff base URL for protected targets |
 | `HASSLEOFF_CONTROLLER_TOKEN` | unset | Authenticates controller lease calls |
 | `HASSLEOFF_CONTROLLER_ID` | `neuron` | Stable deployment identity in leases |
+| `HASSLEOFF_REQUEST_TIMEOUT_SECONDS` | `5` | Timeout for server-side HassleOff calls |
+| `HASSLEOFF_FAILSAFE_TEST_TARGET_ID` | `hassleoff-failsafe-test` | Exact synthetic `testOnly` fake registration exposed in the admin safety UI |
 
 Model choices are configuration-first. Put the user-facing choices in each
 target's `models` array with display names, aliases, backend model IDs, and

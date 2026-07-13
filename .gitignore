@@ -32,3 +32,6 @@ dist/
 # Local durable app data
 data/
 **/data/
+
+# Optional local HassleOff registration file containing real provider bindings
+hassleoff/targets.local.private.json

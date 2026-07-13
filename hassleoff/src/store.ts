@@ -90,7 +90,7 @@ export class HassleOffStore {
       }
       for (const target of persistedById.values()) {
         if (!configuredById.has(target.targetId)) {
-          issues.push(`Durable registration ${target.targetId} is missing from HASSLEOFF_TARGETS_JSON`);
+          issues.push(`Durable registration ${target.targetId} is missing from the configured target registrations`);
         }
       }
     });

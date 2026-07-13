@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import path from "node:path";
 import { z } from "zod";
 import type { HassleOffConfig } from "./types.js";
@@ -21,10 +22,10 @@ const targetSchema = z.object({
 export function loadHassleOffConfig(): HassleOffConfig {
   const controllerToken = requiredEnv("HASSLEOFF_CONTROLLER_TOKEN");
   if (controllerToken.length < 16) throw new Error("HASSLEOFF_CONTROLLER_TOKEN must contain at least 16 characters");
-  const targetsRaw = requiredEnv("HASSLEOFF_TARGETS_JSON");
+  const targetsRaw = loadTargetsJson();
   const targets = z.array(targetSchema).min(1).parse(JSON.parse(targetsRaw));
   const uniqueTargets = new Set(targets.map((target) => target.targetId));
-  if (uniqueTargets.size !== targets.length) throw new Error("HASSLEOFF_TARGETS_JSON contains duplicate targetId values");
+  if (uniqueTargets.size !== targets.length) throw new Error("HassleOff target registrations contain duplicate targetId values");
   return {
     port: intEnv("PORT", 8091),
     controllerToken,
@@ -37,6 +38,15 @@ export function loadHassleOffConfig(): HassleOffConfig {
     maxMaintenanceHoldMs: intEnv("HASSLEOFF_MAX_MAINTENANCE_HOLD_MS", 3_600_000),
     failedActionRetryMs: intEnv("HASSLEOFF_FAILED_ACTION_RETRY_MS", 15_000)
   };
+}
+
+function loadTargetsJson(): string {
+  const inline = process.env.HASSLEOFF_TARGETS_JSON?.trim();
+  const file = process.env.HASSLEOFF_TARGETS_FILE?.trim();
+  if (inline && file) throw new Error("Set only one of HASSLEOFF_TARGETS_JSON or HASSLEOFF_TARGETS_FILE");
+  if (inline) return inline;
+  if (file) return readFileSync(file, "utf8");
+  throw new Error("HASSLEOFF_TARGETS_JSON or HASSLEOFF_TARGETS_FILE is required");
 }
 
 function requiredEnv(name: string): string {

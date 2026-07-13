@@ -37,7 +37,7 @@ jobs:
         id: image
         run: |
           owner="${GITHUB_REPOSITORY_OWNER,,}"
-          echo "name=ghcr.io/${owner}/neuron-hassleoff" >> "$GITHUB_OUTPUT"
+          echo "name=ghcr.io/${owner}/hassleoff" >> "$GITHUB_OUTPUT"
       - uses: docker/metadata-action@v5
         id: meta
         with:

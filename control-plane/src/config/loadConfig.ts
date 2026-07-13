@@ -511,7 +511,8 @@ function loadHassleOffClientConfig(): AppConfig["hassleOff"] {
     baseUrl,
     controllerToken,
     controllerId: env("HASSLEOFF_CONTROLLER_ID") ?? "neuron",
-    requestTimeoutSeconds: intEnv("HASSLEOFF_REQUEST_TIMEOUT_SECONDS", 5)
+    requestTimeoutSeconds: intEnv("HASSLEOFF_REQUEST_TIMEOUT_SECONDS", 5),
+    failSafeTestTargetId: env("HASSLEOFF_FAILSAFE_TEST_TARGET_ID") ?? "hassleoff-failsafe-test"
   };
 }
 

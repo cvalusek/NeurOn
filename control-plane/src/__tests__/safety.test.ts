@@ -32,7 +32,8 @@ const clientConfig: HassleOffClientConfig = {
   baseUrl: "https://hassleoff.example.test",
   controllerToken: "controller-secret-token",
   controllerId: "neuron-test",
-  requestTimeoutSeconds: 2
+  requestTimeoutSeconds: 2,
+  failSafeTestTargetId: "hassleoff-failsafe-test"
 };
 
 const managedEnv = [
@@ -47,7 +48,8 @@ const managedEnv = [
   "CAPACITY_TARGET_GPU_REPROVISION_ON_RECOVERABLE_UNAVAILABLE",
   "HASSLEOFF_URL",
   "HASSLEOFF_CONTROLLER_TOKEN",
-  "HASSLEOFF_CONTROLLER_ID"
+  "HASSLEOFF_CONTROLLER_ID",
+  "HASSLEOFF_FAILSAFE_TEST_TARGET_ID"
 ];
 
 afterEach(() => {
@@ -143,6 +145,70 @@ describe("NeurOn HassleOff start interlock", () => {
   });
 });
 
+describe("HassleOff fail-safe test client", () => {
+  it("runs only the configured synthetic testOnly fake target", async () => {
+    const requests: Array<{ url: string; init?: RequestInit }> = [];
+    const succeededAt = "2026-07-13T12:00:00.000Z";
+    const client = new HassleOffClient(clientConfig, vi.fn(async (url: string, init?: RequestInit) => {
+      requests.push({ url, init });
+      if (url.endsWith("/v1/status")) {
+        return jsonResponse({
+          protocolVersion: "1",
+          service: { healthy: true, ready: true, armed: true },
+          targets: [{
+            targetId: "hassleoff-failsafe-test",
+            registrationId: "hassleoff-failsafe-test-v1",
+            actionType: "fake",
+            testOnly: true,
+            armed: false
+          }]
+        });
+      }
+      return jsonResponse({
+        protocolVersion: "1",
+        targetId: "hassleoff-failsafe-test",
+        succeeded: true,
+        lastFullTripTestSucceededAt: succeededAt,
+        auditEventId: 42
+      });
+    }) as typeof fetch);
+
+    await expect(client.runFailSafeTest()).resolves.toEqual({
+      targetId: "hassleoff-failsafe-test",
+      succeeded: true,
+      lastFullTripTestSucceededAt: succeededAt,
+      auditEventId: 42
+    });
+    expect(requests.map((request) => request.url)).toEqual([
+      "https://hassleoff.example.test/v1/status",
+      "https://hassleoff.example.test/v1/targets/hassleoff-failsafe-test/trip-test"
+    ]);
+    expect(JSON.parse(String(requests[1].init?.body))).toEqual({
+      protocolVersion: "1",
+      targetId: "hassleoff-failsafe-test"
+    });
+  });
+
+  it("refuses a real registration before calling the trip-test endpoint", async () => {
+    const request = vi.fn(async (_url: string) => jsonResponse({
+      protocolVersion: "1",
+      service: { healthy: true, ready: true, armed: true },
+      targets: [{
+        targetId: "hassleoff-failsafe-test",
+        registrationId: "real-target-v1",
+        actionType: "runpod-stop",
+        testOnly: false,
+        armed: true
+      }]
+    }));
+    const client = new HassleOffClient(clientConfig, request as typeof fetch);
+
+    await expect(client.runFailSafeTest()).rejects.toThrow("must be registered as testOnly with a fake action");
+    expect(request).toHaveBeenCalledTimes(1);
+    expect(request.mock.calls[0][0]).toBe("https://hassleoff.example.test/v1/status");
+  });
+});
+
 describe("stale trip-test intentional shutdown", () => {
   it("routes only the exact intended shutdown through HassleOff when the full trip test is stale", async () => {
     const provider = providerSpy();
@@ -151,7 +217,7 @@ describe("stale trip-test intentional shutdown", () => {
       const body = init?.body ? JSON.parse(String(init.body)) as Record<string, unknown> : undefined;
       requests.push({ url, body });
       if (url.endsWith("/v1/status")) {
-        return jsonResponse({ protocolVersion: "1", service: { armed: true, ready: true } });
+        return jsonResponse({ protocolVersion: "1", service: { armed: true, ready: true }, targets: [] });
       }
       return jsonResponse({ protocolVersion: "1", targetId: body?.targetId, requestId: body?.requestId, stopped: true });
     });
@@ -187,6 +253,7 @@ describe("stale trip-test intentional shutdown", () => {
     const freshClient = new HassleOffClient(clientConfig, vi.fn(async () => jsonResponse({
       protocolVersion: "1",
       service: { armed: true, ready: true },
+      targets: [],
       lastFullTripTestSucceededAt: new Date().toISOString()
     })) as typeof fetch);
     await new HassleOffCapacityProvider(freshProvider, freshClient).ensureTargetOff(target);
@@ -339,6 +406,7 @@ describe("safety configuration", () => {
     process.env.HASSLEOFF_URL = "https://hassleoff.example.test";
     process.env.HASSLEOFF_CONTROLLER_TOKEN = "controller-token";
     process.env.HASSLEOFF_CONTROLLER_ID = "neuron-prod";
+    process.env.HASSLEOFF_FAILSAFE_TEST_TARGET_ID = "hassleoff-failsafe-test";
     process.env.CAPACITY_TARGETS_JSON = JSON.stringify([{
       id: "rented-a",
       displayName: "Rented A",
@@ -352,7 +420,11 @@ describe("safety configuration", () => {
       activationPolicy: { reprovisionOnRecoverableUnavailable: true }
     }]);
     const jsonConfig = await loadConfig();
-    expect(jsonConfig.config.hassleOff).toMatchObject({ baseUrl: "https://hassleoff.example.test", controllerId: "neuron-prod" });
+    expect(jsonConfig.config.hassleOff).toMatchObject({
+      baseUrl: "https://hassleoff.example.test",
+      controllerId: "neuron-prod",
+      failSafeTestTargetId: "hassleoff-failsafe-test"
+    });
     expect(jsonConfig.config.capacityTargets[0]).toMatchObject({
       hassleOff: { protected: true, leaseDurationSeconds: 90, staleTripTestShutdown: { enabled: true, maxAgeSeconds: 7_200 } },
       activationPolicy: { reprovisionOnRecoverableUnavailable: true }

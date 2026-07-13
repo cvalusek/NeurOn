@@ -1,5 +1,6 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { buildApp } from "../app.js";
+import { SharedPasswordAuthProvider } from "../auth/SharedPasswordAuthProvider.js";
 import type { AppConfig, ModelDefinition } from "../domain/types.js";
 import { shouldBootstrapRuntimeModels } from "../services/RuntimeModelDiscovery.js";
 
@@ -612,6 +613,175 @@ describe("API authentication context", () => {
   });
 });
 
+describe("HassleOff admin safety UI", () => {
+  const safetyConfig: AppConfig = {
+    ...config,
+    cookieSecret: "test-cookie-secret",
+    adminUsers: ["actual"],
+    hassleOff: {
+      baseUrl: "http://hassleoff.example.test:8091",
+      controllerToken: "controller-token-never-in-browser",
+      controllerId: "neuron-test",
+      requestTimeoutSeconds: 2,
+      failSafeTestTargetId: "hassleoff-failsafe-test"
+    }
+  };
+  const auth = { authorization: `Basic ${Buffer.from("actual:secret").toString("base64")}` };
+
+  it("shows an actionable unconfigured state without changing the default deployment", async () => {
+    process.env.USE_FAKE_PROVIDER = "true";
+    const { app } = await buildApp(config, models);
+    try {
+      const page = await app.inject({ method: "GET", url: "/admin/hassleoff", headers: auth });
+      expect(page.statusCode).toBe(200);
+      expect(page.body).toContain("configured: no");
+      expect(page.body).toContain("Controller URL:");
+      expect(page.body).toContain("Not configured");
+      expect(page.body).not.toContain(">Run fail-safe test</button>");
+    } finally {
+      await app.close();
+    }
+  });
+
+  it("shows server-side readiness and runs the confirmed synthetic fail-safe test", async () => {
+    process.env.USE_FAKE_PROVIDER = "true";
+    const requests: Array<{ url: string; init?: RequestInit }> = [];
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      requests.push({ url, init });
+      if (url.endsWith("/v1/status")) return jsonResponse({
+        protocolVersion: "1",
+        service: { healthy: true, ready: true, armed: true, registrationIssues: [] },
+        lastFullTripTestSucceededAt: "2026-07-13T11:00:00.000Z",
+        tripTests: [{ targetId: "hassleoff-failsafe-test", lastSucceededAt: "2026-07-13T12:00:00.000Z", auditEventId: 76 }],
+        targets: [{
+          targetId: "hassleoff-failsafe-test",
+          registrationId: "hassleoff-failsafe-test-v1",
+          displayName: "HassleOff fail-safe test",
+          actionType: "fake",
+          testOnly: true,
+          armed: false
+        }]
+      });
+      if (url.endsWith("/v1/targets/hassleoff-failsafe-test/trip-test")) return jsonResponse({
+        protocolVersion: "1",
+        targetId: "hassleoff-failsafe-test",
+        succeeded: true,
+        lastFullTripTestSucceededAt: "2026-07-13T12:00:00.000Z",
+        auditEventId: 77
+      });
+      throw new Error(`Unexpected test request: ${url}`);
+    }));
+    const { app } = await buildApp(safetyConfig, models);
+
+    try {
+      const page = await app.inject({ method: "GET", url: "/admin/hassleoff", headers: auth });
+      expect(page.statusCode).toBe(200);
+      expect(page.body).toContain("HassleOff safety");
+      expect(page.body).toContain("Last successful fail-safe test");
+      expect(page.body).toContain("audit #76");
+      expect(page.body).toContain(">Run fail-safe test</button>");
+      expect(page.body).not.toContain("controller-token-never-in-browser");
+      const csrfToken = page.body.match(/name="csrfToken" value="([^"]+)"/)?.[1];
+      expect(csrfToken).toBeTruthy();
+
+      const unconfirmed = await app.inject({
+        method: "POST",
+        url: "/admin/hassleoff/fail-safe-test",
+        headers: { ...auth, "content-type": "application/x-www-form-urlencoded" },
+        payload: new URLSearchParams({ csrfToken: csrfToken! }).toString()
+      });
+      expect(decodeURIComponent(unconfirmed.headers.location!)).toContain("Confirm the synthetic fail-safe test");
+      expect(requests).toHaveLength(1);
+
+      const run = await app.inject({
+        method: "POST",
+        url: "/admin/hassleoff/fail-safe-test",
+        headers: { ...auth, "content-type": "application/x-www-form-urlencoded" },
+        payload: new URLSearchParams({ csrfToken: csrfToken!, confirm: "yes" }).toString()
+      });
+      expect(run.statusCode).toBe(302);
+      expect(decodeURIComponent(run.headers.location!)).toContain("HassleOff fail-safe test succeeded");
+      expect(requests.map((request) => request.url)).toEqual([
+        "http://hassleoff.example.test:8091/v1/status",
+        "http://hassleoff.example.test:8091/v1/status",
+        "http://hassleoff.example.test:8091/v1/targets/hassleoff-failsafe-test/trip-test"
+      ]);
+      expect(JSON.parse(String(requests[2].init?.body))).toEqual({
+        protocolVersion: "1",
+        targetId: "hassleoff-failsafe-test"
+      });
+    } finally {
+      await app.close();
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("does not expose the command to non-admin users", async () => {
+    process.env.USE_FAKE_PROVIDER = "true";
+    const request = vi.fn();
+    vi.stubGlobal("fetch", request);
+    const { app } = await buildApp(safetyConfig, models);
+    try {
+      const nonAdminAuth = { authorization: `Basic ${Buffer.from("other:secret").toString("base64")}` };
+      const page = await app.inject({ method: "GET", url: "/admin/hassleoff", headers: nonAdminAuth });
+      expect(page.statusCode).toBe(403);
+      expect(request).not.toHaveBeenCalled();
+    } finally {
+      await app.close();
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("cannot trip a real provider registration even with a valid action token", async () => {
+    process.env.USE_FAKE_PROVIDER = "true";
+    const requests: string[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      requests.push(url);
+      return jsonResponse({
+        protocolVersion: "1",
+        service: { healthy: true, ready: true, armed: true, registrationIssues: [] },
+        targets: [{
+          targetId: "hassleoff-failsafe-test",
+          registrationId: "real-provider-target-v1",
+          actionType: "runpod-stop",
+          testOnly: false,
+          armed: true
+        }]
+      });
+    }));
+    const { app } = await buildApp(safetyConfig, models);
+
+    try {
+      const page = await app.inject({ method: "GET", url: "/admin/hassleoff", headers: auth });
+      expect(page.body).not.toContain(">Run fail-safe test</button>");
+      expect(page.body).not.toContain("name=\"csrfToken\"");
+      const csrfToken = new SharedPasswordAuthProvider("secret", ["actual"], "test-cookie-secret").createState({
+        purpose: "hassleoff-fail-safe-test",
+        username: "actual",
+        targetId: "hassleoff-failsafe-test",
+        expiresAt: Date.now() + 60_000
+      });
+      const attempted = await app.inject({
+        method: "POST",
+        url: "/admin/hassleoff/fail-safe-test",
+        headers: { ...auth, "content-type": "application/x-www-form-urlencoded" },
+        payload: new URLSearchParams({ csrfToken, confirm: "yes" }).toString()
+      });
+      expect(decodeURIComponent(attempted.headers.location!)).toContain("must be registered as testOnly with a fake action");
+      expect(requests).toEqual([
+        "http://hassleoff.example.test:8091/v1/status",
+        "http://hassleoff.example.test:8091/v1/status"
+      ]);
+      expect(requests.some((url) => url.endsWith("/trip-test"))).toBe(false);
+    } finally {
+      await app.close();
+      vi.unstubAllGlobals();
+    }
+  });
+});
+
 describe("runtime model bootstrap selection", () => {
   it("discovers models by default when a target has no configured models unless disabled", () => {
     expect(shouldBootstrapRuntimeModels({ modelIds: [] })).toBe(true);
@@ -620,3 +790,7 @@ describe("runtime model bootstrap selection", () => {
     expect(shouldBootstrapRuntimeModels({ modelIds: ["configured"], modelDiscovery: { bootstrapOnStartup: true } })).toBe(true);
   });
 });
+
+function jsonResponse(body: unknown, status = 200): Response {
+  return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
+}

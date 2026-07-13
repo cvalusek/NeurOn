@@ -24,9 +24,24 @@ hassleoff/            Separately deployable dead-man watchdog
 Detailed design and operations notes live in
 [control-plane/docs](control-plane/docs/index.md).
 
-## Safe HassleOff Stack
+## Optional HassleOff
 
-Run NeurOn plus HassleOff with fake providers only, without loading a default
+The normal Compose file includes HassleOff as an opt-in profile. After setting
+the shared controller settings and a target-registration file as described in
+the [HassleOff operating guide](control-plane/docs/hassleoff.md), start the
+watchdog and then NeurOn:
+
+```bash
+docker compose --profile hassleoff up -d hassleoff
+docker compose up -d neuron
+```
+
+HassleOff defaults to `http://localhost:8091`; its admin status and safe
+synthetic test are at **Admin > HassleOff safety** in NeurOn. Running
+`docker compose up -d neuron` without the profile preserves the default
+NeurOn-only experience.
+
+For an isolated fake-only verification stack that does not load a default
 `.env` file:
 
 ```bash
@@ -34,8 +49,7 @@ docker compose --env-file control-plane/examples/compose-hassleoff.properties -f
 ```
 
 NeurOn is at `http://localhost:18090`; HassleOff health/readiness is at
-`http://localhost:18091/healthz` and `http://localhost:18091/readyz`. See the
-[HassleOff operating guide](control-plane/docs/hassleoff.md).
+`http://localhost:18091/healthz` and `http://localhost:18091/readyz`.
 
 ## Quick Start
 
@@ -48,7 +62,7 @@ cp .env.example .env
 Run NeurOn locally:
 
 ```bash
-docker compose up --build control-plane
+docker compose up --build neuron
 ```
 
 Open `http://localhost:8090`, sign in with any username and the configured

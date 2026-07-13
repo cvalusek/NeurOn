@@ -1,7 +1,7 @@
 ---
 type: Reference
 title: HassleOff Safety Watchdog
-description: Dead-man leases, start interlock, synthetic trip tests, maintenance holds, and scoped shutdown behavior.
+description: Dead-man leases, start interlock, a synthetic fail-safe test, maintenance holds, and scoped shutdown behavior.
 tags: [safety, watchdog, leases, operations]
 timestamp: 2026-07-13T00:00:00Z
 ---
@@ -19,7 +19,10 @@ Ground Control must not call RunPod or HassleOff directly.
 
 ## Registration And Action Scope
 
-`HASSLEOFF_TARGETS_JSON` is a required, non-empty registration list. Each entry
+Set exactly one target-registration source. `HASSLEOFF_TARGETS_FILE` is
+preferred for local and container operation; `HASSLEOFF_TARGETS_JSON` remains
+available for deployment systems that already supply structured environment
+configuration. The selected source must contain a non-empty list. Each entry
 has a stable `targetId`, a version-like `registrationId`, and exactly one stop
 action:
 
@@ -31,12 +34,13 @@ action:
     "action": {
       "type": "runpod-stop",
       "podId": "the-exact-pod-id",
-      "apiKeyEnv": "RUNPOD_HASSLEOFF_KEY"
+      "apiKeyEnv": "HASSLEOFF_RUNPOD_API_KEY"
     }
   },
   {
-    "targetId": "hassleoff-gfci",
-    "registrationId": "hassleoff-gfci-v1",
+    "targetId": "hassleoff-failsafe-test",
+    "registrationId": "hassleoff-failsafe-test-v1",
+    "displayName": "HassleOff fail-safe test",
     "testOnly": true,
     "action": { "type": "fake" }
   }
@@ -112,11 +116,11 @@ Authenticated `GET /v1/status` reports:
 - the target-scoped maintenance hold, if any;
 - the last trip/action result;
 - recent destructive-action audit events; and
-- the last successful complete synthetic trip test.
+- the last successful HassleOff fail-safe test.
 
 `GET /v1/audit?targetId=<id>&limit=100` returns the durable audit trail. Events
 include lease acceptance/rejection, expiry decisions, maintenance hold changes,
-provider stop start/success/failure, and full trip-test success. Tokens and
+provider stop start/success/failure, and complete fail-safe-test success. Tokens and
 provider credentials are never included.
 
 ## Maintenance Holds
@@ -141,26 +145,27 @@ it cannot affect another target. When the hold expires, an already expired
 lease trips on the same watchdog pass. There is deliberately no indefinite or
 global disable.
 
-## GFCI-Style Synthetic Test
+## HassleOff Fail-Safe Test
 
-The complete test path is restricted to a registration with both
+The complete synthetic test path is restricted to a registration with both
 `testOnly: true` and `action.type: "fake"`:
 
 ```http
-POST /v1/targets/hassleoff-gfci/trip-test
+POST /v1/targets/hassleoff-failsafe-test/trip-test
 
 {
   "protocolVersion": "1",
-  "targetId": "hassleoff-gfci"
+  "targetId": "hassleoff-failsafe-test"
 }
 ```
 
-HassleOff uses the normal lease acceptance logic, deliberately expires that
-lease, runs the normal trip decision and action path, confirms the durable
-success audit, and stores `lastFullTripTestSucceededAt`. It cannot run against a
-real action registration.
+The `/trip-test` route is the internal API behind the operator-facing
+fail-safe test. HassleOff uses the normal lease acceptance logic, deliberately
+expires that lease, runs the normal trip decision and action path, confirms the
+durable success audit, and stores `lastFullTripTestSucceededAt`. It cannot run
+against a real action registration.
 
-Real-target trip testing remains disabled by default. An explicit NeurOn target
+Real-target fail-safe testing remains disabled by default. An explicit NeurOn target
 policy can instead route a shutdown NeurOn already intends to perform through
 HassleOff when the synthetic test timestamp is stale:
 
@@ -191,6 +196,7 @@ Deployment-level client configuration is:
 - `HASSLEOFF_CONTROLLER_TOKEN`
 - `HASSLEOFF_CONTROLLER_ID`
 - `HASSLEOFF_REQUEST_TIMEOUT_SECONDS` (default `5`)
+- `HASSLEOFF_FAILSAFE_TEST_TARGET_ID` (default `hassleoff-failsafe-test`)
 
 Target protection is opt-in through `hassleOff.protected` or
 `CAPACITY_TARGET_<KEY>_HASSLEOFF_PROTECTED=true`. Unprotected targets retain
@@ -204,7 +210,7 @@ explicit target failure; NeurOn never silently bypasses the interlock.
 
 - `PORT` (default `8091`)
 - `HASSLEOFF_CONTROLLER_TOKEN` (required, at least 16 characters)
-- `HASSLEOFF_TARGETS_JSON` (required, non-empty)
+- exactly one of `HASSLEOFF_TARGETS_FILE` or `HASSLEOFF_TARGETS_JSON`
 - `HASSLEOFF_SQLITE_PATH` (default `./data/hassleoff.db`)
 - `HASSLEOFF_CHECK_INTERVAL_MS` (default `5000`)
 - `HASSLEOFF_MAX_CLOCK_SKEW_MS` (default `10000`)
@@ -216,17 +222,17 @@ explicit target failure; NeurOn never silently bypasses the interlock.
 ## Published Container Image
 
 The dedicated GitHub Actions workflow publishes HassleOff to
-`ghcr.io/cvalusek/neuron-hassleoff`. It does not overwrite the NeurOn
+`ghcr.io/cvalusek/hassleoff`. It does not overwrite the NeurOn
 control-plane image. Default-branch publications receive `latest`, `main`, and
 an immutable `sha-<full-commit-sha>` tag. Prefer the full-SHA tag for external
 failure-domain deployments.
 
-The workflow leaves package visibility unchanged, so the GHCR package remains
-private or repository-inherited. After authenticating Docker with `read:packages`
-access, pull a pinned image with:
+The workflow leaves package visibility repository-inherited. This repository
+is public, so the inherited package can be pulled without changing package
+visibility. Pull a pinned image with:
 
 ```bash
-docker pull ghcr.io/cvalusek/neuron-hassleoff:sha-<full-commit-sha>
+docker pull ghcr.io/cvalusek/hassleoff:sha-<full-commit-sha>
 ```
 
 Mount durable storage at `/app/data` (or set another writable
@@ -234,10 +240,101 @@ Mount durable storage at `/app/data` (or set another writable
 registrations through the deployment's secret/configuration mechanism. Do not
 bake either value into the image.
 
-## Safe Local Operation
+## Normal Local Compose Operation
 
-The repository includes a standalone fake-only stack. The explicit properties
-file prevents Docker Compose from loading a default `.env` file:
+HassleOff is an optional `hassleoff` profile in the normal root Compose file.
+The default command remains NeurOn-only and does not fail when HassleOff has
+not been configured or launched:
+
+```bash
+docker compose up -d neuron
+```
+
+The optional service uses `ghcr.io/cvalusek/hassleoff:latest` by default,
+publishes port `8091` unless overridden, stores SQLite in the named
+`hassleoff-data` volume, mounts a target-registration file read-only, and has a
+readiness healthcheck. It has no Compose dependency on NeurOn in either
+direction.
+
+Use this enablement order:
+
+1. Leave every real target's `hassleOff.protected` policy false. Copy
+   `hassleoff/examples/targets.local.json` to the ignored file
+   `hassleoff/targets.local.private.json`. Keep its
+   `hassleoff-failsafe-test` registration unchanged. Add any real registration
+   only after verifying its exact `targetId`, resource ID, and action.
+2. Set the following values in the operator's local configuration. Generate a
+   unique shared token of at least 16 characters; the same value is supplied to
+   NeurOn and HassleOff. Do not commit either credential.
+
+   ```env
+   HASSLEOFF_URL=http://hassleoff:8091
+   HASSLEOFF_CONTROLLER_TOKEN=<random-shared-controller-token-at-least-16-characters>
+   HASSLEOFF_CONTROLLER_ID=neuron-local
+   HASSLEOFF_REQUEST_TIMEOUT_SECONDS=5
+   HASSLEOFF_FAILSAFE_TEST_TARGET_ID=hassleoff-failsafe-test
+   HASSLEOFF_HOST_PORT=8091
+   HASSLEOFF_IMAGE=ghcr.io/cvalusek/hassleoff:latest
+   HASSLEOFF_SQLITE_PATH=/app/data/hassleoff.db
+   HASSLEOFF_TARGETS_FILE_HOST=./hassleoff/targets.local.private.json
+   HASSLEOFF_RUNPOD_API_KEY=<provider-key-referenced-by-apiKeyEnv>
+   ```
+
+   A real RunPod registration references the credential by variable name; it
+   never contains the credential itself:
+
+   ```json
+   {
+     "targetId": "the-exact-neuron-target-id",
+     "registrationId": "the-exact-neuron-target-id-v1",
+     "action": {
+       "type": "runpod-stop",
+       "podId": "the-exact-provider-resource-id",
+       "apiKeyEnv": "HASSLEOFF_RUNPOD_API_KEY"
+     }
+   }
+   ```
+
+3. Start only the optional watchdog and wait for readiness:
+
+   ```bash
+   docker compose --profile hassleoff up -d hassleoff
+   curl http://localhost:8091/readyz
+   ```
+
+4. Start or recreate NeurOn so it receives the internal URL and controller
+   settings:
+
+   ```bash
+   docker compose up -d neuron
+   ```
+
+5. Sign in to `http://localhost:8090`, open **Admin > HassleOff safety**, and
+   confirm configured, reachable, ready, and armed all show `yes`. Select the
+   synthetic confirmation checkbox and choose **Run fail-safe test**. Confirm
+   that **Last successful fail-safe test** shows the new time.
+6. Only after that succeeds, opt in the exact real target with
+   `hassleOff.protected: true`, or with its env-expanded settings:
+
+   ```env
+   CAPACITY_TARGET_<KEY>_HASSLEOFF_PROTECTED=true
+   CAPACITY_TARGET_<KEY>_HASSLEOFF_LEASE_DURATION_SECONDS=120
+   CAPACITY_TARGET_<KEY>_HASSLEOFF_SHUTDOWN_ON_STALE_TRIP_TEST=false
+   CAPACITY_TARGET_<KEY>_HASSLEOFF_TRIP_TEST_MAX_AGE_SECONDS=86400
+   ```
+
+   Recreate NeurOn after changing target configuration. Keep intentional
+   stale-test shutdown routing false unless the exact-target behavior described
+   above is deliberately required.
+
+The UI controller token is never sent to the browser. The UI issues the
+authenticated internal `/trip-test` request server-side and only for the
+configured registration when it is both `testOnly` and `fake`.
+
+## Isolated Fake Stack
+
+For verification that must not load a default `.env`, use the standalone
+fake-only stack and its explicit empty properties file:
 
 ```bash
 docker compose --env-file control-plane/examples/compose-hassleoff.properties -f docker-compose.hassleoff.yml up --build
@@ -245,17 +342,15 @@ docker compose --env-file control-plane/examples/compose-hassleoff.properties -f
 
 Open NeurOn at `http://localhost:18090` and use the local password documented in
 the Compose file. HassleOff liveness and readiness are at
-`http://localhost:18091/healthz` and `http://localhost:18091/readyz`.
+`http://localhost:18091/healthz` and `http://localhost:18091/readyz`. Both
+registered actions are fake, so this stack contains no provider resource ID or
+credential.
 
-Run the safe full trip test:
+The authenticated direct-HTTP fallback for the same safe test is:
 
 ```bash
 curl -H "Authorization: Bearer local-development-controller-token" \
   -H "Content-Type: application/json" \
-  -d '{"protocolVersion":"1","targetId":"hassleoff-gfci"}' \
-  http://localhost:18091/v1/targets/hassleoff-gfci/trip-test
+  -d '{"protocolVersion":"1","targetId":"hassleoff-failsafe-test"}' \
+  http://localhost:18091/v1/targets/hassleoff-failsafe-test/trip-test
 ```
-
-Both registered actions in this stack are fake. It contains no RunPod ID or
-provider credential and cannot start, stop, terminate, or provision real
-infrastructure.

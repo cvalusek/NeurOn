@@ -1,0 +1,9 @@
+[
+  {
+    "targetId": "hassleoff-failsafe-test",
+    "registrationId": "hassleoff-failsafe-test-v1",
+    "displayName": "HassleOff fail-safe test",
+    "testOnly": true,
+    "action": { "type": "fake" }
+  }
+]

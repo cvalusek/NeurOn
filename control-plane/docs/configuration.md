@@ -143,6 +143,7 @@ RUNTIME_PROFILES_JSON=[{"id":"prefer-nightly","name":"PreFer Nightly","type":"do
 - `HASSLEOFF_CONTROLLER_TOKEN`
 - `HASSLEOFF_CONTROLLER_ID`
 - `HASSLEOFF_REQUEST_TIMEOUT_SECONDS`
+- `HASSLEOFF_FAILSAFE_TEST_TARGET_ID`
 
 Production-friendly defaults are intentionally calmer than local development:
 

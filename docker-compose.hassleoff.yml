@@ -5,22 +5,22 @@ services:
     build:
       context: ./hassleoff
       dockerfile: Dockerfile
-    image: neuron-hassleoff:local
-    container_name: neuron-hassleoff-local
+    image: hassleoff:local
+    container_name: hassleoff-fake-local
     restart: on-failure
     ports:
       - "18091:8091"
     volumes:
-      - ./data/hassleoff-local:/app/data
+      - ./data/hassleoff-failsafe-local:/app/data
+      - ./hassleoff/examples/targets.fake-stack.json:/app/config/targets.json:ro
     environment:
       PORT: "8091"
       HASSLEOFF_CONTROLLER_TOKEN: local-development-controller-token
       HASSLEOFF_SQLITE_PATH: /app/data/hassleoff.db
+      HASSLEOFF_TARGETS_FILE: /app/config/targets.json
       HASSLEOFF_CHECK_INTERVAL_MS: "1000"
       HASSLEOFF_MIN_LEASE_MS: "5000"
       HASSLEOFF_MAX_LEASE_MS: "120000"
-      HASSLEOFF_TARGETS_JSON: >-
-        [{"targetId":"rented-fake","registrationId":"rented-fake-local-v1","displayName":"Safe rented-target simulation","action":{"type":"fake"}},{"targetId":"hassleoff-gfci","registrationId":"hassleoff-gfci-local-v1","displayName":"HassleOff synthetic trip target","testOnly":true,"action":{"type":"fake"}}]
     healthcheck:
       test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:8091/readyz"]
       interval: 2s
@@ -53,5 +53,6 @@ services:
       HASSLEOFF_URL: http://hassleoff:8091
       HASSLEOFF_CONTROLLER_TOKEN: local-development-controller-token
       HASSLEOFF_CONTROLLER_ID: neuron-safety-local
+      HASSLEOFF_FAILSAFE_TEST_TARGET_ID: hassleoff-failsafe-test
       HASSLEOFF_REQUEST_TIMEOUT_SECONDS: "2"
       RECONCILER_INTERVAL_SECONDS: "2"

@@ -1,0 +1,15 @@
+[
+  {
+    "targetId": "rented-fake",
+    "registrationId": "rented-fake-local-v1",
+    "displayName": "Safe rented-target simulation",
+    "action": { "type": "fake" }
+  },
+  {
+    "targetId": "hassleoff-failsafe-test",
+    "registrationId": "hassleoff-failsafe-test-v1",
+    "displayName": "HassleOff fail-safe test",
+    "testOnly": true,
+    "action": { "type": "fake" }
+  }
+]

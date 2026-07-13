@@ -3,6 +3,40 @@ import type { AuthMethodView } from "../services/AuthMethodService.js";
 import type { ProviderView } from "../services/ProviderService.js";
 import type { TargetView } from "../services/TargetService.js";
 
+export interface HassleOffSafetyView {
+  configured: boolean;
+  baseUrl?: string;
+  reachable: boolean;
+  healthy?: boolean;
+  ready?: boolean;
+  armed?: boolean;
+  registrationIssues: string[];
+  diagnostic?: string;
+  lastSuccessfulFailSafeTestAt?: string;
+  lastSuccessfulFailSafeTestAuditEventId?: number;
+  failSafeTestTarget: {
+    targetId: string;
+    registered: boolean;
+    eligible: boolean;
+    actionType?: string;
+    testOnly?: boolean;
+    armed?: boolean;
+  };
+  targets: Array<{
+    id: string;
+    displayName: string;
+    protected: boolean;
+    leaseDurationSeconds?: number;
+    registered: boolean;
+    registrationActionType?: string;
+    registrationTestOnly?: boolean;
+    registrationArmed?: boolean;
+  }>;
+  csrfToken?: string;
+  success?: string;
+  error?: string;
+}
+
 export function layout(title: string, user: AuthenticatedUser | undefined, body: string): string {
   return `<!doctype html>
 <html lang="en">
@@ -158,6 +192,7 @@ export function layout(title: string, user: AuthenticatedUser | undefined, body:
         <summary>Admin</summary>
         <div class="drawer-branch">
           <a href="/admin/auth">Authentication</a>
+          <a href="/admin/hassleoff">HassleOff safety</a>
         </div>
       </details>
       <details class="drawer-tree" open>
@@ -1091,6 +1126,103 @@ function targetRow(target: TargetView, providers: ProviderView[], runtimeProfile
   const deleteAction = target.editable ? targetDeletePanel(target) : `<p class="muted">This target is loaded from declarative config. Remove it from configuration or copy it to the database before deleting it here.</p>`;
   const users = target.modelIds.length > 0 ? `${target.modelIds.length} configured models` : "Discovery";
   return `<details class="drilldown"><summary><div><strong>${escapeHtml(target.displayName)}</strong><div class="target-status-meta"><span class="pill off">${escapeHtml(target.provider)}</span><span class="muted"><code>${escapeHtml(target.id)}</code></span><span class="muted">${escapeHtml(users)}</span></div><div data-target-status="${escapeHtml(target.id)}"><p class="muted">Loading status...</p></div></div><span class="badge ${target.source === "persisted" ? "active" : "done"}">${escapeHtml(target.source)}</span></summary><div class="drilldown-body" data-tabs><div class="tabbar"><button type="button" data-tab="view" aria-selected="true">View</button><button type="button" data-tab="json" aria-selected="false">JSON</button><button type="button" data-tab="env" aria-selected="false">ENV</button><button type="button" data-tab="edit" aria-selected="false">Edit</button><button type="button" data-tab="delete" aria-selected="false">Delete</button></div>${details}<section class="tab-panel" data-tab-panel="edit" hidden><p class="muted">${target.editable ? "This target is stored in the database." : "This target is loaded from declarative config."}</p>${editAction}</section><section class="tab-panel" data-tab-panel="delete" hidden>${deleteAction}</section></div></details>`;
+}
+
+export function hassleOffSafetyPage(user: AuthenticatedUser, view: HassleOffSafetyView): string {
+  const servicePills = [
+    safetyPill("configured", view.configured),
+    safetyPill("reachable", view.reachable),
+    safetyPill("healthy", view.healthy),
+    safetyPill("ready", view.ready),
+    safetyPill("armed", view.armed)
+  ].join("");
+  const lastSuccess = safeDateLabel(view.lastSuccessfulFailSafeTestAt) ?? "Never";
+  const target = view.failSafeTestTarget;
+  const testAvailability = target.eligible
+    ? `<span class="badge active">synthetic fake target</span>`
+    : `<span class="badge failed">not eligible</span>`;
+  const runForm = view.csrfToken
+    ? `<form method="post" action="/admin/hassleoff/fail-safe-test" data-fail-safe-test-form data-target-id="${escapeHtml(target.targetId)}">
+        <input type="hidden" name="csrfToken" value="${escapeHtml(view.csrfToken)}">
+        <p><label><input type="checkbox" name="confirm" value="yes" required> I confirm this test is synthetic and must not call a real provider action.</label></p>
+        <div class="inline-actions">
+          <button type="submit" data-fail-safe-test-button>Run fail-safe test</button>
+          <span class="muted" role="status" aria-live="polite" data-fail-safe-test-status></span>
+        </div>
+      </form>`
+    : `<p class="muted">The command is available only when HassleOff is reachable, ready, armed, the configured target is registered as <code>testOnly</code> with a <code>fake</code> action, and <code>COOKIE_SECRET</code> is configured.</p>`;
+  const capacityTargets = view.targets.length
+    ? view.targets.map((capacityTarget) => `<section class="target-status-card">
+        <div class="target-status-head">
+          <div><strong>${escapeHtml(capacityTarget.displayName)}</strong><div class="muted"><code>${escapeHtml(capacityTarget.id)}</code></div></div>
+          <span class="badge ${capacityTarget.protected ? "active" : "done"}">${capacityTarget.protected ? "protected" : "unprotected"}</span>
+        </div>
+        <div class="target-status-meta">
+          <span class="pill ${capacityTarget.registered ? "healthy" : "off"}">${capacityTarget.registered ? "registered" : "not registered"}</span>
+          ${capacityTarget.registrationActionType ? `<span class="pill">${escapeHtml(capacityTarget.registrationActionType)}</span>` : ""}
+          ${capacityTarget.registrationTestOnly ? `<span class="pill">testOnly</span>` : ""}
+          ${capacityTarget.registrationArmed ? `<span class="pill healthy">armed</span>` : ""}
+          ${capacityTarget.leaseDurationSeconds ? `<span class="muted">Lease ${capacityTarget.leaseDurationSeconds}s</span>` : ""}
+        </div>
+      </section>`).join("")
+    : `<p class="muted">No NeurOn capacity targets are configured.</p>`;
+  return layout("HassleOff safety", user, `<section class="panel">
+    <h1>HassleOff safety</h1>
+    <p class="muted">Controller-token requests are made by NeurOn on the server. The token is never sent to this page.</p>
+    <div class="target-status-meta">${servicePills}</div>
+    ${view.baseUrl ? `<p><strong>Controller URL:</strong> <code>${escapeHtml(view.baseUrl)}</code></p>` : `<p><strong>Controller URL:</strong> <span class="muted">Not configured</span></p>`}
+    ${view.diagnostic ? `<p class="status" role="alert">${escapeHtml(view.diagnostic)}</p>` : ""}
+    ${view.registrationIssues.length ? `<div role="alert"><strong>Registration issues</strong><ul>${view.registrationIssues.map((issue) => `<li>${escapeHtml(issue)}</li>`).join("")}</ul></div>` : ""}
+  </section>
+  <section class="panel">
+    <h2>HassleOff fail-safe test</h2>
+    ${view.success ? `<div class="secret-box" role="status">${escapeHtml(view.success)}</div>` : ""}
+    ${view.error ? `<p class="status" role="alert">${escapeHtml(view.error)}</p>` : ""}
+    <p><strong>Last successful fail-safe test:</strong> ${escapeHtml(lastSuccess)}${view.lastSuccessfulFailSafeTestAuditEventId !== undefined ? ` <span class="muted">(audit #${escapeHtml(String(view.lastSuccessfulFailSafeTestAuditEventId))})</span>` : ""}</p>
+    <div class="target-status-card">
+      <div class="target-status-head"><div><strong>${escapeHtml(target.targetId)}</strong><div class="muted">Configured synthetic target</div></div>${testAvailability}</div>
+      <div class="target-status-meta">
+        <span class="pill ${target.registered ? "healthy" : "off"}">${target.registered ? "registered" : "not registered"}</span>
+        ${target.actionType ? `<span class="pill">${escapeHtml(target.actionType)}</span>` : ""}
+        ${target.testOnly ? `<span class="pill">testOnly</span>` : ""}
+        ${target.armed ? `<span class="pill healthy">armed</span>` : ""}
+      </div>
+    </div>
+    <p class="muted">The button calls the authenticated <code>/trip-test</code> API behind this fail-safe test. Both NeurOn and HassleOff reject any target that is not explicitly <code>testOnly</code> with a <code>fake</code> action.</p>
+    ${runForm}
+  </section>
+  <section class="panel">
+    <h2>NeurOn target protection</h2>
+    <div class="status-grid">${capacityTargets}</div>
+  </section>
+  <script type="module">
+    const form = document.querySelector('[data-fail-safe-test-form]');
+    form?.addEventListener('submit', (event) => {
+      if (!form.checkValidity()) return;
+      const targetId = form.dataset.targetId;
+      if (!window.confirm('Run the synthetic HassleOff fail-safe test for ' + targetId + '? No real provider action is permitted.')) {
+        event.preventDefault();
+        return;
+      }
+      const button = form.querySelector('[data-fail-safe-test-button]');
+      const status = form.querySelector('[data-fail-safe-test-status]');
+      button.disabled = true;
+      button.textContent = 'Running fail-safe test...';
+      status.textContent = 'Waiting for the complete lease-expiry and fake-action path.';
+    });
+  </script>`);
+}
+
+function safetyPill(label: string, value: boolean | undefined): string {
+  const state = value === undefined ? "unknown" : value ? "yes" : "no";
+  const css = value === true ? "healthy" : value === false ? "failed" : "off";
+  return `<span class="pill ${css}">${escapeHtml(label)}: ${state}</span>`;
+}
+
+function safeDateLabel(value: string | undefined): string | undefined {
+  if (!value) return undefined;
+  const date = new Date(value);
+  return Number.isFinite(date.getTime()) ? formatDate(date) : undefined;
 }
 
 function targetEditPanel(target: TargetView, providers: ProviderView[], runtimeProfiles: RuntimeProfile[]): string {
