@@ -213,6 +213,27 @@ explicit target failure; NeurOn never silently bypasses the interlock.
 - `HASSLEOFF_MAX_MAINTENANCE_HOLD_MS` (default `3600000`)
 - `HASSLEOFF_FAILED_ACTION_RETRY_MS` (default `15000`)
 
+## Published Container Image
+
+The dedicated GitHub Actions workflow publishes HassleOff to
+`ghcr.io/cvalusek/neuron-hassleoff`. It does not overwrite the NeurOn
+control-plane image. Default-branch publications receive `latest`, `main`, and
+an immutable `sha-<full-commit-sha>` tag. Prefer the full-SHA tag for external
+failure-domain deployments.
+
+The workflow leaves package visibility unchanged, so the GHCR package remains
+private or repository-inherited. After authenticating Docker with `read:packages`
+access, pull a pinned image with:
+
+```bash
+docker pull ghcr.io/cvalusek/neuron-hassleoff:sha-<full-commit-sha>
+```
+
+Mount durable storage at `/app/data` (or set another writable
+`HASSLEOFF_SQLITE_PATH`) and inject controller authentication and target
+registrations through the deployment's secret/configuration mechanism. Do not
+bake either value into the image.
+
 ## Safe Local Operation
 
 The repository includes a standalone fake-only stack. The explicit properties

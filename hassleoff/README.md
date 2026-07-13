@@ -22,3 +22,23 @@ pnpm test
 `HASSLEOFF_SQLITE_PATH` are required for a real process. Use
 `docker-compose.hassleoff.yml` from the repository root for a fake-only local
 stack that does not read a default `.env` file.
+
+## Published Image
+
+Main-branch builds publish the dedicated image
+`ghcr.io/cvalusek/neuron-hassleoff`. This is distinct from the control-plane
+image. Published tags are `latest`, `main`, and the immutable
+`sha-<full-commit-sha>`; pull the full-SHA tag for a pinned deployment.
+
+The workflow does not change GHCR package visibility. Authenticate Docker to
+`ghcr.io` with an account or token that can read the repository-inherited
+package, then pull it with:
+
+```bash
+docker pull ghcr.io/cvalusek/neuron-hassleoff:latest
+```
+
+Supply the required configuration from the deployment environment rather than
+embedding it in an image or command history. The image entrypoint runs
+`node dist/server.js`, listens on port `8091`, and expects durable data at the
+configured `HASSLEOFF_SQLITE_PATH` (normally a volume under `/app/data`).
