@@ -467,6 +467,7 @@ const targetFormSchema = z.object({
   displayName: z.string().optional(),
   providerId: z.string().min(1),
   modelIds: z.string().optional(),
+  trafficModelPrefixes: z.string().optional(),
   runtimeProfileId: z.string().optional(),
   runtimeProfileVariantId: z.string().optional(),
   healthUrl: z.string().optional(),
@@ -495,6 +496,8 @@ function targetFromForm(body: z.infer<typeof targetFormSchema>, provider: Capaci
   target.provider = provider.type;
   target.providerId = provider.id;
   target.modelIds = listField(body.modelIds);
+  const trafficModelPrefixes = listField(body.trafficModelPrefixes);
+  if (trafficModelPrefixes.length > 0) target.trafficModelPrefixes = trafficModelPrefixes;
   if (profileDiscovery(profile)) target.modelDiscovery = { bootstrapOnStartup: true };
   if (body.healthUrl) target.healthUrl = body.healthUrl;
   if (body.apiUrl) target.apiUrl = body.apiUrl;

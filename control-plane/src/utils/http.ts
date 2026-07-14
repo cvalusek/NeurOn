@@ -1,6 +1,7 @@
 import type { FastifyReply, FastifyRequest } from "fastify";
 import type { ApiKey, AuthenticatedUser, CapacityTarget, Reservation, TargetStatus } from "../domain/types.js";
 import type { ReservationCostEstimate } from "../services/CostEstimationService.js";
+import type { StartupRuntimeModelDiscoveryOutcome } from "../services/RuntimeModelDiscovery.js";
 
 export function requireUser(request: FastifyRequest): AuthenticatedUser {
   const user = request.user;
@@ -54,7 +55,13 @@ export function sendError(reply: FastifyReply, error: unknown, statusCode = 400)
   return reply.code(statusCode).send({ error: message });
 }
 
-export function targetJson(target: CapacityTarget, status?: TargetStatus, activeUsers: string[] = []) {
+export function targetJson(
+  target: CapacityTarget,
+  status?: TargetStatus,
+  activeUsers: string[] = [],
+  runtimeModelDiscoveredAt?: Date,
+  startupDiscoveryOutcome?: StartupRuntimeModelDiscoveryOutcome
+) {
   return {
     id: target.id,
     displayName: target.displayName,
@@ -62,6 +69,7 @@ export function targetJson(target: CapacityTarget, status?: TargetStatus, active
     providerId: target.providerId,
     modelIds: target.modelIds,
     modelsMax: target.modelsMax,
+    trafficModelPrefixes: target.trafficModelPrefixes,
     litellmDisplayPrefix: litellmDisplayPrefix(target),
     healthUrl: target.healthUrl,
     apiUrl: target.apiUrl,
@@ -70,6 +78,9 @@ export function targetJson(target: CapacityTarget, status?: TargetStatus, active
     observed: status?.observed ?? "stopped",
     message: status?.message ?? "Not checked",
     startupEstimate: status?.startupEstimate,
+    runtimeModelDiscovery: runtimeModelDiscoveredAt
+      ? { cached: true, discoveredAt: runtimeModelDiscoveredAt.toISOString(), startupOutcome: startupDiscoveryOutcome }
+      : { cached: false, startupOutcome: startupDiscoveryOutcome },
     activeUsers
   };
 }

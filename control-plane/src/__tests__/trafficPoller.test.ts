@@ -82,17 +82,18 @@ describe("TrafficPoller", () => {
     expect(reservations[0].modelIds).toEqual(["prefer/gemma-4b-e2b"]);
   });
 
-  it("uses the target traffic prefix from config instead of requiring prefer", async () => {
+  it("maps a target-specific LiteLLM prefix to the configured target", async () => {
     const configuredPrefixTarget: CapacityTarget = {
       ...target,
-      trafficModelPrefixes: ["runpod/"]
+      id: "local-docker",
+      trafficModelPrefixes: ["clint-desktop/"]
     };
     const repository = new InMemoryReservationRepository();
     const statuses = new InMemoryTargetStatusRepository();
     statuses.set({ targetId: configuredPrefixTarget.id, desired: "on", observed: "healthy", message: "Ready" });
     const source: TrafficSource = {
       async pollRecentTraffic(now = new Date()) {
-        return [{ modelId: "runpod/gemma-4b-e2b", seenAt: now }];
+        return [{ modelId: "clint-desktop/gemma-4-e2b", seenAt: now }];
       }
     };
 
@@ -102,7 +103,7 @@ describe("TrafficPoller", () => {
     const reservations = await repository.list();
     expect(reservations).toHaveLength(1);
     expect(reservations[0].targetIds).toEqual([configuredPrefixTarget.id]);
-    expect(reservations[0].modelIds).toEqual(["runpod/gemma-4b-e2b"]);
+    expect(reservations[0].modelIds).toEqual(["clint-desktop/gemma-4-e2b"]);
   });
 
   it("does not renew keepalive from stale LiteLLM traffic", async () => {

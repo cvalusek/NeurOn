@@ -501,6 +501,7 @@ describe("API authentication context", () => {
         displayName: "RunPod Qwen",
         providerId: "runpod",
         modelIds: "qwen",
+        trafficModelPrefixes: "runpod/",
         runpodPodId: "pod-qwen",
         runpodRuntimePort: "8080"
       }).toString()
@@ -516,6 +517,7 @@ describe("API authentication context", () => {
         displayName: "RunPod PreFer",
         providerId: "runpod",
         modelIds: "qwen,gemma",
+        trafficModelPrefixes: "clint-desktop/,prefer/",
         runpodPodId: "pod-prefer",
         runpodRuntimePort: "8081"
       }).toString()
@@ -526,9 +528,15 @@ describe("API authentication context", () => {
     const refreshed = await app.inject({ method: "GET", url: "/admin/targets", headers: auth });
     await app.close();
 
-    expect(targets.json().capacityTargets.map((target: { id: string }) => target.id)).toContain("runpod-prefer");
+    const storedTarget = targets.json().capacityTargets.find((target: { id: string }) => target.id === "runpod-prefer");
+    expect(storedTarget).toMatchObject({
+      trafficModelPrefixes: ["clint-desktop/", "prefer/"],
+      litellmDisplayPrefix: "clint-desktop/"
+    });
     expect(refreshed.body).toContain("RunPod PreFer");
     expect(refreshed.body).toContain("pod-prefer");
+    expect(refreshed.body).toContain("clint-desktop/");
+    expect(refreshed.body).toContain("LiteLLM model route prefixes");
     expect(refreshed.body).toContain("Save target");
   });
 
@@ -800,12 +808,13 @@ describe("runtime model bootstrap selection", () => {
     const bootstrap = vi.spyOn(runtimeModelDiscovery, "bootstrapTarget").mockResolvedValue(undefined);
     const auth = { authorization: `Basic ${Buffer.from("actual:secret").toString("base64")}` };
     try {
-      await bootstrapRuntimeModels();
+      const outcomes = await bootstrapRuntimeModels();
       const explicit = await app.inject({ method: "POST", url: "/api/admin/targets/t1/discover", headers: auth });
       const provisioned = await app.inject({ method: "POST", url: "/api/admin/targets/t1/provision", headers: auth });
 
       expect(explicit.statusCode).toBe(200);
       expect(provisioned.statusCode).toBe(200);
+      expect(outcomes).toEqual([{ targetId: "t1", outcome: "discovered", reason: "Runtime model discovery bootstrap completed." }]);
       expect(bootstrap).toHaveBeenCalledTimes(3);
     } finally {
       await app.close();

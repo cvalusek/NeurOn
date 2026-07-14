@@ -968,6 +968,8 @@ function targetCreateModal(providers: ProviderView[], runtimeProfiles: RuntimePr
         <p><label>API URL override<br><input name="apiUrl" type="text" placeholder="http://runtime.internal:8080/v1"></label></p>
         <p><label>Health URL override<br><input name="healthUrl" type="text" placeholder="http://runtime.internal:8080/health"></label></p>
         <p><label>Configured model IDs<br><input name="modelIds" type="text" placeholder="qwen-3.6,gemma-4"></label></p>
+        <p><label>LiteLLM model route prefixes<br><input name="trafficModelPrefixes" type="text" placeholder="clint-desktop/,prefer/"></label></p>
+        <p class="muted">Comma-separated prefixes link matching LiteLLM model names and traffic to this target.</p>
         <p class="muted">Leave models empty to rely on runtime discovery.</p>
       </details>
       <div class="actions"><button type="submit">Add target</button></div>
@@ -1108,7 +1110,13 @@ function targetAdminScript(providers: ProviderView[], runtimeProfiles: RuntimePr
       editSync();
     });
     const statusPill = (value) => '<span class="pill ' + String(value ?? '').replace(/[^a-z0-9_-]/gi, '') + '">' + escapeText(value) + '</span>';
-    const statusCard = (target) => '<div class="target-status-meta">' + statusPill(target.desired) + statusPill(target.observed) + '<span class="muted">' + escapeText(target.message) + '</span>' + (target.activeUsers?.length ? '<span class="muted">Users: ' + escapeText(target.activeUsers.join(', ')) + '</span>' : '<span class="muted">No active users</span>') + (target.needsProvisioning ? '<button type="button" data-provision-target="' + escapeText(target.id) + '">Provision</button>' : '') + '</div>';
+    const discoveryCache = (target) => target.runtimeModelDiscovery?.cached
+      ? '<span class="muted">Discovery cached ' + escapeText(new Date(target.runtimeModelDiscovery.discoveredAt).toLocaleString()) + '</span>'
+      : '<span class="muted">No discovery cache</span>';
+    const startupDiscovery = (target) => target.runtimeModelDiscovery?.startupOutcome
+      ? '<span class="muted">Startup discovery: ' + escapeText(target.runtimeModelDiscovery.startupOutcome.reason) + '</span>'
+      : '';
+    const statusCard = (target) => '<div class="target-status-meta">' + statusPill(target.desired) + statusPill(target.observed) + '<span class="muted">' + escapeText(target.message) + '</span>' + discoveryCache(target) + startupDiscovery(target) + (target.activeUsers?.length ? '<span class="muted">Users: ' + escapeText(target.activeUsers.join(', ')) + '</span>' : '<span class="muted">No active users</span>') + (target.needsProvisioning ? '<button type="button" data-provision-target="' + escapeText(target.id) + '">Provision</button>' : '') + '</div>';
     async function refreshTargetStatus() {
       const response = await fetch('/api/admin/targets');
       if (!response.ok) return;
@@ -1127,7 +1135,7 @@ function targetRow(target: TargetView, providers: ProviderView[], runtimeProfile
   const details = targetDetails(target);
   const editAction = target.editable
     ? targetEditPanel(target, providers, runtimeProfiles)
-    : `<form method="post" action="/admin/targets/${escapeHtml(target.id)}/copy-to-db"><button class="secondary" type="submit">Copy to DB</button></form>`;
+    : `<p class="muted">Copy this target to the database before editing settings such as LiteLLM model route prefixes.</p><form method="post" action="/admin/targets/${escapeHtml(target.id)}/copy-to-db"><button class="secondary" type="submit">Copy to DB</button></form>`;
   const deleteAction = target.editable ? targetDeletePanel(target) : `<p class="muted">This target is loaded from declarative config. Remove it from configuration or copy it to the database before deleting it here.</p>`;
   const users = target.modelIds.length > 0 ? `${target.modelIds.length} configured models` : "Discovery";
   return `<details class="drilldown"><summary><div><strong>${escapeHtml(target.displayName)}</strong><div class="target-status-meta"><span class="pill off">${escapeHtml(target.provider)}</span><span class="muted"><code>${escapeHtml(target.id)}</code></span><span class="muted">${escapeHtml(users)}</span></div><div data-target-status="${escapeHtml(target.id)}"><p class="muted">Loading status...</p></div></div><span class="badge ${target.source === "persisted" ? "active" : "done"}">${escapeHtml(target.source)}</span></summary><div class="drilldown-body" data-tabs><div class="tabbar"><button type="button" data-tab="view" aria-selected="true">View</button><button type="button" data-tab="json" aria-selected="false">JSON</button><button type="button" data-tab="env" aria-selected="false">ENV</button><button type="button" data-tab="edit" aria-selected="false">Edit</button><button type="button" data-tab="delete" aria-selected="false">Delete</button></div>${details}<section class="tab-panel" data-tab-panel="edit" hidden><p class="muted">${target.editable ? "This target is stored in the database." : "This target is loaded from declarative config."}</p>${editAction}</section><section class="tab-panel" data-tab-panel="delete" hidden>${deleteAction}</section></div></details>`;
@@ -1262,6 +1270,8 @@ function targetEditPanel(target: TargetView, providers: ProviderView[], runtimeP
       <p><label>API URL override<br><input name="apiUrl" type="text" value="${escapeHtml(target.apiUrl ?? "")}"></label></p>
       <p><label>Health URL override<br><input name="healthUrl" type="text" value="${escapeHtml(target.healthUrl ?? "")}"></label></p>
       <p><label>Configured model IDs<br><input name="modelIds" type="text" value="${escapeHtml(target.modelIds.join(","))}"></label></p>
+      <p><label>LiteLLM model route prefixes<br><input name="trafficModelPrefixes" type="text" value="${escapeHtml(target.trafficModelPrefixes?.join(",") ?? "")}"></label></p>
+      <p class="muted">Comma-separated prefixes link matching LiteLLM model names and traffic to this target.</p>
       <p class="muted">Leave models empty to rely on runtime discovery.</p>
     </details>
     <div class="actions"><button type="submit">Save target</button></div>
@@ -1296,7 +1306,7 @@ function targetDetails(target: CapacityTarget): string {
     ["Remote NeurOn target", target.neuron?.targetId]
   ].filter((entry): entry is [string, string] => entry[1] !== undefined && entry[1] !== "");
   const view = `<table><tbody>${viewRows.map(([label, value]) => `<tr><th>${escapeHtml(label)}</th><td>${escapeHtml(String(value))}</td></tr>`).join("")}</tbody></table>`;
-  const operations = `<div class="inline-actions" style="margin-top: 12px;"><button type="button" data-target-action="discover" data-target-id="${escapeHtml(target.id)}">Discover</button><button class="secondary" type="button" data-target-action="reconcile" data-target-id="${escapeHtml(target.id)}">Reconcile</button><button class="danger" type="button" data-target-action="force-stop" data-target-id="${escapeHtml(target.id)}">Force stop</button></div>`;
+  const operations = `<p class="muted">Discover models now refreshes the cached runtime catalog and may activate a stopped target.</p><div class="inline-actions" style="margin-top: 12px;"><button type="button" data-target-action="discover" data-target-id="${escapeHtml(target.id)}">Discover models now</button><button class="secondary" type="button" data-target-action="reconcile" data-target-id="${escapeHtml(target.id)}">Reconcile</button><button class="danger" type="button" data-target-action="force-stop" data-target-id="${escapeHtml(target.id)}">Force stop</button></div>`;
   return `<section class="tab-panel" data-tab-panel="view">${view}${operations}</section><section class="tab-panel" data-tab-panel="json" hidden><div class="inline-actions"><button type="button" data-copy="${escapeHtml(declarative)}">Copy JSON</button></div><pre>${escapeHtml(declarative)}</pre></section><section class="tab-panel" data-tab-panel="env" hidden><p class="muted">Profiles are create-time templates; ENV shows the expanded target config.</p><div class="inline-actions"><button type="button" data-copy="${escapeHtml(env)}">Copy ENV</button></div><pre>${escapeHtml(env)}</pre></section>`;
 }
 
@@ -1610,6 +1620,8 @@ function createTargetFromProviderModal(providers: ProviderView[], runtimeProfile
           <p><label>API URL override<br><input name="apiUrl" type="text" placeholder="http://runtime.internal:8080/v1"></label></p>
           <p><label>Health URL override<br><input name="healthUrl" type="text" placeholder="http://runtime.internal:8080/health"></label></p>
           <p><label>Configured model IDs<br><input name="modelIds" type="text" placeholder="qwen-3.6,gemma-4"></label></p>
+          <p><label>LiteLLM model route prefixes<br><input name="trafficModelPrefixes" type="text" placeholder="clint-desktop/,prefer/"></label></p>
+          <p class="muted">Comma-separated prefixes link matching LiteLLM model names and traffic to this target.</p>
           <p class="muted">Leave models empty to use runtime discovery.</p>
         </details>
         <div class="actions"><button type="submit">Create target</button></div>

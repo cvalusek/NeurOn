@@ -201,10 +201,25 @@ describe("reservation behavior", () => {
     });
 
     const catalog = new ModelCatalog([], [discoveryTarget]);
-    await new RuntimeModelDiscovery(catalog, repository).hydrateCachedTargets();
+    const discovery = new RuntimeModelDiscovery(catalog, repository);
+    await discovery.hydrateCachedTargets();
 
     expect(catalog.getModel("qwen-3.6")?.id).toBe("unsloth/Qwen3.6-35B-A3B-MTP-GGUF:UD-Q6_K_XL");
     expect(discoveryTarget.modelIds).toEqual(["unsloth/Qwen3.6-35B-A3B-MTP-GGUF:UD-Q6_K_XL"]);
+    expect(discovery.cachedDiscoveryAt(discoveryTarget.id)).toEqual(new Date("2026-06-29T12:00:00.000Z"));
+  });
+
+  it("treats an empty persisted runtime catalog as completed discovery", async () => {
+    const discoveryTarget: CapacityTarget = { id: "empty-discovery", displayName: "Empty Discovery", provider: "docker", modelIds: [] };
+    const repository = new InMemoryTargetModelDiscoveryRepository();
+    const discoveredAt = new Date("2026-06-29T13:00:00.000Z");
+    await repository.record({ targetId: discoveryTarget.id, discoveredAt, models: [] });
+
+    const discovery = new RuntimeModelDiscovery(new ModelCatalog([], [discoveryTarget]), repository);
+    await discovery.hydrateCachedTargets();
+
+    expect(discovery.cachedDiscoveryAt(discoveryTarget.id)).toEqual(discoveredAt);
+    expect(discoveryTarget.modelIds).toEqual([]);
   });
 
   it("marks active reservations failed when provider reports failure", async () => {

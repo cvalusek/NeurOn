@@ -51,15 +51,25 @@ The ownership invariant is:
   use the same serialized lifecycle lane. Different targets remain
   independent.
 
-On startup, NeurOn first hydrates discovered models from storage. Bootstrap
-then runs only for discovery-enabled targets that still have no configured or
-cached models. It also runs in the background after explicit provisioning for a
-discovery-enabled target with no configured models.
+On startup, NeurOn first records which targets request automatic bootstrap,
+then hydrates discovered models from storage. A persisted discovery record is a
+completed bootstrap marker even when the recorded catalog is empty. Startup
+reuses that cache and makes no provider, health, or model request for the
+target. A full coordinated discovery pass runs only when a requested target has
+no persisted record. The Admin Targets status shows the cache timestamp, and a
+startup log and status outcome record the cache reuse reason. SQLite and
+Postgres preserve this marker across process restarts; memory storage does not.
 
-Startup bootstrap, the admin Discover action, and post-provision background
-bootstrap all use this same operation path. Concurrent discovery requests for
-one target coalesce onto the in-flight result, and catalog reads are likewise
-coalesced. Discovery on different targets remains independent.
+`modelDiscovery.bootstrapOnStartup=true` requests initial automatic discovery;
+it does not mean rediscover on every NeurOn process start. Set it to `false` to
+disable automatic bootstrap. The authenticated **Discover models now** action
+is the explicit way to force a refresh. Background discovery after an explicit
+provisioning action remains independent of the process-start cache check.
+
+When startup actually needs discovery, it, the Admin action, and post-provision
+background discovery use the same operation path. Concurrent discovery
+requests for one target coalesce onto the in-flight result, and catalog reads
+are likewise coalesced. Discovery on different targets remains independent.
 
 Force stop has explicit precedence rules: while discovery is active for a
 target, force stop returns HTTP `409 Conflict` and does not call the provider.
@@ -86,11 +96,12 @@ shows it in the browser instead of leaving only a generic failed result.
    configured `ghcr.io/cvalusek/prefer:latest` image is used only if an explicit
    provisioning action creates a missing container.
 3. Sign in as an admin and open **Admin > Targets > local-prefer**.
-4. Select **Discover** once and wait for the synchronous success or concrete
-   failure message. A second click while it is running joins the same discovery
-   operation.
+4. Select **Discover models now** once and wait for the synchronous success or
+   concrete failure message. A second click while it is running joins the same
+   discovery operation.
 5. On success, refresh the target/model view and confirm the runtime catalog is
    populated. On failure, use the displayed error and the matching NeurOn log
    entry to correct the underlying readiness or catalog issue before retrying.
 
-No storage migration or target configuration change is required.
+No storage migration or target configuration change is required. Existing
+persisted discovery records automatically suppress redundant startup passes.

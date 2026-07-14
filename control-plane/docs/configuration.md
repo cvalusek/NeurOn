@@ -462,7 +462,13 @@ Set `TRAFFIC_MODEL_PREFIXES` when LiteLLM logs model names with a route prefix,
 for example `prefer/gemma-4b-e2b`. Traffic whose model starts with one of those
 prefixes keeps the matching target warm even if runtime model discovery has not
 seen that exact LiteLLM-facing name. The prefix can be any target-specific
-route prefix, not only `prefer/`.
+route prefix, not only `prefer/`. The Admin target create and persisted-target
+edit forms expose the same comma-separated setting; for example,
+`clint-desktop/` maps
+`clint-desktop/gemma-4-e2b` model names and traffic to that target. The first
+traffic prefix is also the default `litellmDisplayPrefix` exposed to clients.
+For a declarative target, set the field in JSON/env configuration or use
+**Copy to DB** before editing it in Admin.
 
 Set `LITELLM_DISPLAY_PREFIX` separately when tools show a different
 LiteLLM-facing model name than the traffic log prefix. Use `__empty__` in
@@ -492,12 +498,21 @@ behind one or more Compose profiles.
 
 Explicit model config is the normal source of truth. Runtime discovery enriches
 models with IDs reported by the backend. It should not be treated as a solver.
-When a target has no configured or cached models, NeurOn bootstraps discovery
-on startup by starting the target, waiting for health, reading `/v1/models`,
-persisting the discovered models with a discovery timestamp, and releasing its
-target-scoped operation lease. Capacity started only for discovery is stopped
-when no reservation or traffic demand exists. Set `bootstrapOnStartup=false`
-to opt out.
+When a target has no configured models and no persisted discovery record,
+NeurOn bootstraps discovery on startup by starting the target, waiting for
+health, reading `/v1/models`, persisting the result with a discovery timestamp,
+and releasing its target-scoped operation lease. Capacity started only for
+discovery is stopped when no reservation or traffic demand exists.
+
+Before startup discovery runs, NeurOn hydrates persisted discovery records.
+Any record, including a successful empty catalog, satisfies automatic startup
+bootstrap. NeurOn then reuses the cache without calling the provider, health
+URL, or model endpoint. `bootstrapOnStartup=true` enables an initial bootstrap
+for a target with configured models; it does not force a refresh on every
+control-plane restart. Set it to `false` to opt out. Use the authenticated Admin
+**Discover models now** action when an operator wants to force a refresh.
+Reuse across process restarts requires `STORAGE_DRIVER=sqlite` or `postgres`;
+the `memory` driver has no persisted record after a restart.
 
 Optional bootstrap:
 
@@ -506,8 +521,8 @@ CAPACITY_TARGET_MULTIPLE_MOE_96GB_MODEL_DISCOVERY_BOOTSTRAP_ON_STARTUP=true
 CAPACITY_TARGET_MULTIPLE_MOE_96GB_MODEL_DISCOVERY_BOOTSTRAP_TIMEOUT_SECONDS=600
 ```
 
-When enabled, NeurOn starts the target once before accepting requests, waits for
-health, reads `/v1/models`, records runtime IDs, persists the discovery result,
+When enabled and no persisted result exists, NeurOn starts the target once,
+waits for health, reads `/v1/models`, records runtime IDs, persists the result,
 and reconciles discovery-started capacity against current demand.
 
 ## Model Warmup

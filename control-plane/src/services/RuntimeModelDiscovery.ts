@@ -10,8 +10,17 @@ interface OpenAiModelsResponse {
 
 export interface RuntimeModelInfo extends RuntimeDiscoveredModel {}
 
+export interface StartupRuntimeModelDiscoveryOutcome {
+  targetId: string;
+  outcome: "skipped-cached" | "discovered" | "failed";
+  reason: string;
+  cachedDiscoveredAt?: string;
+}
+
 export class RuntimeModelDiscovery {
   private readonly refreshes = new Map<string, Promise<void>>();
+  private readonly cachedDiscoveryTimes = new Map<string, Date>();
+  private readonly startupOutcomes = new Map<string, StartupRuntimeModelDiscoveryOutcome>();
 
   constructor(
     private readonly catalog: ModelCatalog,
@@ -25,8 +34,23 @@ export class RuntimeModelDiscovery {
     const knownTargets = new Set(this.catalog.listTargets().map((target) => target.id));
     for (const record of await this.repository.list()) {
       if (!knownTargets.has(record.targetId)) continue;
+      this.cachedDiscoveryTimes.set(record.targetId, new Date(record.discoveredAt));
       this.catalog.recordRuntimeModels(record.targetId, record.models);
     }
+  }
+
+  cachedDiscoveryAt(targetId: string): Date | undefined {
+    const discoveredAt = this.cachedDiscoveryTimes.get(targetId);
+    return discoveredAt ? new Date(discoveredAt) : undefined;
+  }
+
+  recordStartupOutcome(outcome: StartupRuntimeModelDiscoveryOutcome): void {
+    this.startupOutcomes.set(outcome.targetId, { ...outcome });
+  }
+
+  startupOutcome(targetId: string): StartupRuntimeModelDiscoveryOutcome | undefined {
+    const outcome = this.startupOutcomes.get(targetId);
+    return outcome ? { ...outcome } : undefined;
   }
 
   async refreshTarget(target: CapacityTarget): Promise<void> {
@@ -49,7 +73,9 @@ export class RuntimeModelDiscovery {
     const body = (await response.json()) as OpenAiModelsResponse;
     const models = body.data ?? [];
     this.catalog.recordRuntimeModels(target.id, models);
-    await this.repository?.record({ targetId: target.id, models, discoveredAt: new Date() });
+    const discoveredAt = new Date();
+    await this.repository?.record({ targetId: target.id, models, discoveredAt });
+    this.cachedDiscoveryTimes.set(target.id, discoveredAt);
   }
 
   async bootstrapTarget(target: CapacityTarget, capacityProvider: CapacityProvider, healthChecker: HealthChecker): Promise<void> {

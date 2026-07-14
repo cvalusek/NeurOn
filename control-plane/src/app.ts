@@ -31,7 +31,7 @@ import { ProviderService } from "./services/ProviderService.js";
 import { CostEstimationService } from "./services/CostEstimationService.js";
 import { ReservationService } from "./services/ReservationService.js";
 import { ReservationProfileService } from "./services/ReservationProfileService.js";
-import { RuntimeModelDiscovery, shouldBootstrapRuntimeModels } from "./services/RuntimeModelDiscovery.js";
+import { RuntimeModelDiscovery, shouldBootstrapRuntimeModels, type StartupRuntimeModelDiscoveryOutcome } from "./services/RuntimeModelDiscovery.js";
 import { TargetOperationCoordinator } from "./services/TargetOperationCoordinator.js";
 import { TargetProvisioningService } from "./services/TargetProvisioningService.js";
 import { TargetService } from "./services/TargetService.js";
@@ -79,6 +79,9 @@ export async function buildApp(config: AppConfig, models: ModelDefinition[]) {
   const healthChecker = new HealthChecker(config.healthCheckTimeoutSeconds);
   const targetOperations = new TargetOperationCoordinator();
   const runtimeModelDiscovery = new RuntimeModelDiscovery(catalog, reservationRepository.targetModelDiscoveries, targetOperations, statuses);
+  const startupDiscoveryRequestedTargetIds = new Set(
+    catalog.listTargets().filter(shouldBootstrapRuntimeModels).map((target) => target.id)
+  );
   await runtimeModelDiscovery.hydrateCachedTargets();
   const modelWarmup = new ModelWarmupService(catalog);
   const costEstimation = new CostEstimationService(reservationRepository.targetActivations, capacityProvider);
@@ -144,16 +147,35 @@ export async function buildApp(config: AppConfig, models: ModelDefinition[]) {
   registerMcpRoutes(app, catalog, reservations, statuses, reservationService);
   registerUiRoutes(app, config, authProvider, authMethodService, catalog, apiKeyService, reservationService, reservationProfileService, providerService, targetService, targetProvisioningService, costEstimation, hassleOffClient);
 
-  const bootstrapRuntimeModels = async () => {
-    for (const target of catalog.listTargets().filter(shouldBootstrapRuntimeModels)) {
+  const bootstrapRuntimeModels = async (): Promise<StartupRuntimeModelDiscoveryOutcome[]> => {
+    const outcomes: StartupRuntimeModelDiscoveryOutcome[] = [];
+    const recordOutcome = (outcome: StartupRuntimeModelDiscoveryOutcome) => {
+      runtimeModelDiscovery.recordStartupOutcome(outcome);
+      outcomes.push(outcome);
+    };
+    for (const target of catalog.listTargets().filter((candidate) => startupDiscoveryRequestedTargetIds.has(candidate.id))) {
+      const cachedDiscoveredAt = runtimeModelDiscovery.cachedDiscoveryAt(target.id);
+      if (cachedDiscoveredAt) {
+        const discoveredAt = cachedDiscoveredAt.toISOString();
+        const reason = `Reused persisted runtime model discovery from ${discoveredAt}; startup discovery did not contact the capacity provider.`;
+        recordOutcome({ targetId: target.id, outcome: "skipped-cached", reason, cachedDiscoveredAt: discoveredAt });
+        app.log.info(
+          { targetId: target.id, outcome: "skipped-cached", cachedDiscoveredAt: discoveredAt, reason },
+          "runtime model discovery bootstrap skipped because cached discovery is available"
+        );
+        continue;
+      }
       try {
         await runtimeModelDiscovery.bootstrapTarget(target, capacityProvider, healthChecker);
+        recordOutcome({ targetId: target.id, outcome: "discovered", reason: "Runtime model discovery bootstrap completed." });
         app.log.info({ targetId: target.id }, "runtime model discovery bootstrap complete");
       } catch (error) {
         const loggedError = errorForLog(error);
+        recordOutcome({ targetId: target.id, outcome: "failed", reason: loggedError.message });
         app.log.warn({ targetId: target.id, error: loggedError }, "runtime model discovery bootstrap failed");
       }
     }
+    return outcomes;
   };
 
   return { app, reconciler, trafficPoller, bootstrapRuntimeModels, runtimeModelDiscovery, targetOperations };

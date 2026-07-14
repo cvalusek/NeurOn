@@ -216,6 +216,9 @@ can grow from one target selection to many without a relational schema change.
 
 Runtime model discovery results persist with the configured storage driver so
 NeurOn can restart without waking discovery-only targets just to recover their
-model list. Target status and startup estimates remain in-memory observational
-state. Provider state is still observed on the next reconciliation loop, and
-startup estimates are not used for scheduling decisions.
+model list. Presence of a persisted record, including an empty successful
+catalog, suppresses a full process-start discovery pass; manual discovery and
+post-provision refresh remain explicit paths. Target status and startup
+estimates remain in-memory observational state. Provider state is still
+observed on the next reconciliation loop, and startup estimates are not used
+for scheduling decisions.

@@ -123,6 +123,11 @@ using model IDs, aliases, backend IDs, runtime IDs, and each target's
 publishes the first `trafficModelPrefixes` value as the display prefix. Set the
 display prefix to `""` in JSON config, or `__empty__` in env-expanded config,
 when LiteLLM aliases the route prefix away for users.
+The Admin target create and persisted-target edit forms expose
+`trafficModelPrefixes` as **LiteLLM model route prefixes**, so a value such as
+`clint-desktop/` links `clint-desktop/gemma-4-e2b` to the selected target
+without editing JSON. Declarative targets can set the field in JSON/env config
+or use **Copy to DB** before editing it in Admin.
 
 LiteLLM traffic monitoring remains useful for clients that cannot run a plugin.
 The OpenCode plugin is a stronger signal when it is available because it can

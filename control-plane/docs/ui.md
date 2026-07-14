@@ -151,6 +151,14 @@ Each target has its own status card showing:
 Reservations render compact model copy chips so users can quickly copy the
 model ID or alias they should use.
 
+The Admin Targets status also shows whether a persisted runtime discovery cache
+exists and when it was recorded. Target create and persisted-target edit forms
+expose comma-separated LiteLLM model route prefixes; for example,
+`clint-desktop/` links `clint-desktop/gemma-4-e2b` model names and traffic to
+that target. Declarative targets remain configuration-owned and must be copied
+to the database before Admin can edit them. **Discover models now** explicitly
+refreshes the cache and may activate a stopped target.
+
 ## Activations Page
 
 Route:

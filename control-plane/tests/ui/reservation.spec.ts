@@ -55,14 +55,14 @@ test("requires sign-in before showing protected pages", async ({ page }) => {
 
 test("creates, extends, and ends a reservation from the rendered UI", async ({ page }) => {
   await signIn(page, "ui-user");
+  await createSmolProfile(page);
 
   await expect(page.getByRole("heading", { name: "Start capacity" })).toBeVisible();
   await expect(page.locator("#current-reservation")).toContainText("No active reservation");
   await expect(page.locator("#start-form")).toContainText("PreFer Smol");
-  await expect(page.locator("#start-form")).toContainText("Qwen Smol");
+  await expect(page.locator("#start-form")).toContainText("qwen-smol");
   await expect(page.locator("#start-cost-estimate")).toContainText("Estimated cost: $0.80");
 
-  await page.locator("label.option", { hasText: "Qwen Smol" }).click();
   await page.locator('[aria-label="Duration"]').getByRole("button", { name: "5 min", exact: true }).click();
   await expect(page.locator("#duration-minutes")).toHaveValue("5");
   await expect(page.locator("#start-cost-estimate")).toContainText("Estimated cost: $1.40");
@@ -84,8 +84,8 @@ test("creates, extends, and ends a reservation from the rendered UI", async ({ p
 
 test("supports custom reservation duration and keepalive controls", async ({ page }) => {
   await signIn(page, "custom-user");
+  await createSmolProfile(page);
 
-  await page.locator("label.option", { hasText: "Qwen Smol" }).click();
   await page.locator('[data-custom-duration="true"]').click();
   await expect(page.locator("#custom-duration-wrap")).toBeVisible();
   await page.locator("#custom-duration").fill("7");
@@ -103,7 +103,7 @@ test("supports custom reservation duration and keepalive controls", async ({ pag
   await expect(page.locator("#current-reservation")).toContainText("active");
 });
 
-test("prevents reserving a configured-model target without selecting a model", async ({ page }) => {
+test("prevents reserving without selecting or creating a profile", async ({ page }) => {
   await signIn(page, "validation-user");
 
   await page.getByRole("button", { name: "Reserve" }).click();
@@ -145,7 +145,7 @@ test("shows reservation cost and activation history", async ({ page }) => {
   await expect(page.locator("#current-reservation")).toContainText("$3.00");
   await expect(page.locator("#current-reservation")).toContainText("Projected total:");
 
-  await page.getByRole("link", { name: "Activations" }).click();
+  await page.goto(`${baseUrl}/admin/activations`);
   await expect(page.getByRole("heading", { name: "Activations" })).toBeVisible();
   await expect(page.locator("#activation-list")).toContainText("PreFer Smol");
   await expect(page.locator("#activation-list")).toContainText("$3.00");
@@ -187,9 +187,13 @@ test("generates and revokes personal API keys", async ({ page }) => {
 test("copies model aliases, API keys, and declarative snippets", async ({ page, context }) => {
   await context.grantPermissions(["clipboard-read", "clipboard-write"], { origin: baseUrl });
   await signIn(page, "copy-user");
+  await createSmolProfile(page);
 
-  await page.locator("#start-form [data-copy='qwen-smol']").first().click();
+  await page.getByRole("button", { name: "Review" }).click();
+  const review = page.locator("#profile-review-modal");
+  await review.locator("[data-copy='qwen-smol']").first().click();
   await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toBe("qwen-smol");
+  await review.getByRole("button", { name: "Close" }).click();
 
   await page.getByRole("link", { name: "API keys" }).click();
   await page.getByLabel("Name").fill("Copy key");
@@ -213,32 +217,34 @@ test("copies model aliases, API keys, and declarative snippets", async ({ page, 
 test("shows admin status with active and completed reservations", async ({ page }) => {
   await signIn(page, "admin-user");
   await reserveSmolModel(page);
-  await page.getByRole("link", { name: "Admin" }).click();
+  await page.goto(`${baseUrl}/admin/reservations`);
 
-  await expect(page.getByRole("heading", { name: "Admin" })).toBeVisible();
-  await expect(page.locator("#admin-status")).toContainText("prefer-smol");
-  await expect(page.locator("#admin-status")).toContainText("admin-user");
-  await expect(page.locator("#admin-status")).toContainText("qwen-smol");
+  await expect(page.getByRole("heading", { name: "Reservations" })).toBeVisible();
+  await expect(page.locator("#reservation-history")).toContainText("prefer-smol");
+  await expect(page.locator("#reservation-history")).toContainText("admin-user");
+  await expect(page.locator("#reservation-history")).toContainText("qwen-smol");
 
-  await page.getByRole("link", { name: "Home" }).click();
+  await page.goto(baseUrl);
   await page.locator("#current-reservation").getByRole("button", { name: "I'm done" }).click();
-  await page.getByRole("link", { name: "Admin" }).click();
+  await page.goto(`${baseUrl}/admin/reservations`);
 
-  await expect(page.locator("#admin-status")).toContainText("done");
-  await expect(page.locator("#admin-status")).toContainText("admin-user");
+  await expect(page.locator("#reservation-history")).toContainText("done");
+  await expect(page.locator("#reservation-history")).toContainText("admin-user");
 });
 
-test("runs admin target lifecycle actions from the dashboard", async ({ page }) => {
+test("runs admin target lifecycle actions from the target page", async ({ page }) => {
   await signIn(page, "lifecycle-admin");
-  await page.getByRole("link", { name: "Admin" }).click();
+  await page.goto(`${baseUrl}/admin/targets`);
 
-  await expect(page.locator("#admin-status")).toContainText("prefer-smol");
+  const target = page.locator("details.drilldown", { hasText: "PreFer Smol" });
+  await expect(target.locator('[data-target-status="prefer-smol"]')).toContainText("Not checked");
+  await target.locator(":scope > summary").click();
 
-  await page.getByRole("button", { name: "Reconcile" }).click();
-  await expect(page.locator("#admin-status")).toContainText("Stopped");
+  await target.getByRole("button", { name: "Reconcile" }).click();
+  await expect(target.locator('[data-target-status="prefer-smol"]')).toContainText("Stopped");
 
-  await page.getByRole("button", { name: "Force stop" }).click();
-  await expect(page.locator("#admin-status")).toContainText("Force stopped");
+  await target.getByRole("button", { name: "Force stop" }).click();
+  await expect(target.locator('[data-target-status="prefer-smol"]')).toContainText("Force stopped");
 });
 
 test("creates, edits, and deletes providers from the admin UI", async ({ page }) => {
@@ -293,6 +299,7 @@ test("copies config-backed providers and targets into persisted storage", async 
   await expect(configTarget).toContainText("config");
   await configTarget.locator(":scope > summary").click();
   await configTarget.getByRole("button", { name: "Edit" }).click();
+  await expect(configTarget.locator('[data-tab-panel="edit"]')).toContainText("LiteLLM model route prefixes");
   await configTarget.getByRole("button", { name: "Copy to DB" }).click();
 
   configTarget = page.locator("details.drilldown", { hasText: "PreFer Smol" });
@@ -306,6 +313,7 @@ test("creates, edits, and deletes targets from the admin UI", async ({ page }) =
   await signIn(page, "target-admin");
   await createDockerProvider(page);
   await page.getByRole("link", { name: "Targets" }).click();
+  await page.setViewportSize({ width: 390, height: 844 });
 
   await expect(page.getByRole("heading", { name: "Targets" })).toBeVisible();
   await page.getByRole("button", { name: "Add target" }).click();
@@ -320,7 +328,13 @@ test("creates, edits, and deletes targets from the admin UI", async ({ page }) =
   await modal.locator('input[name="displayName"]').fill("Docker Qwen");
   await modal.locator('input[name="dockerContainerName"]').fill("prefer-qwen");
   await modal.locator("summary", { hasText: "Overrides" }).click();
+  await expect(modal).toContainText("LiteLLM model route prefixes");
+  expect(await modal.locator('input[name="trafficModelPrefixes"]').evaluate((input) => {
+    const bounds = input.getBoundingClientRect();
+    return bounds.left >= 0 && bounds.right <= window.innerWidth;
+  })).toBe(true);
   await modal.locator('input[name="modelIds"]').fill("qwen-smol");
+  await modal.locator('input[name="trafficModelPrefixes"]').fill("clint-desktop/");
   await modal.getByRole("button", { name: "Add target" }).click();
 
   await expect(page.locator(".secret-box")).toContainText("docker-qwen");
@@ -328,17 +342,19 @@ test("creates, edits, and deletes targets from the admin UI", async ({ page }) =
   await expect(target).toContainText("persisted");
   await target.locator(":scope > summary").click();
 
-  await target.getByRole("button", { name: "Status" }).click();
-  await expect(target.locator('[data-tab-panel="status"]')).toContainText("Not checked");
+  await expect(target.locator('[data-target-status="docker-qwen"]')).toContainText("Not checked");
+  await expect(target.locator('[data-target-status="docker-qwen"]')).toContainText("No discovery cache");
 
   await target.getByRole("button", { name: "JSON" }).click();
   await expect(target.locator('[data-tab-panel="json"]')).toContainText("prefer-qwen");
+  await expect(target.locator('[data-tab-panel="json"]')).toContainText("clint-desktop/");
 
   await target.getByRole("button", { name: "Edit" }).click();
   const editPanel = target.locator('[data-tab-panel="edit"]');
   await editPanel.locator('input[name="displayName"]').fill("Docker Qwen Updated");
   await editPanel.locator("summary", { hasText: "Overrides" }).click();
   await editPanel.locator('input[name="modelIds"]').fill("qwen-smol,other-smol");
+  await editPanel.locator('input[name="trafficModelPrefixes"]').fill("clint-desktop/,prefer/");
   await editPanel.getByRole("button", { name: "Save target" }).click();
 
   target = page.locator("details.drilldown", { hasText: "Docker Qwen Updated" });
@@ -346,6 +362,7 @@ test("creates, edits, and deletes targets from the admin UI", async ({ page }) =
   await target.locator(":scope > summary").click();
   await target.getByRole("button", { name: "View" }).click();
   await expect(target.locator('[data-tab-panel="view"]')).toContainText("qwen-smol, other-smol");
+  await expect(target.locator('[data-tab-panel="view"]')).toContainText("clint-desktop/, prefer/");
 
   await target.getByRole("button", { name: "Delete" }).click();
   await target.locator('[data-tab-panel="delete"] input[name="confirmName"]').fill("docker-qwen");
@@ -392,9 +409,19 @@ async function signIn(page: Page, username: string) {
 }
 
 async function reserveSmolModel(page: Page) {
-  await page.locator("label.option", { hasText: "Qwen Smol" }).click();
+  await createSmolProfile(page);
   await page.getByRole("button", { name: "Reserve" }).click();
   await expect(page.locator("#current-reservation")).toContainText("active");
+}
+
+async function createSmolProfile(page: Page) {
+  await page.getByRole("button", { name: "New", exact: true }).click();
+  const modal = page.locator("#profile-modal");
+  await modal.getByLabel("Name").fill("Smol profile");
+  await modal.locator("label.option", { hasText: "Qwen Smol" }).click();
+  await modal.getByRole("button", { name: "Save profile" }).click();
+  await expect(page).toHaveURL(`${baseUrl}/`);
+  await expect(page.locator("#start-form")).toContainText("Smol profile");
 }
 
 async function createDockerProvider(page: Page, options: { allowProvisioning?: boolean } = {}) {

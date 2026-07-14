@@ -228,7 +228,7 @@ export function registerApiRoutes(
         response: { 200: statusSchema }
       }
     },
-    async () => statusPayload(catalog, reservations, statuses, costEstimation)
+    async () => statusPayload(catalog, reservations, statuses, costEstimation, runtimeModelDiscovery)
   );
   app.get("/api/admin/reservations", async (request) => {
     const query = z
@@ -250,9 +250,9 @@ export function registerApiRoutes(
       sort: query.sort
     };
   });
-  app.get("/api/admin/targets", async () => ({ capacityTargets: await targetsPayload(catalog, reservations, statuses) }));
+  app.get("/api/admin/targets", async () => ({ capacityTargets: await targetsPayload(catalog, reservations, statuses, runtimeModelDiscovery) }));
   app.get("/api/admin/activations", async () => activationPayload(catalog, reservations, targetActivations));
-  app.get("/api/admin/status", async () => statusPayload(catalog, reservations, statuses, costEstimation, { includeReservationHistory: true }));
+  app.get("/api/admin/status", async () => statusPayload(catalog, reservations, statuses, costEstimation, runtimeModelDiscovery, { includeReservationHistory: true }));
 
   app.post("/api/admin/targets/:id/reconcile", async (request, reply) => {
     try {
@@ -348,13 +348,20 @@ async function reservationEndpoint(request: { params: unknown }, reply: { code: 
   }
 }
 
-async function statusPayload(catalog: ModelCatalog, reservations: ReservationRepository, statuses: TargetStatusRepository, costEstimation: CostEstimationService, options: { includeReservationHistory?: boolean } = {}) {
+async function statusPayload(
+  catalog: ModelCatalog,
+  reservations: ReservationRepository,
+  statuses: TargetStatusRepository,
+  costEstimation: CostEstimationService,
+  runtimeModelDiscovery: RuntimeModelDiscovery,
+  options: { includeReservationHistory?: boolean } = {}
+) {
   const activeReservations = await reservations.listActive(new Date());
   const visibleReservations = options.includeReservationHistory ? await reservations.list() : activeReservations;
   return {
     reservations: await reservationPayloads(visibleReservations, statuses, costEstimation, catalog),
     activeReservations: await reservationPayloads(activeReservations, statuses, costEstimation, catalog),
-    capacityTargets: await targetsPayload(catalog, reservations, statuses)
+    capacityTargets: await targetsPayload(catalog, reservations, statuses, runtimeModelDiscovery)
   };
 }
 
@@ -367,13 +374,20 @@ async function reservationPayload(reservation: Reservation, statuses: TargetStat
   return reservationJson(reservation, statuses.list(), await costEstimation.estimateForReservation(reservation, targets));
 }
 
-async function targetsPayload(catalog: ModelCatalog, reservations: ReservationRepository, statuses: TargetStatusRepository) {
+async function targetsPayload(
+  catalog: ModelCatalog,
+  reservations: ReservationRepository,
+  statuses: TargetStatusRepository,
+  runtimeModelDiscovery: RuntimeModelDiscovery
+) {
   const active = await reservations.listActive(new Date());
   return catalog.listTargets().map((target) =>
     targetJson(
       target,
       statuses.get(target.id),
-      Array.from(new Set(active.filter((reservation) => reservation.targetIds.includes(target.id)).map(reservationDisplayUsername)))
+      Array.from(new Set(active.filter((reservation) => reservation.targetIds.includes(target.id)).map(reservationDisplayUsername))),
+      runtimeModelDiscovery.cachedDiscoveryAt(target.id),
+      runtimeModelDiscovery.startupOutcome(target.id)
     )
   );
 }
@@ -600,6 +614,7 @@ const targetSchema = {
     providerId: { type: "string" },
     modelIds: { type: "array", items: { type: "string" } },
     modelsMax: { type: "number" },
+    trafficModelPrefixes: { type: "array", items: { type: "string" } },
     litellmDisplayPrefix: { type: "string" },
     healthUrl: { type: "string" },
     apiUrl: { type: "string" },
@@ -615,9 +630,27 @@ const targetSchema = {
         sampleCount: { type: "number" }
       }
     },
+    runtimeModelDiscovery: {
+      type: "object",
+      properties: {
+        cached: { type: "boolean" },
+        discoveredAt: { type: "string", format: "date-time" },
+        startupOutcome: {
+          type: "object",
+          properties: {
+            targetId: { type: "string" },
+            outcome: { type: "string", enum: ["skipped-cached", "discovered", "failed"] },
+            reason: { type: "string" },
+            cachedDiscoveredAt: { type: "string", format: "date-time" }
+          },
+          required: ["targetId", "outcome", "reason"]
+        }
+      },
+      required: ["cached"]
+    },
     activeUsers: { type: "array", items: { type: "string" } }
   },
-  required: ["id", "displayName", "provider", "modelIds", "desired", "observed", "message", "activeUsers"]
+  required: ["id", "displayName", "provider", "modelIds", "desired", "observed", "message", "runtimeModelDiscovery", "activeUsers"]
 } as const;
 
 const statusSchema = {
