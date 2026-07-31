@@ -3,8 +3,6 @@ import type { TargetModelDiscoveryRepository } from "../domain/interfaces.js";
 import type { TargetModelDiscoveryRecord } from "../domain/types.js";
 import { cloneTargetModelDiscoveryRecord, targetModelDiscoveryRecordFromJson } from "./targetModelDiscoveryUtils.js";
 
-const { Pool } = pg;
-
 interface DiscoveryRow {
   target_id: string;
   discovery_json: TargetModelDiscoveryRecord | string;
@@ -14,18 +12,8 @@ interface DiscoveryRow {
 export class PostgresTargetModelDiscoveryRepository implements TargetModelDiscoveryRepository {
   private readonly pool: pg.Pool;
 
-  constructor(connectionString: string) {
-    this.pool = new Pool({ connectionString });
-  }
-
-  async initialize(): Promise<void> {
-    await this.pool.query(`
-      create table if not exists target_model_discoveries (
-        target_id text primary key,
-        discovery_json jsonb not null,
-        discovered_at timestamptz not null
-      );
-    `);
+  constructor(pool: pg.Pool) {
+    this.pool = pool;
   }
 
   async record(input: TargetModelDiscoveryRecord): Promise<TargetModelDiscoveryRecord> {
@@ -57,9 +45,6 @@ export class PostgresTargetModelDiscoveryRepository implements TargetModelDiscov
     return (result.rowCount ?? 0) > 0;
   }
 
-  async close(): Promise<void> {
-    await this.pool.end();
-  }
 }
 
 function fromRow(row: DiscoveryRow): TargetModelDiscoveryRecord {

@@ -1,0 +1,42 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: "no"
+    env_file:
+      - .env.postgres.local
+    environment:
+      POSTGRES_DB: neuron_test
+    tmpfs:
+      - /var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d neuron_test"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+      start_period: 3s
+    networks:
+      - test-postgres
+
+  neuron-postgres-test:
+    build:
+      context: ./control-plane
+      dockerfile: Dockerfile
+      target: deps
+    restart: "no"
+    env_file:
+      - .env.postgres.local
+    command: ["npm", "test", "--", "src/__tests__/postgresRepository.test.ts", "src/__tests__/sqliteToPostgresMigration.test.ts"]
+    volumes:
+      - ./control-plane/src:/app/src:ro
+      - ./control-plane/tsconfig.json:/app/tsconfig.json:ro
+      - ./control-plane/vitest.config.ts:/app/vitest.config.ts:ro
+      - ./control-plane/.eslintrc.cjs:/app/.eslintrc.cjs:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - test-postgres
+
+networks:
+  test-postgres:
+    internal: true

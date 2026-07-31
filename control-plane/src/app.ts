@@ -84,7 +84,10 @@ export async function buildApp(config: AppConfig, models: ModelDefinition[]) {
   );
   await runtimeModelDiscovery.hydrateCachedTargets();
   const modelWarmup = new ModelWarmupService(catalog);
-  const costEstimation = new CostEstimationService(reservationRepository.targetActivations, capacityProvider);
+  const costEstimation = new CostEstimationService(
+    reservationRepository.targetActivations,
+    config.maintenanceMode ? undefined : capacityProvider
+  );
   const trafficPoller =
     config.litellmApiBaseUrl && config.litellmApiKey && config.litellmTrafficPollSeconds > 0
       ? new TrafficPoller(new LiteLlmSpendLogsTrafficSource(config.litellmApiBaseUrl, config.litellmApiKey, config.litellmTrafficLookbackSeconds), catalog, trafficKeepalive)
@@ -130,6 +133,17 @@ export async function buildApp(config: AppConfig, models: ModelDefinition[]) {
   app.addHook("onClose", async () => reservationRepository.close());
 
   app.addHook("preHandler", async (request, reply) => {
+    const mutationAllowedInMaintenance = request.url === "/login" || request.url.startsWith("/auth/");
+    if (
+      config.maintenanceMode &&
+      !["GET", "HEAD", "OPTIONS"].includes(request.method) &&
+      !mutationAllowedInMaintenance
+    ) {
+      if (request.url.startsWith("/api/") || request.url === "/mcp") {
+        return reply.code(503).send({ error: "NeurOn is in maintenance mode; state changes are disabled" });
+      }
+      return reply.code(503).type("text/html").send("NeurOn is in maintenance mode; state changes are disabled");
+    }
     if (request.url === "/healthz" || request.url === "/login" || request.url.startsWith("/auth/") || request.url === "/openapi.json" || request.url.startsWith("/docs")) return;
     const user = await authProvider.authenticate({ headers: request.headers, cookies: request.cookies });
     if (!user) {
@@ -143,9 +157,42 @@ export async function buildApp(config: AppConfig, models: ModelDefinition[]) {
     request.user = user;
   });
 
-  registerApiRoutes(app, catalog, reservations, statuses, apiKeyService, reservationService, reservationProfileService, trafficKeepalive, reconciler, capacityProvider, runtimeModelDiscovery, healthChecker, targetService, targetProvisioningService, costEstimation, reservationRepository.targetActivations, targetOperations);
+  registerApiRoutes(
+    app,
+    catalog,
+    reservations,
+    statuses,
+    apiKeyService,
+    reservationService,
+    reservationProfileService,
+    trafficKeepalive,
+    reconciler,
+    capacityProvider,
+    runtimeModelDiscovery,
+    healthChecker,
+    targetService,
+    targetProvisioningService,
+    costEstimation,
+    reservationRepository.targetActivations,
+    targetOperations,
+    { storageDriver: config.storage.driver, maintenanceMode: Boolean(config.maintenanceMode) }
+  );
   registerMcpRoutes(app, catalog, reservations, statuses, reservationService);
-  registerUiRoutes(app, config, authProvider, authMethodService, catalog, apiKeyService, reservationService, reservationProfileService, providerService, targetService, targetProvisioningService, costEstimation, hassleOffClient);
+  registerUiRoutes(
+    app,
+    config,
+    authProvider,
+    authMethodService,
+    catalog,
+    apiKeyService,
+    reservationService,
+    reservationProfileService,
+    providerService,
+    targetService,
+    targetProvisioningService,
+    costEstimation,
+    config.maintenanceMode ? undefined : hassleOffClient
+  );
 
   const bootstrapRuntimeModels = async (): Promise<StartupRuntimeModelDiscoveryOutcome[]> => {
     const outcomes: StartupRuntimeModelDiscoveryOutcome[] = [];

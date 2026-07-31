@@ -34,9 +34,10 @@ export function registerApiRoutes(
   targetProvisioningService: TargetProvisioningService,
   costEstimation: CostEstimationService,
   targetActivations: TargetActivationRepository,
-  targetOperations: TargetOperationCoordinator
+  targetOperations: TargetOperationCoordinator,
+  healthInfo: { storageDriver: string; maintenanceMode: boolean }
 ) {
-  app.get("/healthz", async () => ({ ok: true }));
+  app.get("/healthz", async () => ({ ok: true, ...healthInfo }));
   app.get(
     "/api/models",
     {

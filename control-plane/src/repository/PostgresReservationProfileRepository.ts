@@ -3,8 +3,6 @@ import pg from "pg";
 import type { ReservationProfileRepository } from "../domain/interfaces.js";
 import type { ReservationProfile, ReservationProfileSelection } from "../domain/types.js";
 
-const { Pool } = pg;
-
 interface ReservationProfileRow {
   id: string;
   username: string;
@@ -20,27 +18,8 @@ interface ReservationProfileRow {
 export class PostgresReservationProfileRepository implements ReservationProfileRepository {
   private readonly pool: pg.Pool;
 
-  constructor(connectionString: string) {
-    this.pool = new Pool({ connectionString });
-  }
-
-  async initialize(): Promise<void> {
-    await this.pool.query(`
-      create table if not exists reservation_profiles (
-        id text primary key,
-        username text not null,
-        name text not null,
-        description text,
-        selections jsonb not null,
-        default_duration_minutes integer,
-        default_keepalive_minutes integer,
-        created_at timestamptz not null,
-        updated_at timestamptz not null
-      );
-
-      create index if not exists idx_reservation_profiles_username_name
-        on reservation_profiles(username, name);
-    `);
+  constructor(pool: pg.Pool) {
+    this.pool = pool;
   }
 
   async create(input: Omit<ReservationProfile, "id" | "createdAt" | "updatedAt"> & { id?: string; createdAt?: Date; updatedAt?: Date }): Promise<ReservationProfile> {
@@ -88,9 +67,6 @@ export class PostgresReservationProfileRepository implements ReservationProfileR
     return (result.rowCount ?? 0) > 0;
   }
 
-  async close(): Promise<void> {
-    await this.pool.end();
-  }
 }
 
 function toSqlValues(profile: ReservationProfile): unknown[] {

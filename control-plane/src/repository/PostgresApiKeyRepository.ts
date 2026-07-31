@@ -3,8 +3,6 @@ import pg from "pg";
 import type { ApiKeyRepository } from "../domain/interfaces.js";
 import type { ApiKey } from "../domain/types.js";
 
-const { Pool } = pg;
-
 interface ApiKeyRow {
   id: string;
   username: string;
@@ -18,25 +16,8 @@ interface ApiKeyRow {
 export class PostgresApiKeyRepository implements ApiKeyRepository {
   private readonly pool: pg.Pool;
 
-  constructor(connectionString: string) {
-    this.pool = new Pool({ connectionString });
-  }
-
-  async initialize(): Promise<void> {
-    await this.pool.query(`
-      create table if not exists api_keys (
-        id text primary key,
-        username text not null,
-        name text not null,
-        prefix text not null,
-        key_hash text not null,
-        created_at timestamptz not null,
-        last_used_at timestamptz
-      );
-
-      create index if not exists idx_api_keys_username_created_at
-        on api_keys(username, created_at);
-    `);
+  constructor(pool: pg.Pool) {
+    this.pool = pool;
   }
 
   async create(input: Omit<ApiKey, "id"> & { id?: string }): Promise<ApiKey> {
@@ -69,9 +50,6 @@ export class PostgresApiKeyRepository implements ApiKeyRepository {
     await this.pool.query("update api_keys set last_used_at = $1 where id = $2", [lastUsedAt, id]);
   }
 
-  async close(): Promise<void> {
-    await this.pool.end();
-  }
 }
 
 function toSqlValues(key: ApiKey): unknown[] {

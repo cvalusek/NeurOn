@@ -222,3 +222,17 @@ post-provision refresh remain explicit paths. Target status and startup
 estimates remain in-memory observational state. Provider state is still
 observed on the next reconciliation loop, and startup estimates are not used
 for scheduling decisions.
+
+The durable driver is one control-plane ownership boundary covering nine
+repository families: reservations, profiles, hashed API keys, auth methods,
+provider definitions, target definitions, provisioning jobs, model-discovery
+records, and target activation/cost allocation history. PostgreSQL uses one
+bounded shared pool. Ordered transactional schema changes are recorded in
+`neuron_schema_migrations`; the data-transfer ledger is separate so an exact
+SQLite import can be verified without confusing it with schema upgrades.
+
+Only one application storage writer may own the deployment. A storage operation
+lock coordinates application startup with explicit backup/migration commands,
+and maintenance mode suppresses lifecycle/provider side effects during cutover
+verification. HassleOff is a separate failure domain with its own SQLite state
+and is outside this ownership boundary.

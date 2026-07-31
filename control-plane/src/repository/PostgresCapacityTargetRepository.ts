@@ -3,8 +3,6 @@ import type { CapacityTargetRepository } from "../domain/interfaces.js";
 import type { CapacityTarget } from "../domain/types.js";
 import { cloneTarget } from "./targetRepositoryUtils.js";
 
-const { Pool } = pg;
-
 interface TargetRow {
   id: string;
   target_json: CapacityTarget | string;
@@ -13,17 +11,8 @@ interface TargetRow {
 export class PostgresCapacityTargetRepository implements CapacityTargetRepository {
   private readonly pool: pg.Pool;
 
-  constructor(connectionString: string) {
-    this.pool = new Pool({ connectionString });
-  }
-
-  async initialize(): Promise<void> {
-    await this.pool.query(`
-      create table if not exists capacity_targets (
-        id text primary key,
-        target_json jsonb not null
-      );
-    `);
+  constructor(pool: pg.Pool) {
+    this.pool = pool;
   }
 
   async create(input: CapacityTarget): Promise<CapacityTarget> {
@@ -52,9 +41,6 @@ export class PostgresCapacityTargetRepository implements CapacityTargetRepositor
     return (result.rowCount ?? 0) > 0;
   }
 
-  async close(): Promise<void> {
-    await this.pool.end();
-  }
 }
 
 function fromRow(row: TargetRow): CapacityTarget {

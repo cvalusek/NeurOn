@@ -1,5 +1,6 @@
 import type { ApiKeyRepository, AuthMethodRepository, CapacityProviderRepository, CapacityTargetRepository, ReservationProfileRepository, ReservationRepository, TargetModelDiscoveryRepository, TargetProvisioningJobRepository, TargetActivationRepository } from "../domain/interfaces.js";
 import type { StorageConfig } from "../domain/types.js";
+import pg from "pg";
 import { InMemoryApiKeyRepository } from "./InMemoryApiKeyRepository.js";
 import { InMemoryAuthMethodRepository } from "./InMemoryAuthMethodRepository.js";
 import { InMemoryCapacityProviderRepository } from "./InMemoryCapacityProviderRepository.js";
@@ -8,6 +9,7 @@ import { InMemoryReservationRepository } from "./InMemoryReservationRepository.j
 import { InMemoryTargetModelDiscoveryRepository } from "./InMemoryTargetModelDiscoveryRepository.js";
 import { InMemoryTargetProvisioningJobRepository } from "./InMemoryTargetProvisioningJobRepository.js";
 import { InMemoryTargetActivationRepository } from "./InMemoryTargetActivationRepository.js";
+import { migratePostgresSchema } from "./postgresSchema.js";
 
 export interface ReservationRepositoryHandle {
   repository: ReservationRepository;
@@ -75,24 +77,22 @@ export async function createReservationRepository(config: StorageConfig): Promis
     const { PostgresTargetModelDiscoveryRepository } = await import("./PostgresTargetModelDiscoveryRepository.js");
     const { PostgresTargetProvisioningJobRepository } = await import("./PostgresTargetProvisioningJobRepository.js");
     const { PostgresTargetActivationRepository } = await import("./PostgresTargetActivationRepository.js");
-    const repository = new PostgresReservationRepository(config.connectionString);
-    const reservationProfiles = new PostgresReservationProfileRepository(config.connectionString);
-    const apiKeys = new PostgresApiKeyRepository(config.connectionString);
-    const authMethods = new PostgresAuthMethodRepository(config.connectionString);
-    const capacityProviders = new PostgresCapacityProviderRepository(config.connectionString);
-    const capacityTargets = new PostgresCapacityTargetRepository(config.connectionString);
-    const targetProvisioningJobs = new PostgresTargetProvisioningJobRepository(config.connectionString);
-    const targetModelDiscoveries = new PostgresTargetModelDiscoveryRepository(config.connectionString);
-    const targetActivations = new PostgresTargetActivationRepository(config.connectionString);
-    await repository.initialize();
-    await reservationProfiles.initialize();
-    await apiKeys.initialize();
-    await authMethods.initialize();
-    await capacityProviders.initialize();
-    await capacityTargets.initialize();
-    await targetProvisioningJobs.initialize();
-    await targetModelDiscoveries.initialize();
-    await targetActivations.initialize();
+    const pool = new pg.Pool({ connectionString: config.connectionString, max: config.maxConnections });
+    try {
+      await migratePostgresSchema(pool);
+    } catch (error) {
+      await pool.end().catch(() => undefined);
+      throw error;
+    }
+    const repository = new PostgresReservationRepository(pool);
+    const reservationProfiles = new PostgresReservationProfileRepository(pool);
+    const apiKeys = new PostgresApiKeyRepository(pool);
+    const authMethods = new PostgresAuthMethodRepository(pool);
+    const capacityProviders = new PostgresCapacityProviderRepository(pool);
+    const capacityTargets = new PostgresCapacityTargetRepository(pool);
+    const targetProvisioningJobs = new PostgresTargetProvisioningJobRepository(pool);
+    const targetModelDiscoveries = new PostgresTargetModelDiscoveryRepository(pool);
+    const targetActivations = new PostgresTargetActivationRepository(pool);
     return {
       repository,
       reservationProfiles,
@@ -103,17 +103,7 @@ export async function createReservationRepository(config: StorageConfig): Promis
       targetProvisioningJobs,
       targetModelDiscoveries,
       targetActivations,
-      close: async () => {
-        await repository.close();
-        await reservationProfiles.close();
-        await apiKeys.close();
-        await authMethods.close();
-        await capacityProviders.close();
-        await capacityTargets.close();
-        await targetProvisioningJobs.close();
-        await targetModelDiscoveries.close();
-        await targetActivations.close();
-      }
+      close: async () => pool.end()
     };
   }
 

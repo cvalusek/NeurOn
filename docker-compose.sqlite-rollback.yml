@@ -1,0 +1,6 @@
+services:
+  neuron:
+    environment:
+      STORAGE_DRIVER: sqlite
+      SQLITE_PATH: ${SQLITE_ROLLBACK_PATH:?Set SQLITE_ROLLBACK_PATH to a retained path under /app/data}
+      STORAGE_OPERATION_LOCK_PATH: /app/data/neuron-storage.lock

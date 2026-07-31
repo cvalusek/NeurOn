@@ -1,0 +1,56 @@
+services:
+  neuron:
+    env_file:
+      - .env.postgres.local
+    environment:
+      STORAGE_DRIVER: postgres
+      POSTGRES_POOL_MAX: ${POSTGRES_POOL_MAX:-10}
+      STORAGE_OPERATION_LOCK_PATH: /app/data/neuron-storage.lock
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - default
+      - neuron-postgres
+
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    env_file:
+      - .env.postgres.local
+    volumes:
+      - neuron-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 5s
+    networks:
+      - neuron-postgres
+
+  neuron-migrate:
+    profiles:
+      - migration
+    build:
+      context: ./control-plane
+      dockerfile: Dockerfile
+    image: neuron-control-plane:local
+    restart: "no"
+    env_file:
+      - .env.postgres.local
+    entrypoint: ["node", "dist/scripts/migrateSqliteToPostgres.js"]
+    volumes:
+      - ./data:/app/data
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - neuron-postgres
+
+volumes:
+  neuron-postgres-data:
+
+networks:
+  neuron-postgres:
+    internal: true

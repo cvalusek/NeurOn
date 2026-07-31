@@ -28,21 +28,36 @@ rotated by revoking old keys from `/api-keys`.
 
 ## Persistence
 
-Reservation and API-key storage are configurable:
+Control-plane storage is configurable:
 
-- `STORAGE_DRIVER=memory` keeps reservations and API keys in process memory
-- `STORAGE_DRIVER=sqlite` stores reservations and API keys in `SQLITE_PATH`
-- `STORAGE_DRIVER=postgres` stores reservations and API keys in `DATABASE_URL`
+- `STORAGE_DRIVER=memory` keeps all repository families in process memory
+- `STORAGE_DRIVER=sqlite` stores them in `SQLITE_PATH`
+- `STORAGE_DRIVER=postgres` stores them in `DATABASE_URL` through one bounded
+  shared pool and the versioned schema ledger
 
 SQLite is the local Compose default and uses `/app/data/neuron.db`, mounted from
 the repository `./data` directory. Durable reservations allow NeurOn to restart
 without forgetting active demand, so the reconciler continues to desire matching
 targets on after the process comes back. Durable API keys allow plugin and MCP
-clients to survive control-plane restarts.
+clients to survive control-plane restarts. The selected driver also owns
+reservation profiles, auth methods, provider and target definitions,
+provisioning jobs, runtime model-discovery records, and target activation/cost
+history.
 
-Target startup estimates, runtime model IDs discovered from healthy targets,
-and target status remain in memory. They are observational state and are rebuilt
-by reconciliation; they are not used for scheduling decisions.
+Target startup estimates and target status remain in memory. They are
+observational state and are rebuilt by reconciliation; they are not used for
+scheduling decisions. HassleOff's SQLite database is independent and is never
+part of a NeurOn control-plane database migration.
+
+Use the [SQLite to PostgreSQL migration](postgres-migration.md) procedure for a
+backup, disposable dry-run, one-writer cutover, verification, and rollback. Do
+not change `STORAGE_DRIVER` on a live application or run SQLite and PostgreSQL
+application writers concurrently.
+
+`CONTROL_PLANE_MAINTENANCE_MODE=true` is the safe cutover boundary: state
+mutations, reconciliation, traffic polling, startup discovery/provider sync,
+and HassleOff status calls are disabled while read-only verification remains
+available. `/healthz` reports the active storage driver and maintenance state.
 
 ## Polling Defaults
 

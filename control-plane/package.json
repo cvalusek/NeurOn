@@ -10,7 +10,9 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:ui": "playwright test",
-    "lint": "eslint \"src/**/*.ts\""
+    "lint": "eslint \"src/**/*.ts\"",
+    "migrate:sqlite-to-postgres": "node dist/scripts/migrateSqliteToPostgres.js",
+    "postgres:local-config": "node scripts/create-postgres-local-config.js"
   },
   "dependencies": {
     "@aws-sdk/client-auto-scaling": "^3.600.0",

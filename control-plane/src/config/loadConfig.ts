@@ -196,9 +196,10 @@ const runtimeProfileSchema = z
   }));
 
 export async function loadConfig(): Promise<{ config: AppConfig; models: ModelDefinition[] }> {
+  const maintenanceMode = boolEnv("CONTROL_PLANE_MAINTENANCE_MODE") ?? false;
   const configuredProviders = await loadCapacityProviders();
   const runtimeProfiles = loadRuntimeProfiles();
-  const capacityTargets = await loadCapacityTargets(configuredProviders);
+  const capacityTargets = await loadCapacityTargets(configuredProviders, { syncNeuronTargets: !maintenanceMode });
   const modelsById = new Map<string, ModelDefinition>();
 
   for (const target of capacityTargets) {
@@ -259,7 +260,9 @@ export async function loadConfig(): Promise<{ config: AppConfig; models: ModelDe
         .map((user) => user.trim())
         .filter(Boolean),
       authMethods: loadAuthMethods(),
-      hassleOff: loadHassleOffClientConfig()
+      hassleOff: loadHassleOffClientConfig(),
+      maintenanceMode,
+      storageOperationLockPath: env("STORAGE_OPERATION_LOCK_PATH") ?? path.resolve(process.cwd(), "data", "neuron-storage.lock")
     },
     models: Array.from(modelsById.values()).sort((a, b) => a.id.localeCompare(b.id))
   };
@@ -429,7 +432,10 @@ function loadProviderConfigFromEnv(prefix: string, type: string): Record<string,
   return undefined;
 }
 
-async function loadCapacityTargets(providers: CapacityProviderDefinition[]): Promise<CapacityTarget[]> {
+async function loadCapacityTargets(
+  providers: CapacityProviderDefinition[],
+  options: { syncNeuronTargets: boolean } = { syncNeuronTargets: true }
+): Promise<CapacityTarget[]> {
   const raw = env("CAPACITY_TARGETS_JSON") ?? (env("CAPACITY_TARGET_KEYS") ? JSON.stringify(loadTargetsFromEnv(providers)) : await readTargetsFile());
   const parsed = raw ? z.array(targetSchema).parse(JSON.parse(raw)) : [];
   const providerById = new Map(providers.map((provider) => [provider.id, provider]));
@@ -438,7 +444,7 @@ async function loadCapacityTargets(providers: CapacityProviderDefinition[]): Pro
     const provider = normalizeProvider(target.provider ?? providerById.get(providerId ?? "")?.type ?? "aws-ecs");
     return { ...target, provider, providerId: providerId ?? provider };
   });
-  const syncedTargets = await loadSyncedNeuronTargets(providers);
+  const syncedTargets = options.syncNeuronTargets ? await loadSyncedNeuronTargets(providers) : [];
   const configuredIds = new Set(configuredTargets.map((target) => target.id));
   return [...configuredTargets, ...syncedTargets.filter((target) => !configuredIds.has(target.id))];
 }
@@ -696,7 +702,15 @@ function loadStorageConfig(): StorageConfig {
   const driver = (env("STORAGE_DRIVER") ?? "memory").toLowerCase();
   if (driver === "memory") return { driver: "memory" };
   if (driver === "sqlite") return { driver: "sqlite", path: env("SQLITE_PATH") ?? path.resolve(process.cwd(), "data", "neuron.db") };
-  if (driver === "postgres") return { driver: "postgres", connectionString: requiredScopedEnv("DATABASE_URL") };
+  if (driver === "postgres") {
+    const maxConnections = intEnv("POSTGRES_POOL_MAX", 10);
+    if (maxConnections < 1) throw new Error("POSTGRES_POOL_MAX must be at least 1");
+    return {
+      driver: "postgres",
+      connectionString: requiredScopedEnv("DATABASE_URL"),
+      maxConnections
+    };
+  }
   throw new Error(`Unsupported STORAGE_DRIVER: ${driver}`);
 }
 

@@ -1,0 +1,39 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: "no"
+    env_file:
+      - .env.postgres.local
+    environment:
+      POSTGRES_DB: neuron_dry_run
+    tmpfs:
+      - /var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d neuron_dry_run"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+      start_period: 3s
+    networks:
+      - disposable-postgres
+
+  neuron-migrate:
+    build:
+      context: ./control-plane
+      dockerfile: Dockerfile
+    image: neuron-control-plane:local
+    restart: "no"
+    env_file:
+      - .env.postgres.local
+    entrypoint: ["node", "dist/scripts/migrateSqliteToPostgres.js"]
+    volumes:
+      - ./data:/app/data
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - disposable-postgres
+
+networks:
+  disposable-postgres:
+    internal: true

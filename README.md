@@ -90,8 +90,11 @@ Useful knobs:
   MCP clients.
 - `CAPACITY_TARGETS_FILE`, `CAPACITY_TARGETS_JSON`, or `CAPACITY_TARGET_KEYS`
   define the capacity targets NeurOn can control.
-- `STORAGE_DRIVER=sqlite` is the local Compose default and persists
-  reservations plus API keys in `./data/neuron.db`.
+- `STORAGE_DRIVER=sqlite` is the local Compose default and persists the nine
+  control-plane repository families in `./data/neuron.db`.
+- The private PostgreSQL Compose overlay, migration command, dry-run, rollback
+  backup, and one-writer cutover procedure are documented in
+  [SQLite to PostgreSQL Migration](control-plane/docs/postgres-migration.md).
 - `USE_FAKE_PROVIDER=true` switches to the fake provider for tests/app-only
   development.
 - `LITELLM_API_BASE_URL` and `LITELLM_API_KEY` enable traffic-based keepalive

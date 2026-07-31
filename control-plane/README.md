@@ -127,6 +127,9 @@ Environment variables:
 | `STORAGE_DRIVER` | `memory` | `memory`, `sqlite`, or `postgres` reservation and API-key storage |
 | `SQLITE_PATH` | `data/neuron.db` | SQLite database path when `STORAGE_DRIVER=sqlite` |
 | `DATABASE_URL` | unset | Postgres connection string when `STORAGE_DRIVER=postgres` |
+| `POSTGRES_POOL_MAX` | `10` | Maximum connections in the shared Postgres application pool |
+| `CONTROL_PLANE_MAINTENANCE_MODE` | `false` | Disable mutations and lifecycle/provider background work for storage maintenance |
+| `STORAGE_OPERATION_LOCK_PATH` | `data/neuron-storage.lock` | Exclusive application/migration storage lock |
 | `CAPACITY_TARGETS_JSON` | unset | JSON array of targets |
 | `CAPACITY_TARGET_KEYS` | unset | Comma-separated target keys for env-expanded config |
 | `CAPACITY_TARGETS_FILE` | unset | Local target config file |
@@ -254,5 +257,14 @@ Reservation and API-key storage defaults to memory for direct local runs. Set
 `STORAGE_DRIVER=sqlite` for a single-file durable database or
 `STORAGE_DRIVER=postgres` with `DATABASE_URL` for Postgres. The local Compose
 file defaults to SQLite at `/app/data/neuron.db` and mounts the repository
-`./data` directory there. Target status, runtime discovery cache, and startup
-estimates remain in memory and are rebuilt observationally by reconciliation.
+`./data` directory there. Runtime discovery records use the selected durable
+driver. Target status and startup estimates remain in memory and are rebuilt
+observationally by reconciliation. PostgreSQL uses one bounded shared pool and
+a transactional versioned schema ledger.
+
+For local private PostgreSQL Compose, safe SQLite transfer, dry-run proof,
+cutover, backup, and rollback, follow
+[docs/postgres-migration.md](docs/postgres-migration.md). The PostgreSQL service
+publishes no host database port. Never operate SQLite and PostgreSQL as
+simultaneous production writers; HassleOff's separate SQLite store is not part
+of this migration.

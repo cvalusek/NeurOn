@@ -13,6 +13,7 @@
 * [Provisioning](provisioning.md) - Explicit resource creation and persisted jobs.
 * [HassleOff](hassleoff.md) - Dead-man leases, start interlock, fail-safe testing, and scoped shutdowns.
 * [Discovery](discovery.md) - Runtime model discovery and bootstrap behavior.
+* [SQLite to PostgreSQL Migration](postgres-migration.md) - Fail-closed backup, dry-run, cutover, verification, and rollback.
 * [UI](ui.md) - Target-first interaction model and server-rendered pages.
 * [Operations](operations.md) - Deployment, IAM, runtime behavior, and limits.
 

@@ -379,9 +379,11 @@ export interface AppConfig {
   adminUsers: string[];
   authMethods: AuthMethod[];
   hassleOff?: HassleOffClientConfig;
+  maintenanceMode?: boolean;
+  storageOperationLockPath?: string;
 }
 
 export type StorageConfig =
   | { driver: "memory" }
   | { driver: "sqlite"; path: string }
-  | { driver: "postgres"; connectionString: string };
+  | { driver: "postgres"; connectionString: string; maxConnections: number };

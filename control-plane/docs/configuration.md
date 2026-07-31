@@ -129,6 +129,9 @@ RUNTIME_PROFILES_JSON=[{"id":"prefer-nightly","name":"PreFer Nightly","type":"do
 - `STORAGE_DRIVER`
 - `SQLITE_PATH`
 - `DATABASE_URL`
+- `POSTGRES_POOL_MAX`
+- `CONTROL_PLANE_MAINTENANCE_MODE`
+- `STORAGE_OPERATION_LOCK_PATH`
 - `AWS_REGION`
 - `LITELLM_API_BASE_URL`
 - `LITELLM_API_KEY`
@@ -156,7 +159,7 @@ Local compose overrides the important polling settings for faster iteration.
 
 ## Storage
 
-Reservation and API-key storage use the same configured driver. Storage
+All nine durable repository families use the same configured driver. Storage
 defaults to memory for direct local runs:
 
 ```env
@@ -175,6 +178,7 @@ Use Postgres when the control plane should use external database storage:
 ```env
 STORAGE_DRIVER=postgres
 DATABASE_URL=postgres://neuron:secret@postgres:5432/neuron
+POSTGRES_POOL_MAX=10
 ```
 
 Local Compose defaults to SQLite at `/app/data/neuron.db` and mounts the
@@ -184,6 +188,22 @@ targets, target provisioning jobs, target model discovery results, target
 activations, and reservation cost allocation records across NeurOn restarts. Target status and
 startup estimates remain in memory because they are observational and rebuilt by
 reconciliation.
+
+PostgreSQL repositories share the bounded pool. Schema creation and upgrades
+run transactionally through `neuron_schema_migrations`; repository classes do
+not own pools or execute startup DDL. Do not use application startup to transfer
+SQLite rows. Follow the explicit [SQLite to PostgreSQL migration](postgres-migration.md)
+procedure, which retains a consistent rollback backup and enforces one
+production database writer.
+
+`CONTROL_PLANE_MAINTENANCE_MODE=true` disables state-changing HTTP/MCP routes,
+the reconciler, LiteLLM traffic polling, startup discovery/provider sync, and
+HassleOff status calls for storage verification. `STORAGE_OPERATION_LOCK_PATH`
+defaults to `data/neuron-storage.lock`; the application and migration command
+use the same exclusive lock.
+
+HassleOff continues to own its separate SQLite database regardless of the
+NeurOn control-plane storage driver.
 
 ## Auth And API Keys
 

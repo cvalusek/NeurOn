@@ -2,8 +2,6 @@ import pg from "pg";
 import type { AuthMethodRepository } from "../domain/interfaces.js";
 import type { AuthMethod, AuthMethodType } from "../domain/types.js";
 
-const { Pool } = pg;
-
 interface AuthMethodRow {
   id: string;
   display_name: string;
@@ -15,20 +13,8 @@ interface AuthMethodRow {
 export class PostgresAuthMethodRepository implements AuthMethodRepository {
   private readonly pool: pg.Pool;
 
-  constructor(connectionString: string) {
-    this.pool = new Pool({ connectionString });
-  }
-
-  async initialize(): Promise<void> {
-    await this.pool.query(`
-      create table if not exists auth_methods (
-        id text primary key,
-        display_name text not null,
-        type text not null,
-        enabled boolean not null,
-        config_json jsonb not null
-      );
-    `);
+  constructor(pool: pg.Pool) {
+    this.pool = pool;
   }
 
   async create(input: AuthMethod): Promise<AuthMethod> {
@@ -57,9 +43,6 @@ export class PostgresAuthMethodRepository implements AuthMethodRepository {
     return (result.rowCount ?? 0) > 0;
   }
 
-  async close(): Promise<void> {
-    await this.pool.end();
-  }
 }
 
 function toSqlValues(method: AuthMethod): unknown[] {

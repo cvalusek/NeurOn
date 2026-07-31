@@ -38,6 +38,40 @@ const config: AppConfig = {
 
 const models: ModelDefinition[] = [{ id: "m1", displayName: "M1", aliases: ["m1"], targetIds: ["t1"] }];
 
+describe("maintenance mode", () => {
+  it("reports the active storage driver, blocks mutations, and avoids HassleOff status calls", async () => {
+    process.env.USE_FAKE_PROVIDER = "true";
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const { app } = await buildApp({
+      ...config,
+      maintenanceMode: true,
+      adminUsers: ["actual"],
+      capacityTargets: [{ id: "t1", displayName: "T1", provider: "runpod", providerId: "runpod", modelIds: ["m1"] }],
+      hassleOff: {
+        baseUrl: "http://hassleoff.invalid",
+        controllerToken: "not-used",
+        controllerId: "neuron-test",
+        requestTimeoutSeconds: 1,
+        failSafeTestTargetId: "test"
+      }
+    }, models);
+    const auth = { authorization: `Basic ${Buffer.from("actual:secret").toString("base64")}` };
+    const health = await app.inject({ method: "GET", url: "/healthz" });
+    const mutation = await app.inject({ method: "POST", url: "/api/reservations", headers: auth, payload: { modelIds: ["m1"] } });
+    const home = await app.inject({ method: "GET", url: "/", headers: auth });
+    const hassleOff = await app.inject({ method: "GET", url: "/admin/hassleoff", headers: auth });
+    await app.close();
+    vi.unstubAllGlobals();
+
+    expect(health.json()).toEqual({ ok: true, storageDriver: "memory", maintenanceMode: true });
+    expect(mutation.statusCode).toBe(503);
+    expect(home.statusCode).toBe(200);
+    expect(hassleOff.statusCode).toBe(200);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
+
 describe("API authentication context", () => {
   it("uses the authenticated username instead of POST body username", async () => {
     process.env.USE_FAKE_PROVIDER = "true";

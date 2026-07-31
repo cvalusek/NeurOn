@@ -3,8 +3,6 @@ import type { TargetProvisioningJobRepository } from "../domain/interfaces.js";
 import type { TargetProvisioningJob } from "../domain/types.js";
 import { cloneTargetProvisioningJob, targetProvisioningJobFromJson } from "./targetProvisioningJobUtils.js";
 
-const { Pool } = pg;
-
 interface JobRow {
   id: string;
   target_id: string;
@@ -14,20 +12,8 @@ interface JobRow {
 export class PostgresTargetProvisioningJobRepository implements TargetProvisioningJobRepository {
   private readonly pool: pg.Pool;
 
-  constructor(connectionString: string) {
-    this.pool = new Pool({ connectionString });
-  }
-
-  async initialize(): Promise<void> {
-    await this.pool.query(`
-      create table if not exists target_creation_jobs (
-        id text primary key,
-        target_id text not null,
-        job_json jsonb not null
-      );
-      create index if not exists idx_target_creation_jobs_target_id
-        on target_creation_jobs(target_id);
-    `);
+  constructor(pool: pg.Pool) {
+    this.pool = pool;
   }
 
   async create(input: TargetProvisioningJob): Promise<TargetProvisioningJob> {
@@ -58,9 +44,6 @@ export class PostgresTargetProvisioningJobRepository implements TargetProvisioni
     return cloneTargetProvisioningJob(updated);
   }
 
-  async close(): Promise<void> {
-    await this.pool.end();
-  }
 }
 
 function fromRow(row: JobRow): TargetProvisioningJob {

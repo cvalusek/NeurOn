@@ -3,8 +3,6 @@ import type { CapacityProviderRepository } from "../domain/interfaces.js";
 import type { CapacityProviderDefinition } from "../domain/types.js";
 import { cloneProvider } from "./InMemoryCapacityProviderRepository.js";
 
-const { Pool } = pg;
-
 interface ProviderRow {
   id: string;
   display_name: string;
@@ -17,22 +15,8 @@ interface ProviderRow {
 export class PostgresCapacityProviderRepository implements CapacityProviderRepository {
   private readonly pool: pg.Pool;
 
-  constructor(connectionString: string) {
-    this.pool = new Pool({ connectionString });
-  }
-
-  async initialize(): Promise<void> {
-    await this.pool.query(`
-      create table if not exists capacity_providers (
-        id text primary key,
-        display_name text not null,
-        type text not null,
-        provisioning_enabled boolean not null default false,
-        config jsonb,
-        credential_id text
-      );
-    `);
-    await this.pool.query("alter table capacity_providers add column if not exists provisioning_enabled boolean not null default false");
+  constructor(pool: pg.Pool) {
+    this.pool = pool;
   }
 
   async create(input: CapacityProviderDefinition): Promise<CapacityProviderDefinition> {
@@ -67,9 +51,6 @@ export class PostgresCapacityProviderRepository implements CapacityProviderRepos
     return (result.rowCount ?? 0) > 0;
   }
 
-  async close(): Promise<void> {
-    await this.pool.end();
-  }
 }
 
 function toSqlValues(provider: CapacityProviderDefinition): unknown[] {

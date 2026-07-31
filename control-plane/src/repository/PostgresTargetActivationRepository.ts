@@ -4,8 +4,6 @@ import type { TargetActivationRepository } from "../domain/interfaces.js";
 import type { TargetActivation, TargetActivationReservation, TargetActivationStatus } from "../domain/types.js";
 import { cloneTargetActivation, cloneTargetActivationReservation } from "./targetActivationUtils.js";
 
-const { Pool } = pg;
-
 interface TargetActivationRow {
   id: string;
   target_id: string;
@@ -29,39 +27,8 @@ interface TargetActivationReservationRow {
 export class PostgresTargetActivationRepository implements TargetActivationRepository {
   private readonly pool: pg.Pool;
 
-  constructor(connectionString: string) {
-    this.pool = new Pool({ connectionString });
-  }
-
-  async initialize(): Promise<void> {
-    await this.pool.query(`
-      create table if not exists target_activations (
-        id text primary key,
-        target_id text not null,
-        started_at timestamptz not null,
-        ended_at timestamptz,
-        status text not null check (status in ('open', 'closed')),
-        estimated_hourly_cost_usd numeric,
-        estimated_cost_usd numeric not null default 0,
-        last_costed_at timestamptz not null
-      );
-      create index if not exists idx_target_activations_target_status
-        on target_activations(target_id, status, started_at);
-
-      create table if not exists target_activation_reservations (
-        id text primary key,
-        target_activation_id text not null references target_activations(id) on delete cascade,
-        reservation_id text not null references reservations(id) on delete cascade,
-        started_at timestamptz not null,
-        ended_at timestamptz,
-        estimated_cost_usd numeric not null default 0,
-        unique(target_activation_id, reservation_id)
-      );
-      create index if not exists idx_target_activation_reservations_reservation
-        on target_activation_reservations(reservation_id);
-      create index if not exists idx_target_activation_reservations_activation
-        on target_activation_reservations(target_activation_id);
-    `);
+  constructor(pool: pg.Pool) {
+    this.pool = pool;
   }
 
   async createActivation(input: Omit<TargetActivation, "id"> & { id?: string }): Promise<TargetActivation> {
@@ -154,9 +121,6 @@ export class PostgresTargetActivationRepository implements TargetActivationRepos
     return result.rows.map(linkFromRow);
   }
 
-  async close(): Promise<void> {
-    await this.pool.end();
-  }
 }
 
 function toActivationSqlValues(activation: TargetActivation): unknown[] {

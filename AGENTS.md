@@ -31,10 +31,15 @@ referenced through NeurOn target configuration.
   `CapacityProvider`, `BackendConfigSync`, `ReservationRepository`,
   `ApiKeyRepository`, `AuthProvider`, `TrafficSource`, and
   `TargetStatusRepository`.
-- Reservation and API-key storage can be memory, SQLite, or Postgres behind
-  repository interfaces. Target status, runtime discovery cache, and startup
-  estimates remain observational and in-memory unless a task is explicitly
-  about persisting them.
+- The selected storage driver supplies reservations, reservation profiles, API
+  keys, auth methods, provider and target definitions, provisioning jobs,
+  runtime discovery records, and target activation/cost history. SQLite and
+  Postgres are durable; memory storage is process-local.
+- Target status and startup estimates remain observational and in-memory unless
+  a task is explicitly about persisting them.
+- PostgreSQL schema changes belong in the centralized versioned migration
+  ledger. Repositories share one bounded application pool and must not create
+  their own pools or run startup DDL.
 - Model choices are owned by target configuration. Do not infer the production
   catalog from external preset files.
 

@@ -3,8 +3,6 @@ import pg from "pg";
 import type { ReservationRepository } from "../domain/interfaces.js";
 import type { Reservation, ReservationStatus } from "../domain/types.js";
 
-const { Pool } = pg;
-
 interface ReservationRow {
   id: string;
   username: string;
@@ -25,35 +23,8 @@ interface ReservationRow {
 export class PostgresReservationRepository implements ReservationRepository {
   private readonly pool: pg.Pool;
 
-  constructor(connectionString: string) {
-    this.pool = new Pool({ connectionString });
-  }
-
-  async initialize(): Promise<void> {
-    await this.pool.query(`
-      create table if not exists reservations (
-        id text primary key,
-        username text not null,
-        api_key_name text,
-        profile_id text,
-        profile_name text,
-        model_ids jsonb not null,
-        target_ids jsonb not null,
-        created_at timestamptz not null,
-        expires_at timestamptz not null,
-        keepalive_minutes integer,
-        ended_at timestamptz,
-        status text not null check (status in ('active', 'done', 'expired', 'failed')),
-        failure_message text,
-        synthetic boolean not null default false
-      );
-
-      create index if not exists idx_reservations_status_expires_at
-        on reservations(status, expires_at);
-    `);
-    await this.pool.query("alter table reservations add column if not exists api_key_name text");
-    await this.pool.query("alter table reservations add column if not exists profile_id text");
-    await this.pool.query("alter table reservations add column if not exists profile_name text");
+  constructor(pool: pg.Pool) {
+    this.pool = pool;
   }
 
   async create(input: Omit<Reservation, "id"> & { id?: string }): Promise<Reservation> {
@@ -123,9 +94,6 @@ export class PostgresReservationRepository implements ReservationRepository {
     return result.rows.map(fromRow);
   }
 
-  async close(): Promise<void> {
-    await this.pool.end();
-  }
 }
 
 function toSqlValues(reservation: Reservation): unknown[] {

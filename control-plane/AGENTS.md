@@ -31,10 +31,15 @@ configuration or in the external runtime project.
   `CapacityProvider`, `BackendConfigSync`, `ReservationRepository`,
   `ApiKeyRepository`, `AuthProvider`, `TrafficSource`, and
   `TargetStatusRepository`.
-- Reservation and API-key storage can be memory, SQLite, or Postgres behind
-  repository interfaces. Keep target status, runtime discovery cache, and
-  startup estimates observational and in-memory unless a task is explicitly
-  about persisting them.
+- The selected storage driver supplies reservations, reservation profiles, API
+  keys, auth methods, provider and target definitions, provisioning jobs,
+  runtime discovery records, and target activation/cost history. SQLite and
+  Postgres are durable; memory storage is process-local.
+- Keep target status and startup estimates observational and in-memory unless a
+  task is explicitly about persisting them.
+- PostgreSQL schema changes belong in the centralized versioned migration
+  ledger. Repositories share one bounded application pool and must not create
+  their own pools or run startup DDL.
 - Use explicit service classes and typed interfaces over framework magic.
 
 ## Configuration Rules
