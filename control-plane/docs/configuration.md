@@ -347,6 +347,16 @@ CAPACITY_TARGET_MULTIPLE_MOE_96GB_MODEL_QWEN_36_CONTEXT_LABEL=256k
 
 ## AWS Env Fields
 
+Use `aws-ec2` when NeurOn should start and stop one existing EC2 instance:
+
+```env
+CAPACITY_TARGET_GPU_INSTANCE_PROVIDER=aws-ec2
+CAPACITY_TARGET_GPU_INSTANCE_AWS_INSTANCE_ID=i-1234567890abcdef0
+```
+
+Use `aws-ecs` or `aws-ecs-asg` when NeurOn should control an ECS service backed
+by an Auto Scaling Group:
+
 ```env
 CAPACITY_TARGET_MULTIPLE_MOE_96GB_AWS_CLUSTER=llm-cluster
 CAPACITY_TARGET_MULTIPLE_MOE_96GB_AWS_SERVICE=llama-cpp-gpu-pool-96gb
@@ -355,6 +365,7 @@ CAPACITY_TARGET_MULTIPLE_MOE_96GB_AWS_ASG_NAME=llm-gpu-pool-96gb-asg
 
 `AWS_CLUSTER` and `AWS_SERVICE` may be names or ARNs. The Auto Scaling Group
 must be supplied by name because Auto Scaling APIs use `AutoScalingGroupName`.
+EC2 targets do not use an Auto Scaling Group.
 
 Older JSON fields `clusterName` and `serviceName` are still supported, but new
 configs should use `cluster` and `service`.

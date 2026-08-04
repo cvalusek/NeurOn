@@ -4,6 +4,7 @@ import swagger from "@fastify/swagger";
 import swaggerUi from "@fastify/swagger-ui";
 import Fastify from "fastify";
 import { SharedPasswordAuthProvider } from "./auth/SharedPasswordAuthProvider.js";
+import { AwsEc2CapacityProvider } from "./capacity/AwsEc2CapacityProvider.js";
 import { AwsEcsAsgCapacityProvider } from "./capacity/AwsEcsAsgCapacityProvider.js";
 import { ActivateOrReprovisionCapacityProvider } from "./capacity/ActivateOrReprovisionCapacityProvider.js";
 import { CompositeCapacityProvider } from "./capacity/CompositeCapacityProvider.js";
@@ -59,6 +60,7 @@ export async function buildApp(config: AppConfig, models: ModelDefinition[]) {
     process.env.USE_FAKE_PROVIDER === "true"
       ? new FakeCapacityProvider()
         : new CompositeCapacityProvider({
+          "aws-ec2": new AwsEc2CapacityProvider(config.awsRegion),
           "aws-ecs": new AwsEcsAsgCapacityProvider(config.awsRegion),
           docker: new DockerContainerCapacityProvider(),
           "docker-compose": new DockerComposeCapacityProvider(),

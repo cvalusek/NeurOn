@@ -7,7 +7,7 @@
 * [Reconciler](reconciler.md) - Desired-state loop and lifecycle decisions.
 * [Configuration](configuration.md) - JSON, file, and env-expanded config.
 * [Integrations](integrations.md) - API keys, OpenAPI, Swagger UI, and MCP.
-* [Providers](providers.md) - Docker Compose, AWS ECS/ASG, and LiteLLM.
+* [Providers](providers.md) - Docker Compose, AWS EC2, AWS ECS/ASG, and LiteLLM.
 * [Targets](targets.md) - Target config, provider relationships, and runtime profiles.
 * [PreFer](prefer.md) - PreFer runtime config, presets, and plugin direction.
 * [Provisioning](provisioning.md) - Explicit resource creation and persisted jobs.

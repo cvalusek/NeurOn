@@ -1,7 +1,7 @@
 ---
 type: Reference
 title: Providers
-description: Capacity, Docker Compose, AWS ECS/ASG, NeurOn, and LiteLLM provider behavior.
+description: Capacity, Docker Compose, AWS EC2, AWS ECS/ASG, NeurOn, and LiteLLM provider behavior.
 tags: [providers, aws, docker, neuron, litellm]
 timestamp: 2026-06-25T00:00:00Z
 ---
@@ -62,6 +62,103 @@ durably. Generic provider errors never enter this path.
 Credentials are not a separate first-class record yet. Until that exists,
 providers should prefer environment-variable references such as `apiKeyEnv`
 rather than storing secret material directly.
+
+## AWS EC2
+
+The AWS EC2 provider starts and stops a pre-created EC2 instance. It is the
+simplest AWS lifecycle option when an operator wants to own instance creation,
+AMI selection, security groups, EBS volumes, instance profile, and runtime
+bootstrap outside NeurOn.
+
+For a target desired on:
+
+- Start the configured EC2 instance.
+
+For a target desired off:
+
+- Stop the configured EC2 instance.
+
+The provider does not create instances, AMIs, launch templates, networking,
+instance profiles, or volumes yet. Provisioning should be added as an explicit
+admin action only, because AMI IDs vary by region and runtime projects own the
+image and model-loading details.
+
+In the Admin UI, create an `aws-ec2` provider with provisioning disabled, then
+create a target under it and enter the existing EC2 instance ID. The target can
+also be supplied declaratively with the JSON or environment forms below.
+
+### Target config
+
+```json
+{
+  "id": "gpu-instance",
+  "displayName": "GPU Instance",
+  "provider": "aws-ec2",
+  "modelIds": ["qwen"],
+  "aws": {
+    "instanceId": "i-1234567890abcdef0"
+  }
+}
+```
+
+### Minimal IAM for Pre-Created Instances
+
+Use this policy shape when operators create and tag the instances themselves
+and NeurOn only starts, stops, and reads status. Scope the resource ARN to the
+specific instance IDs NeurOn may control.
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "StartStopKnownInstances",
+      "Effect": "Allow",
+      "Action": [
+        "ec2:StartInstances",
+        "ec2:StopInstances"
+      ],
+      "Resource": [
+        "arn:aws:ec2:us-east-1:123456789012:instance/i-1234567890abcdef0"
+      ]
+    },
+    {
+      "Sid": "ReadInstanceStatus",
+      "Effect": "Allow",
+      "Action": "ec2:DescribeInstances",
+      "Resource": "*"
+    }
+  ]
+}
+```
+
+`ec2:DescribeInstances` does not support resource-level permissions for this
+use case, so it remains `Resource: "*"`. Prefer a separate NeurOn IAM role per
+environment/account and keep start/stop resources tightly scoped.
+
+### Future IAM for Provisioning
+
+When EC2 provisioning is implemented, the policy will need to cover instance
+creation and cleanup in addition to lifecycle. Keep it separate from the
+minimal start/stop role and constrain it with tags such as
+`ManagedBy=NeurOn`, allowed AMI ARNs, subnet/security group ARNs, and the
+specific instance profile NeurOn may pass.
+
+Likely additional actions:
+
+- `ec2:RunInstances`
+- `ec2:CreateTags`
+- `ec2:TerminateInstances`
+- `ec2:DescribeImages`
+- `ec2:DescribeInstanceTypes`
+- `ec2:DescribeSubnets`
+- `ec2:DescribeSecurityGroups`
+- `ec2:DescribeVpcs`
+- `iam:PassRole` for the runtime instance profile only
+
+Provisioning config should require a region-appropriate AMI ID or SSM parameter
+reference, instance type, subnet, security groups, IAM instance profile, storage
+shape, and bootstrap/user-data owned by the runtime project.
 
 ## AWS ECS/ASG
 

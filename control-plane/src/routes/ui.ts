@@ -477,6 +477,7 @@ const targetFormSchema = z.object({
   awsCluster: z.string().optional(),
   awsService: z.string().optional(),
   awsAsgName: z.string().optional(),
+  awsInstanceId: z.string().optional(),
   dockerContainerName: z.string().optional(),
   dockerModelVolume: z.string().optional(),
   neuronTargetId: z.string().optional()
@@ -524,6 +525,11 @@ function targetFromForm(body: z.infer<typeof targetFormSchema>, provider: Capaci
       service: body.awsService,
       autoScalingGroupName: body.awsAsgName
     };
+  }
+  if (provider.type === "aws-ec2") {
+    const instanceId = body.awsInstanceId?.trim();
+    if (!instanceId) throw new Error("AWS EC2 instance ID is required");
+    target.aws = { instanceId };
   }
   if (provider.type === "docker" && body.dockerContainerName) {
     const port = profilePort(profile);

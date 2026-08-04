@@ -77,7 +77,8 @@ export interface AwsTargetConfig {
   service?: string;
   clusterName?: string;
   serviceName?: string;
-  autoScalingGroupName: string;
+  autoScalingGroupName?: string;
+  instanceId?: string;
 }
 
 export interface LiteLlmTargetConfig {

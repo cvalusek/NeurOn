@@ -12,7 +12,7 @@ It is intentionally small:
 - OpenAPI-compatible REST endpoints, Swagger UI, and MCP
 - durable reservation and API-key storage with memory, SQLite, or Postgres
   options
-- provider adapters for Docker containers, Docker Compose, and AWS ECS/ASG
+- provider adapters for Docker containers, Docker Compose, AWS EC2, and AWS ECS/ASG
 - LiteLLM request-log polling for traffic-based keepalive
 
 ## Local Run
@@ -138,7 +138,7 @@ Environment variables:
 | `ADMIN_STATUS_POLL_SECONDS` | `30` | Main/admin status polling |
 | `HEALTH_CHECK_TIMEOUT_SECONDS` | `5` | Per-target health check timeout |
 | `HEALTH_CHECK_INTERVAL_SECONDS` | `15` | Reserved for health tuning |
-| `AWS_REGION` | `us-east-1` | AWS region for ECS/ASG provider |
+| `AWS_REGION` | `us-east-1` | AWS region for EC2 and ECS/ASG providers |
 | `LITELLM_API_BASE_URL` | unset | LiteLLM admin API base URL |
 | `LITELLM_API_KEY` | unset | LiteLLM admin API key |
 | `LITELLM_TRAFFIC_POLL_SECONDS` | `60` | Poll `/spend/logs/v2`; set `0` to disable |
@@ -233,6 +233,15 @@ hashed `sk-neuron-...` API keys for Bearer-auth integrations. `AuthProvider` is
 isolated so GitHub/AuthentiK/Okta/Tailscale identity can replace it later.
 
 ## IAM
+
+For AWS EC2 targets that use pre-created instances, the task role needs:
+
+- `ec2:StartInstances`
+- `ec2:StopInstances`
+- `ec2:DescribeInstances`
+
+Scope start/stop to the specific instance ARNs NeurOn may control. EC2 targets
+use `aws.instanceId` and do not use an Auto Scaling Group.
 
 For AWS ECS/ASG targets, the task role needs:
 

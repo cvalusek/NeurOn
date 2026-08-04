@@ -3,13 +3,16 @@ import { DescribeServicesCommand, ECSClient, UpdateServiceCommand } from "@aws-s
 import type { CapacityProvider } from "../domain/interfaces.js";
 import type { CapacityProviderStatus, CapacityTarget } from "../domain/types.js";
 
-export class AwsEcsAsgCapacityProvider implements CapacityProvider {
-  private readonly ecs: ECSClient;
-  private readonly asg: AutoScalingClient;
+type AwsEcsClient = Pick<ECSClient, "send">;
+type AwsAutoScalingClient = Pick<AutoScalingClient, "send">;
 
-  constructor(region: string) {
-    this.ecs = new ECSClient({ region });
-    this.asg = new AutoScalingClient({ region });
+export class AwsEcsAsgCapacityProvider implements CapacityProvider {
+  private readonly ecs: AwsEcsClient;
+  private readonly asg: AwsAutoScalingClient;
+
+  constructor(region: string, clients?: { ecs?: AwsEcsClient; asg?: AwsAutoScalingClient }) {
+    this.ecs = clients?.ecs ?? new ECSClient({ region });
+    this.asg = clients?.asg ?? new AutoScalingClient({ region });
   }
 
   async provisionTarget(_target: CapacityTarget): Promise<void> {
@@ -51,10 +54,12 @@ export class AwsEcsAsgCapacityProvider implements CapacityProvider {
   }
 }
 
-function requireAws(target: CapacityTarget) {
+function requireAws(target: CapacityTarget): NonNullable<CapacityTarget["aws"]> & { cluster: string; service: string; autoScalingGroupName: string } {
   if (!target.aws) throw new Error(`Target ${target.id} is missing AWS config`);
   const cluster = target.aws.cluster ?? target.aws.clusterName;
   const service = target.aws.service ?? target.aws.serviceName;
+  const autoScalingGroupName = target.aws.autoScalingGroupName;
   if (!cluster || !service) throw new Error(`Target ${target.id} is missing ECS cluster or service config`);
-  return { ...target.aws, cluster, service };
+  if (!autoScalingGroupName) throw new Error(`Target ${target.id} is missing AWS autoScalingGroupName config`);
+  return { ...target.aws, cluster, service, autoScalingGroupName };
 }

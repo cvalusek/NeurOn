@@ -16,6 +16,7 @@
   },
   "dependencies": {
     "@aws-sdk/client-auto-scaling": "^3.600.0",
+    "@aws-sdk/client-ec2": "^3.1078.0",
     "@aws-sdk/client-ecs": "^3.600.0",
     "@fastify/cookie": "^9.3.1",
     "@fastify/formbody": "^7.4.0",

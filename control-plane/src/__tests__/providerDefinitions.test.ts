@@ -13,6 +13,9 @@ const managedEnv = [
   "CAPACITY_TARGET_GPU_MODEL_IDS",
   "CAPACITY_TARGET_GPU_ESTIMATED_HOURLY_COST_USD",
   "CAPACITY_TARGETS_FILE",
+  "CAPACITY_TARGET_EC2_GPU_DISPLAY_NAME",
+  "CAPACITY_TARGET_EC2_GPU_PROVIDER",
+  "CAPACITY_TARGET_EC2_GPU_AWS_INSTANCE_ID",
   "RUNTIME_PROFILES_JSON",
   "SHARED_PASSWORD"
 ];
@@ -314,6 +317,77 @@ describe("provider definitions", () => {
     });
 
     expect(captured[0].provider).toBe("aws-ecs");
+  });
+
+  it("dispatches aws-ec2 provider definitions to the EC2 adapter key", async () => {
+    const captured: CapacityTarget[] = [];
+    const awsProvider: CapacityProvider = {
+      provisionTarget: async () => undefined,
+      ensureTargetOn: async (target) => {
+        captured.push(target);
+      },
+      ensureTargetOff: async () => undefined,
+      getTargetStatus: async (): Promise<CapacityProviderStatus> => ({ observed: "stopped", message: "Stopped" }),
+      forceStopTarget: async () => undefined
+    };
+    const composite = new CompositeCapacityProvider(
+      { "aws-ec2": awsProvider },
+      [{ id: "aws-main", displayName: "AWS Main", type: "aws-ec2", config: {} }]
+    );
+
+    await composite.ensureTargetOn({
+      id: "gpu-instance",
+      displayName: "GPU Instance",
+      provider: "aws-ec2",
+      providerId: "aws-main",
+      modelIds: ["qwen"],
+      aws: { instanceId: "i-1234567890abcdef0" }
+    });
+
+    expect(captured[0]).toMatchObject({
+      provider: "aws-ec2",
+      aws: { instanceId: "i-1234567890abcdef0" }
+    });
+  });
+
+  it("loads AWS EC2 targets from environment variables", async () => {
+    process.env.CAPACITY_TARGET_KEYS = "EC2_GPU";
+    process.env.CAPACITY_TARGET_EC2_GPU_DISPLAY_NAME = "EC2 GPU";
+    process.env.CAPACITY_TARGET_EC2_GPU_PROVIDER = "aws-ec2";
+    process.env.CAPACITY_TARGET_EC2_GPU_AWS_INSTANCE_ID = "i-1234567890abcdef0";
+
+    const { config } = await loadConfig();
+
+    expect(config.capacityTargets[0]).toMatchObject({
+      id: "ec2-gpu",
+      displayName: "EC2 GPU",
+      provider: "aws-ec2",
+      providerId: "aws-ec2",
+      aws: { instanceId: "i-1234567890abcdef0" }
+    });
+  });
+
+  it("resolves AWS EC2 target validation through a provider ID", async () => {
+    process.env.CAPACITY_PROVIDERS_JSON = JSON.stringify([
+      { id: "aws-main", displayName: "AWS Main", type: "aws-ec2" }
+    ]);
+    process.env.CAPACITY_TARGETS_JSON = JSON.stringify([
+      {
+        id: "ec2-gpu",
+        displayName: "EC2 GPU",
+        providerId: "aws-main",
+        modelIds: [],
+        aws: { instanceId: "i-1234567890abcdef0" }
+      }
+    ]);
+
+    const { config } = await loadConfig();
+
+    expect(config.capacityTargets[0]).toMatchObject({
+      provider: "aws-ec2",
+      providerId: "aws-main",
+      aws: { instanceId: "i-1234567890abcdef0" }
+    });
   });
 
   it("requires providers to explicitly allow resource provisioning", async () => {

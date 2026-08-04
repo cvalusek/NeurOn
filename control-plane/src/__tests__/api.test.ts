@@ -426,6 +426,61 @@ describe("API authentication context", () => {
     expect(refreshed.body).toContain("Save provider");
   });
 
+  it("creates AWS EC2 providers and targets for pre-created instances", async () => {
+    process.env.USE_FAKE_PROVIDER = "true";
+    const { app } = await buildApp(config, models);
+    const auth = { authorization: `Basic ${Buffer.from("actual:secret").toString("base64")}` };
+
+    const providersPage = await app.inject({ method: "GET", url: "/admin/providers", headers: auth });
+    expect(providersPage.body).toContain('<option value="aws-ec2"');
+
+    const provider = await app.inject({
+      method: "POST",
+      url: "/admin/providers",
+      headers: { ...auth, "content-type": "application/x-www-form-urlencoded" },
+      payload: new URLSearchParams({
+        id: "aws-ec2",
+        displayName: "AWS EC2",
+        type: "aws-ec2"
+      }).toString()
+    });
+    expect(provider.statusCode).toBe(302);
+
+    const target = await app.inject({
+      method: "POST",
+      url: "/admin/targets",
+      headers: { ...auth, "content-type": "application/x-www-form-urlencoded" },
+      payload: new URLSearchParams({
+        id: "prefer-gpu",
+        displayName: "PreFer GPU",
+        providerId: "aws-ec2",
+        modelIds: "qwen",
+        awsInstanceId: "i-1234567890abcdef0"
+      }).toString()
+    });
+    expect(target.statusCode).toBe(302);
+    expect(target.headers.location).toBe("/admin/targets?created=prefer-gpu");
+
+    const targetsPage = await app.inject({ method: "GET", url: "/admin/targets", headers: auth });
+    expect(targetsPage.body).toContain("PreFer GPU");
+    expect(targetsPage.body).toContain("i-1234567890abcdef0");
+    expect(targetsPage.body).toContain("CAPACITY_TARGET_PREFER_GPU_AWS_INSTANCE_ID");
+
+    const missingInstance = await app.inject({
+      method: "POST",
+      url: "/admin/targets",
+      headers: { ...auth, "content-type": "application/x-www-form-urlencoded" },
+      payload: new URLSearchParams({
+        id: "missing-instance",
+        providerId: "aws-ec2"
+      }).toString()
+    });
+    await app.close();
+
+    expect(missingInstance.statusCode).toBe(302);
+    expect(missingInstance.headers.location).toContain("AWS%20EC2%20instance%20ID%20is%20required");
+  });
+
   it("serves admin auth management and creates persisted GitHub methods", async () => {
     process.env.USE_FAKE_PROVIDER = "true";
     const { app } = await buildApp(config, models);

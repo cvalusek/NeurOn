@@ -48,10 +48,9 @@ const targetSchema = z.object({
       service: z.string().optional(),
       clusterName: z.string().optional(),
       serviceName: z.string().optional(),
-      autoScalingGroupName: z.string()
+      autoScalingGroupName: z.string().optional(),
+      instanceId: z.string().optional()
     })
-    .refine((value) => Boolean(value.cluster ?? value.clusterName), "AWS cluster is required")
-    .refine((value) => Boolean(value.service ?? value.serviceName), "AWS service is required")
     .optional(),
   docker: z
     .object({
@@ -122,6 +121,28 @@ const targetSchema = z.object({
       reprovisionOnRecoverableUnavailable: z.boolean().optional()
     })
     .optional()
+}).superRefine((target, context) => {
+  if (target.provider === "aws-ec2" || (!target.provider && target.aws?.instanceId)) {
+    if (!target.aws?.instanceId) {
+      context.addIssue({ code: z.ZodIssueCode.custom, path: ["aws", "instanceId"], message: "AWS EC2 instanceId is required" });
+    }
+    return;
+  }
+  if (target.provider === "aws-ecs" || target.provider === "aws-ecs-asg" || (!target.provider && target.aws)) {
+    if (!target.aws) {
+      context.addIssue({ code: z.ZodIssueCode.custom, path: ["aws"], message: "AWS config is required" });
+      return;
+    }
+    if (!target.aws.cluster && !target.aws.clusterName) {
+      context.addIssue({ code: z.ZodIssueCode.custom, path: ["aws", "cluster"], message: "AWS cluster is required" });
+    }
+    if (!target.aws.service && !target.aws.serviceName) {
+      context.addIssue({ code: z.ZodIssueCode.custom, path: ["aws", "service"], message: "AWS service is required" });
+    }
+    if (!target.aws.autoScalingGroupName) {
+      context.addIssue({ code: z.ZodIssueCode.custom, path: ["aws", "autoScalingGroupName"], message: "AWS autoScalingGroupName is required" });
+    }
+  }
 });
 
 const providerSchema = z.object({
@@ -442,7 +463,7 @@ async function loadCapacityTargets(
   const configuredTargets = parsed.map((target) => {
     const providerId = target.providerId;
     const provider = normalizeProvider(target.provider ?? providerById.get(providerId ?? "")?.type ?? "aws-ecs");
-    return { ...target, provider, providerId: providerId ?? provider };
+    return targetSchema.parse({ ...target, provider, providerId: providerId ?? provider }) as CapacityTarget;
   });
   const syncedTargets = options.syncNeuronTargets ? await loadSyncedNeuronTargets(providers) : [];
   const configuredIds = new Set(configuredTargets.map((target) => target.id));
@@ -476,7 +497,7 @@ function loadTargetsFromEnv(providers: CapacityProviderDefinition[]): unknown[] 
       trafficModelPrefixes: listEnv(`${prefix}_TRAFFIC_MODEL_PREFIXES`),
       litellmDisplayPrefix: displayPrefixEnv(`${prefix}_LITELLM_DISPLAY_PREFIX`),
       modelsMax: intOptionalEnv(`${prefix}_MODELS_MAX`),
-      aws: provider === "aws-ecs" ? loadAwsTargetFromEnv(prefix) : undefined,
+      aws: provider === "aws-ecs" || provider === "aws-ecs-asg" || provider === "aws-ec2" ? loadAwsTargetFromEnv(prefix, provider) : undefined,
       docker: provider === "docker" ? loadDockerContainerTargetFromEnv(prefix) : undefined,
       dockerCompose: provider === "docker-compose" ? loadDockerTargetFromEnv(prefix) : undefined,
       runpod: provider === "runpod" ? loadRunPodTargetFromEnv(prefix) : undefined,
@@ -540,7 +561,12 @@ function loadModelsFromEnv(targetPrefix: string): unknown[] | undefined {
   });
 }
 
-function loadAwsTargetFromEnv(prefix: string): unknown {
+function loadAwsTargetFromEnv(prefix: string, provider: string): unknown {
+  if (provider === "aws-ec2") {
+    return compactObject({
+      instanceId: requiredScopedEnv(`${prefix}_AWS_INSTANCE_ID`)
+    });
+  }
   return compactObject({
     cluster: env(`${prefix}_AWS_CLUSTER`),
     service: env(`${prefix}_AWS_SERVICE`),

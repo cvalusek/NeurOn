@@ -954,6 +954,10 @@ function targetCreateModal(providers: ProviderView[], runtimeProfiles: RuntimePr
         <p><label>AWS service<br><input name="awsService" type="text" placeholder="llama-cpp-gpu-pool"></label></p>
         <p><label>AWS ASG name<br><input name="awsAsgName" type="text" placeholder="llm-gpu-pool-asg"></label></p>
       </div>
+      <div id="aws-ec2-target-fields">
+        <p><label>AWS EC2 instance ID<br><input name="awsInstanceId" type="text" placeholder="i-1234567890abcdef0"></label></p>
+        <p class="muted">NeurOn starts, stops, and inspects this pre-created instance.</p>
+      </div>
       <div id="docker-target-fields">
         <p><label>Docker container name<br><input name="dockerContainerName" type="text" placeholder="prefer"></label></p>
         <p><label>Model volume<br><input name="dockerModelVolume" type="text" placeholder="prefer-model-cache"></label></p>
@@ -1045,6 +1049,7 @@ function targetAdminScript(providers: ProviderView[], runtimeProfiles: RuntimePr
     dockerModelVolumeInput?.addEventListener('input', () => { dockerModelVolumeInput.dataset.touched = 'true'; });
     const runpod = document.querySelector('#runpod-target-fields');
     const aws = document.querySelector('#aws-target-fields');
+    const awsEc2 = document.querySelector('#aws-ec2-target-fields');
     const docker = document.querySelector('#docker-target-fields');
     const neuron = document.querySelector('#neuron-target-fields');
     const selectedProfile = () => runtimeProfile ? runtimeProfiles[runtimeProfile.value] : undefined;
@@ -1079,6 +1084,7 @@ function targetAdminScript(providers: ProviderView[], runtimeProfiles: RuntimePr
       const type = providers[provider.value];
       runpod.hidden = type !== 'runpod';
       aws.hidden = type !== 'aws-ecs' && type !== 'aws-ecs-asg';
+      awsEc2.hidden = type !== 'aws-ec2';
       docker.hidden = type !== 'docker';
       neuron.hidden = type !== 'neuron';
       const profile = effectiveProfile();
@@ -1257,6 +1263,10 @@ function targetEditPanel(target: TargetView, providers: ProviderView[], runtimeP
       <p><label>AWS service<br><input name="awsService" type="text" value="${escapeHtml(target.aws?.service ?? target.aws?.serviceName ?? "")}"></label></p>
       <p><label>AWS ASG name<br><input name="awsAsgName" type="text" value="${escapeHtml(target.aws?.autoScalingGroupName ?? "")}"></label></p>
     </div>
+    <div data-edit-provider-fields="aws-ec2">
+      <p><label>AWS EC2 instance ID<br><input name="awsInstanceId" type="text" value="${escapeHtml(target.aws?.instanceId ?? "")}"></label></p>
+      <p class="muted">NeurOn starts, stops, and inspects this pre-created instance.</p>
+    </div>
     <div data-edit-provider-fields="docker">
       <p><label>Docker container name<br><input name="dockerContainerName" type="text" value="${escapeHtml(target.docker?.containerName ?? "")}"></label></p>
       <p><label>Model volume<br><input name="dockerModelVolume" type="text" value="${escapeHtml(dockerModelVolumeForTarget(target))}"></label></p>
@@ -1303,6 +1313,7 @@ function targetDetails(target: CapacityTarget): string {
     ["AWS cluster", target.aws?.cluster ?? target.aws?.clusterName],
     ["AWS service", target.aws?.service ?? target.aws?.serviceName],
     ["AWS ASG", target.aws?.autoScalingGroupName],
+    ["AWS EC2 instance", target.aws?.instanceId],
     ["Remote NeurOn target", target.neuron?.targetId]
   ].filter((entry): entry is [string, string] => entry[1] !== undefined && entry[1] !== "");
   const view = `<table><tbody>${viewRows.map(([label, value]) => `<tr><th>${escapeHtml(label)}</th><td>${escapeHtml(String(value))}</td></tr>`).join("")}</tbody></table>`;
@@ -1378,6 +1389,7 @@ function declarativeTargetEnv(target: CapacityTarget): string {
     target.aws?.clusterName ? envLine(`${prefix}_AWS_CLUSTER_NAME`, target.aws.clusterName) : "",
     target.aws?.serviceName ? envLine(`${prefix}_AWS_SERVICE_NAME`, target.aws.serviceName) : "",
     target.aws?.autoScalingGroupName ? envLine(`${prefix}_AWS_ASG_NAME`, target.aws.autoScalingGroupName) : "",
+    target.aws?.instanceId ? envLine(`${prefix}_AWS_INSTANCE_ID`, target.aws.instanceId) : "",
     target.runpod?.podId ? envLine(`${prefix}_RUNPOD_POD_ID`, target.runpod.podId) : "",
     target.runpod?.apiKeyEnv ? envLine(`${prefix}_RUNPOD_API_KEY_ENV`, target.runpod.apiKeyEnv) : "",
     target.runpod?.apiBaseUrl ? envLine(`${prefix}_RUNPOD_API_BASE_URL`, target.runpod.apiBaseUrl) : "",
@@ -1468,6 +1480,7 @@ export function providerAdminPage(user: AuthenticatedUser, providers: ProviderVi
     const notes = {
       runpod: 'RunPod account access will come from the runtime environment or a future credentials record.',
       neuron: 'External NeurOn providers will need a NeurOn API key once credentials are modeled.',
+      'aws-ec2': 'AWS uses the NeurOn runtime role to start, stop, and inspect a pre-created EC2 instance.',
       'aws-ecs-asg': 'AWS uses the NeurOn runtime role for ordinary lifecycle operations.',
       docker: 'Docker providers use the local Docker daemon available to NeurOn.',
       'docker-compose': 'Docker Compose providers use target-level project and service settings.'
@@ -1484,6 +1497,7 @@ export function providerAdminPage(user: AuthenticatedUser, providers: ProviderVi
     const runpodTarget = document.querySelector('#provider-target-modal [data-provider-fields="runpod"]');
     const dockerTarget = document.querySelector('#provider-target-modal [data-provider-fields="docker"]');
     const awsTarget = document.querySelector('#provider-target-modal [data-provider-fields="aws"]');
+    const awsEc2Target = document.querySelector('#provider-target-modal [data-provider-fields="aws-ec2"]');
     const neuronTarget = document.querySelector('#provider-target-modal [data-provider-fields="neuron"]');
     const runtimeNote = document.querySelector('#runtime-profile-note');
     const dockerModelVolumeInput = document.querySelector('#provider-target-modal input[name="dockerModelVolume"]');
@@ -1520,6 +1534,7 @@ export function providerAdminPage(user: AuthenticatedUser, providers: ProviderVi
       runpodTarget.hidden = targetType !== 'runpod';
       dockerTarget.hidden = targetType !== 'docker';
       awsTarget.hidden = targetType !== 'aws-ecs' && targetType !== 'aws-ecs-asg';
+      awsEc2Target.hidden = targetType !== 'aws-ec2';
       neuronTarget.hidden = targetType !== 'neuron';
       const profile = effectiveTargetProfile();
       const variant = selectedTargetVariant();
@@ -1611,6 +1626,10 @@ function createTargetFromProviderModal(providers: ProviderView[], runtimeProfile
           <p><label>AWS service<br><input name="awsService" type="text" placeholder="llama-cpp-gpu-pool"></label></p>
           <p><label>AWS ASG name<br><input name="awsAsgName" type="text" placeholder="llm-gpu-pool-asg"></label></p>
         </div>
+        <div data-provider-fields="aws-ec2">
+          <p><label>AWS EC2 instance ID<br><input name="awsInstanceId" type="text" placeholder="i-1234567890abcdef0"></label></p>
+          <p class="muted">NeurOn starts, stops, and inspects this pre-created instance.</p>
+        </div>
         <div data-provider-fields="neuron">
           <p><label>Remote NeurOn target ID<br><input name="neuronTargetId" type="text" placeholder="gpu-pool-west"></label></p>
           <p class="muted">Later we can populate this from the remote NeurOn API.</p>
@@ -1636,7 +1655,7 @@ function runtimeProfileSelect(runtimeProfiles: RuntimeProfile[], selected = ""):
 }
 
 function providerTypeSelect(selected = "runpod"): string {
-  const types = ["runpod", "aws-ecs-asg", "docker", "docker-compose", "neuron"];
+  const types = ["runpod", "aws-ec2", "aws-ecs-asg", "docker", "docker-compose", "neuron"];
   return `<select name="type">${types.map((type) => `<option value="${escapeHtml(type)}" ${type === selected ? "selected" : ""}>${escapeHtml(type)}</option>`).join("")}</select>`;
 }
 
