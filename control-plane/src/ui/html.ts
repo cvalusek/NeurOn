@@ -2,6 +2,7 @@ import type { ApiKey, AppConfig, AuthenticatedUser, CapacityTarget, ModelDefinit
 import type { AuthMethodView } from "../services/AuthMethodService.js";
 import type { ProviderView } from "../services/ProviderService.js";
 import type { TargetView } from "../services/TargetService.js";
+import { litellmRoutePrefixes } from "../litellm/modelRouting.js";
 
 export interface HassleOffSafetyView {
   configured: boolean;
@@ -975,8 +976,12 @@ function targetCreateModal(providers: ProviderView[], runtimeProfiles: RuntimePr
         <p><label>Health URL override<br><input name="healthUrl" type="text" placeholder="http://runtime.internal:8080/health"></label></p>
         <p><label>Hourly cost override (USD)<br><input name="estimatedHourlyCostUsd" type="number" min="0" step="0.000001" placeholder="leave empty for provider discovery"></label></p>
         <p><label>Configured model IDs<br><input name="modelIds" type="text" placeholder="qwen-3.6,gemma-4"></label></p>
-        <p><label>LiteLLM model route prefixes<br><input name="trafficModelPrefixes" type="text" placeholder="clint-desktop/,prefer/"></label></p>
-        <p class="muted">Comma-separated prefixes link matching LiteLLM model names and traffic to this target.</p>
+        <p><label>LiteLLM model route prefixes<br><input name="trafficModelPrefixes" type="text" placeholder="defaults to &lt;target-id&gt;/"></label></p>
+        <p class="muted">Comma-separated prefixes link matching LiteLLM model names and traffic to this target. When omitted, NeurOn uses <code>&lt;target-id&gt;/</code>.</p>
+        <p><label>LiteLLM credential name override<br><input name="litellmCredentialName" type="text" placeholder="neuron/&lt;target-id&gt;"></label></p>
+        <p><label>Runtime API key environment variable<br><input name="litellmApiKeyEnv" type="text" placeholder="PREFER_TARGET_API_KEY"></label></p>
+        <p class="muted">NeurOn reads this environment variable only while synchronizing the target credential; the key is not stored in target configuration.</p>
+        <p><label><input name="litellmSyncDisabled" type="checkbox"> Disable discovered-model synchronization to LiteLLM</label></p>
         <p class="muted">Leave models empty to rely on runtime discovery.</p>
       </details>
       <div class="actions"><button type="submit">Add target</button></div>
@@ -1332,12 +1337,16 @@ function targetEditPanel(target: TargetView, providers: ProviderView[], runtimeP
     </div>
     <details>
       <summary>Overrides</summary>
-      <p><label>API URL override<br><input name="apiUrl" type="text" value="${escapeHtml(target.apiUrl ?? "")}"></label></p>
+      <p><label>API URL override<br><input name="apiUrl" type="text" value="${escapeHtml(target.apiUrl ?? target.litellm?.apiBaseUrl ?? "")}"></label></p>
       <p><label>Health URL override<br><input name="healthUrl" type="text" value="${escapeHtml(target.healthUrl ?? "")}"></label></p>
       <p><label>Hourly cost override (USD)<br><input name="estimatedHourlyCostUsd" type="number" min="0" step="0.000001" value="${escapeHtml(String(target.costEstimate?.hourlyUsd ?? ""))}" placeholder="leave empty for provider discovery"></label></p>
       <p><label>Configured model IDs<br><input name="modelIds" type="text" value="${escapeHtml(target.modelIds.join(","))}"></label></p>
-      <p><label>LiteLLM model route prefixes<br><input name="trafficModelPrefixes" type="text" value="${escapeHtml(target.trafficModelPrefixes?.join(",") ?? "")}"></label></p>
-      <p class="muted">Comma-separated prefixes link matching LiteLLM model names and traffic to this target.</p>
+      <p><label>LiteLLM model route prefixes<br><input name="trafficModelPrefixes" type="text" value="${escapeHtml(target.trafficModelPrefixes?.join(",") ?? "")}" placeholder="defaults to ${escapeHtml(target.id)}/"></label></p>
+      <p class="muted">Comma-separated prefixes link matching LiteLLM model names and traffic to this target. When omitted, NeurOn uses <code>${escapeHtml(target.id)}/</code>.</p>
+      <p><label>LiteLLM credential name override<br><input name="litellmCredentialName" type="text" value="${escapeHtml(target.litellm?.credentialName ?? "")}" placeholder="neuron/${escapeHtml(target.id)}"></label></p>
+      <p><label>Runtime API key environment variable<br><input name="litellmApiKeyEnv" type="text" value="${escapeHtml(target.litellm?.apiKeyEnv ?? "")}" placeholder="PREFER_TARGET_API_KEY"></label></p>
+      <p class="muted">The secret value is injected into NeurOn at runtime and is never stored with the target.</p>
+      <p><label><input name="litellmSyncDisabled" type="checkbox" ${target.litellm?.syncDiscoveredModels === false ? "checked" : ""}> Disable discovered-model synchronization to LiteLLM</label></p>
       <p class="muted">Leave models empty to rely on runtime discovery.</p>
     </details>
     <div class="actions"><button type="submit">Save target</button></div>
@@ -1361,7 +1370,9 @@ function targetDetails(target: CapacityTarget): string {
     ["Models", target.modelIds.length ? target.modelIds.join(", ") : "Discovery"],
     ["API URL", target.apiUrl],
     ["Health URL", target.healthUrl],
-    ["Traffic prefixes", target.trafficModelPrefixes?.join(", ")],
+    ["LiteLLM route prefixes", litellmRoutePrefixes(target).join(", ")],
+    ["LiteLLM credential", target.litellm?.credentialName ?? `neuron/${target.id}`],
+    ["Runtime API key environment variable", target.litellm?.apiKeyEnv],
     ["Docker container", target.docker?.containerName],
     ["Docker image", target.docker?.image],
     ["Docker volumes", target.docker?.volumes?.join(", ")],
@@ -1476,7 +1487,10 @@ function declarativeTargetEnv(target: CapacityTarget): string {
     target.dockerCompose?.profiles?.length ? envLine(`${prefix}_DOCKER_PROFILES`, target.dockerCompose.profiles.join(",")) : "",
     target.dockerCompose?.serviceName ? envLine(`${prefix}_DOCKER_SERVICE_NAME`, target.dockerCompose.serviceName) : "",
     target.litellm?.backendName ? envLine(`${prefix}_LITELLM_BACKEND_NAME`, target.litellm.backendName) : "",
-    target.litellm?.apiBaseUrl ? envLine(`${prefix}_LITELLM_API_BASE_URL`, target.litellm.apiBaseUrl) : ""
+    target.litellm?.apiBaseUrl ? envLine(`${prefix}_LITELLM_API_BASE_URL`, target.litellm.apiBaseUrl) : "",
+    target.litellm?.credentialName ? envLine(`${prefix}_LITELLM_CREDENTIAL_NAME`, target.litellm.credentialName) : "",
+    target.litellm?.apiKeyEnv ? envLine(`${prefix}_LITELLM_API_KEY_ENV`, target.litellm.apiKeyEnv) : "",
+    target.litellm?.syncDiscoveredModels === false ? envLine(`${prefix}_LITELLM_SYNC_DISCOVERED_MODELS`, "false") : ""
   ].filter(Boolean);
   if (target.models?.length || target.modelDiscovery || target.modelWarmup || target.docker?.environment) {
     lines.push(`# Some fields are only represented in JSON: ${JSON.stringify(stripUndefined({ models: target.models, modelDiscovery: target.modelDiscovery, modelWarmup: target.modelWarmup, dockerEnvironment: target.docker?.environment }))}`);
@@ -1761,8 +1775,12 @@ function createTargetFromProviderModal(providers: ProviderView[], runtimeProfile
           <p><label>Health URL override<br><input name="healthUrl" type="text" placeholder="http://runtime.internal:8080/health"></label></p>
           <p><label>Hourly cost override (USD)<br><input name="estimatedHourlyCostUsd" type="number" min="0" step="0.000001" placeholder="leave empty for provider discovery"></label></p>
           <p><label>Configured model IDs<br><input name="modelIds" type="text" placeholder="qwen-3.6,gemma-4"></label></p>
-          <p><label>LiteLLM model route prefixes<br><input name="trafficModelPrefixes" type="text" placeholder="clint-desktop/,prefer/"></label></p>
-          <p class="muted">Comma-separated prefixes link matching LiteLLM model names and traffic to this target.</p>
+          <p><label>LiteLLM model route prefixes<br><input name="trafficModelPrefixes" type="text" placeholder="defaults to &lt;target-id&gt;/"></label></p>
+          <p class="muted">Comma-separated prefixes link matching LiteLLM model names and traffic to this target. When omitted, NeurOn uses <code>&lt;target-id&gt;/</code>.</p>
+          <p><label>LiteLLM credential name override<br><input name="litellmCredentialName" type="text" placeholder="neuron/&lt;target-id&gt;"></label></p>
+          <p><label>Runtime API key environment variable<br><input name="litellmApiKeyEnv" type="text" placeholder="PREFER_TARGET_API_KEY"></label></p>
+          <p class="muted">NeurOn reads this environment variable only while synchronizing the target credential.</p>
+          <p><label><input name="litellmSyncDisabled" type="checkbox"> Disable discovered-model synchronization to LiteLLM</label></p>
           <p class="muted">Leave models empty to use runtime discovery.</p>
         </details>
         <div class="actions"><button type="submit">Create target</button></div>

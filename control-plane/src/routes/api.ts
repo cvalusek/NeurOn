@@ -617,6 +617,16 @@ const targetSchema = {
     modelsMax: { type: "number" },
     trafficModelPrefixes: { type: "array", items: { type: "string" } },
     litellmDisplayPrefix: { type: "string" },
+    litellm: {
+      type: "object",
+      properties: {
+        backendName: { type: "string" },
+        apiBaseUrl: { type: "string" },
+        credentialName: { type: "string" },
+        apiKeyEnv: { type: "string" },
+        syncDiscoveredModels: { type: "boolean" }
+      }
+    },
     healthUrl: { type: "string" },
     apiUrl: { type: "string" },
     desired: { type: "string" },

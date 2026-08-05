@@ -94,9 +94,6 @@ export class Reconciler {
         }
         const next = targetStatus(target.id, desired, observed, message, now, previous);
         this.statuses.set(next);
-        if (previous?.observed !== "healthy" && next.observed === "healthy") {
-          await this.backendConfigSync.syncTargetHealthy(runtimeTarget);
-        }
         if (next.observed === "healthy" && !this.targetOperations?.isDiscoveryActive(target.id)) {
           await this.runtimeModelDiscovery?.refreshTarget(runtimeTarget).catch(() => undefined);
         }

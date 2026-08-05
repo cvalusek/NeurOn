@@ -1,4 +1,4 @@
-import type { ApiKey, AuthenticatedUser, AuthMethod, CapacityProviderDefinition, CapacityProviderResource, CapacityProviderStatus, CapacityTarget, Reservation, ReservationProfile, TargetCostEstimateConfig, TargetModelDiscoveryRecord, TargetProvisioningJob, TargetActivation, TargetActivationReservation, TargetStatus } from "./types.js";
+import type { ApiKey, AuthenticatedUser, AuthMethod, CapacityProviderDefinition, CapacityProviderResource, CapacityProviderStatus, CapacityTarget, Reservation, ReservationProfile, RuntimeDiscoveredModel, TargetCostEstimateConfig, TargetModelDiscoveryRecord, TargetProvisioningJob, TargetActivation, TargetActivationReservation, TargetStatus } from "./types.js";
 
 export interface CapacityProvider {
   provisionTarget(target: CapacityTarget): Promise<Partial<CapacityTarget> | void>;
@@ -12,8 +12,7 @@ export interface CapacityProvider {
 }
 
 export interface BackendConfigSync {
-  syncTargetHealthy(target: CapacityTarget): Promise<void>;
-  markTargetUnavailable?(target: CapacityTarget): Promise<void>;
+  syncTargetHealthy(target: CapacityTarget, discoveredModels: RuntimeDiscoveredModel[]): Promise<void>;
 }
 
 export interface ReservationRepository {

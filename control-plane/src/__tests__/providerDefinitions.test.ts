@@ -20,6 +20,9 @@ const managedEnv = [
   "CAPACITY_TARGET_EC2_GPU_AWS_RUNTIME_PROTOCOL",
   "CAPACITY_TARGET_EC2_GPU_AWS_HEALTH_PATH",
   "CAPACITY_TARGET_EC2_GPU_AWS_API_PATH",
+  "CAPACITY_TARGET_EC2_GPU_LITELLM_CREDENTIAL_NAME",
+  "CAPACITY_TARGET_EC2_GPU_LITELLM_API_KEY_ENV",
+  "CAPACITY_TARGET_EC2_GPU_LITELLM_SYNC_DISCOVERED_MODELS",
   "CAPACITY_PROVIDER_KEYS",
   "CAPACITY_PROVIDER_AWS_MAIN_ID",
   "CAPACITY_PROVIDER_AWS_MAIN_DISPLAY_NAME",
@@ -368,6 +371,9 @@ describe("provider definitions", () => {
     process.env.CAPACITY_TARGET_EC2_GPU_AWS_RUNTIME_PROTOCOL = "https";
     process.env.CAPACITY_TARGET_EC2_GPU_AWS_HEALTH_PATH = "/ready";
     process.env.CAPACITY_TARGET_EC2_GPU_AWS_API_PATH = "/openai/v1";
+    process.env.CAPACITY_TARGET_EC2_GPU_LITELLM_CREDENTIAL_NAME = "neuron/ec2-gpu";
+    process.env.CAPACITY_TARGET_EC2_GPU_LITELLM_API_KEY_ENV = "PREFER_EC2_GPU_API_KEY";
+    process.env.CAPACITY_TARGET_EC2_GPU_LITELLM_SYNC_DISCOVERED_MODELS = "false";
 
     const { config } = await loadConfig();
 
@@ -382,6 +388,11 @@ describe("provider definitions", () => {
         runtimeProtocol: "https",
         healthPath: "/ready",
         apiPath: "/openai/v1"
+      },
+      litellm: {
+        credentialName: "neuron/ec2-gpu",
+        apiKeyEnv: "PREFER_EC2_GPU_API_KEY",
+        syncDiscoveredModels: false
       }
     });
   });

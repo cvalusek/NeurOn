@@ -86,8 +86,12 @@ export interface AwsTargetConfig {
 }
 
 export interface LiteLlmTargetConfig {
-  backendName: string;
-  apiBaseUrl: string;
+  /** @deprecated Use credentialName for discovered-model synchronization. */
+  backendName?: string;
+  apiBaseUrl?: string;
+  credentialName?: string;
+  apiKeyEnv?: string;
+  syncDiscoveredModels?: boolean;
 }
 
 export interface DockerComposeTargetConfig {

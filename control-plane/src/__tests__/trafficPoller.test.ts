@@ -106,6 +106,30 @@ describe("TrafficPoller", () => {
     expect(reservations[0].modelIds).toEqual(["clint-desktop/gemma-4-e2b"]);
   });
 
+  it("maps the default target-ID LiteLLM prefix without target configuration", async () => {
+    const defaultPrefixTarget: CapacityTarget = {
+      ...target,
+      id: "g6.xlarge.general",
+      trafficModelPrefixes: undefined
+    };
+    const repository = new InMemoryReservationRepository();
+    const statuses = new InMemoryTargetStatusRepository();
+    statuses.set({ targetId: defaultPrefixTarget.id, desired: "on", observed: "healthy", message: "Ready" });
+    const source: TrafficSource = {
+      async pollRecentTraffic(now = new Date()) {
+        return [{ modelId: "g6.xlarge.general/gemma-4-e2b", seenAt: now }];
+      }
+    };
+    const poller = new TrafficPoller(source, new ModelCatalog(models, [defaultPrefixTarget]), new TrafficKeepaliveService(repository, statuses));
+
+    await poller.poll(new Date("2026-06-24T20:00:00.000Z"));
+
+    expect(await repository.list()).toMatchObject([{
+      targetIds: [defaultPrefixTarget.id],
+      modelIds: ["g6.xlarge.general/gemma-4-e2b"]
+    }]);
+  });
+
   it("does not renew keepalive from stale LiteLLM traffic", async () => {
     const repository = new InMemoryReservationRepository();
     const statuses = new InMemoryTargetStatusRepository();

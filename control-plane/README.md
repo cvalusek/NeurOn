@@ -204,6 +204,20 @@ MCP is available at `/mcp` for authenticated JSON-RPC clients. It exposes tools
 for listing models/targets/status and creating or ending the key user's own
 reservations. See [docs/integrations.md](docs/integrations.md).
 
+## LiteLLM Model Synchronization
+
+When `LITELLM_API_BASE_URL` and `LITELLM_API_KEY` are set, runtime discovery
+publishes each target's primary OpenAI-compatible model IDs to LiteLLM. Model
+routes default to `<target-id>/<runtime-model-id>`, and each target gets one
+reusable `neuron/<target-id>` credential containing its current runtime API base.
+Set the target's `litellm.apiKeyEnv` to the name of an injected runtime secret
+when the runtime requires authentication. See
+[docs/configuration.md](docs/configuration.md#litellm-discovered-model-sync).
+
+NeurOn never changes LiteLLM deployment block state when capacity stops. The
+route remains available so LiteLLM can queue requests while NeurOn starts the
+target.
+
 ## Traffic Keepalive
 
 NeurOn can keep healthy capacity warm from LiteLLM request logs. Enable:
@@ -254,8 +268,11 @@ For AWS ECS/ASG targets, the task role needs:
 - `ecs:UpdateService`
 - `ecs:DescribeServices`
 
-If LiteLLM credentials are stored in AWS Secrets Manager or SSM Parameter
-Store, grant read access and inject `LITELLM_API_KEY` at runtime.
+If LiteLLM or target runtime credentials are stored in AWS Secrets Manager or
+SSM Parameter Store, grant the ECS task execution role read access and inject
+`LITELLM_API_KEY` plus each target-specific environment variable referenced by
+`litellm.apiKeyEnv` at runtime. NeurOn stores only the environment-variable name
+in target configuration.
 
 ## Development
 

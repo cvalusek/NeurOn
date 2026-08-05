@@ -1,5 +1,6 @@
 import type { FastifyReply, FastifyRequest } from "fastify";
 import type { ApiKey, AuthenticatedUser, CapacityTarget, Reservation, TargetStatus } from "../domain/types.js";
+import { litellmDisplayPrefix, litellmRoutePrefixes } from "../litellm/modelRouting.js";
 import type { ReservationCostEstimate } from "../services/CostEstimationService.js";
 import type { StartupRuntimeModelDiscoveryOutcome } from "../services/RuntimeModelDiscovery.js";
 
@@ -69,8 +70,9 @@ export function targetJson(
     providerId: target.providerId,
     modelIds: target.modelIds,
     modelsMax: target.modelsMax,
-    trafficModelPrefixes: target.trafficModelPrefixes,
+    trafficModelPrefixes: litellmRoutePrefixes(target),
     litellmDisplayPrefix: litellmDisplayPrefix(target),
+    litellm: target.litellm,
     healthUrl: target.healthUrl,
     apiUrl: target.apiUrl,
     needsProvisioning: needsProvisioning(target, status),
@@ -89,9 +91,4 @@ function needsProvisioning(target: CapacityTarget, status?: TargetStatus): boole
   if (target.provider === "runpod") return !target.runpod?.podId && Boolean(target.runpod?.create);
   if (target.provider === "docker") return Boolean(target.docker?.image) && (!status || status.message.toLowerCase().includes("not provisioned"));
   return false;
-}
-
-function litellmDisplayPrefix(target: CapacityTarget): string | undefined {
-  if (target.litellmDisplayPrefix !== undefined) return target.litellmDisplayPrefix;
-  return target.trafficModelPrefixes?.[0];
 }

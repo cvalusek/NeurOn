@@ -99,8 +99,11 @@ const targetSchema = z.object({
   apiUrl: z.string().url().optional(),
   litellm: z
     .object({
-      backendName: z.string(),
-      apiBaseUrl: z.string().url()
+      backendName: z.string().optional(),
+      apiBaseUrl: z.string().url().optional(),
+      credentialName: z.string().optional(),
+      apiKeyEnv: z.string().optional(),
+      syncDiscoveredModels: z.boolean().optional()
     })
     .optional(),
   costEstimate: z
@@ -520,12 +523,13 @@ function loadTargetsFromEnv(providers: CapacityProviderDefinition[]): unknown[] 
       neuron: provider === "neuron" ? loadNeuronTargetFromEnv(prefix) : undefined,
       healthUrl: env(`${prefix}_HEALTH_URL`),
       apiUrl: env(`${prefix}_API_URL`),
-      litellm: env(`${prefix}_LITELLM_BACKEND_NAME`) || env(`${prefix}_LITELLM_API_BASE_URL`)
-        ? {
-            backendName: requiredScopedEnv(`${prefix}_LITELLM_BACKEND_NAME`),
-            apiBaseUrl: requiredScopedEnv(`${prefix}_LITELLM_API_BASE_URL`)
-          }
-        : undefined,
+      litellm: compactObject({
+        backendName: env(`${prefix}_LITELLM_BACKEND_NAME`),
+        apiBaseUrl: env(`${prefix}_LITELLM_API_BASE_URL`),
+        credentialName: env(`${prefix}_LITELLM_CREDENTIAL_NAME`),
+        apiKeyEnv: env(`${prefix}_LITELLM_API_KEY_ENV`),
+        syncDiscoveredModels: boolEnv(`${prefix}_LITELLM_SYNC_DISCOVERED_MODELS`)
+      }),
       costEstimate: compactObject({
         hourlyUsd: numberOptionalEnv(`${prefix}_ESTIMATED_HOURLY_COST_USD`)
       }),

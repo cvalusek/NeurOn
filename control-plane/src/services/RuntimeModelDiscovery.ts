@@ -1,4 +1,4 @@
-import type { CapacityProvider, TargetModelDiscoveryRepository, TargetStatusRepository } from "../domain/interfaces.js";
+import type { BackendConfigSync, CapacityProvider, TargetModelDiscoveryRepository, TargetStatusRepository } from "../domain/interfaces.js";
 import type { CapacityTarget, RuntimeDiscoveredModel } from "../domain/types.js";
 import type { HealthChecker } from "../reconciler/HealthChecker.js";
 import { ModelCatalog } from "./ModelCatalog.js";
@@ -18,8 +18,10 @@ export interface StartupRuntimeModelDiscoveryOutcome {
   cachedDiscoveredAt?: string;
 }
 
+type BackendSyncErrorReporter = (target: CapacityTarget, error: unknown) => void;
+
 export class RuntimeModelDiscovery {
-  private readonly refreshes = new Map<string, Promise<void>>();
+  private readonly refreshes = new Map<string, Promise<RuntimeDiscoveredModel[]>>();
   private readonly cachedDiscoveryTimes = new Map<string, Date>();
   private readonly startupOutcomes = new Map<string, StartupRuntimeModelDiscoveryOutcome>();
 
@@ -27,7 +29,9 @@ export class RuntimeModelDiscovery {
     private readonly catalog: ModelCatalog,
     private readonly repository?: TargetModelDiscoveryRepository,
     private readonly targetOperations?: TargetOperationCoordinator,
-    private readonly statuses?: TargetStatusRepository
+    private readonly statuses?: TargetStatusRepository,
+    private readonly backendConfigSync?: BackendConfigSync,
+    private readonly reportBackendSyncError?: BackendSyncErrorReporter
   ) {}
 
   async hydrateCachedTargets(): Promise<void> {
@@ -54,19 +58,19 @@ export class RuntimeModelDiscovery {
     return outcome ? { ...outcome } : undefined;
   }
 
-  async refreshTarget(target: CapacityTarget): Promise<void> {
+  async refreshTarget(target: CapacityTarget): Promise<RuntimeDiscoveredModel[]> {
     const existing = this.refreshes.get(target.id);
     if (existing) return existing;
     const refresh = Promise.resolve().then(() => this.readTargetCatalog(target));
     this.refreshes.set(target.id, refresh);
     try {
-      await refresh;
+      return await refresh;
     } finally {
       if (this.refreshes.get(target.id) === refresh) this.refreshes.delete(target.id);
     }
   }
 
-  private async readTargetCatalog(target: CapacityTarget): Promise<void> {
+  private async readTargetCatalog(target: CapacityTarget): Promise<RuntimeDiscoveredModel[]> {
     const url = modelsUrlForTarget(target);
     if (!url) throw new Error(`Target ${target.id} is missing apiUrl, litellm.apiBaseUrl, or healthUrl for model discovery`);
     const response = await fetch(url, { signal: AbortSignal.timeout(5000) });
@@ -77,6 +81,14 @@ export class RuntimeModelDiscovery {
     const discoveredAt = new Date();
     await this.repository?.record({ targetId: target.id, models, discoveredAt });
     this.cachedDiscoveryTimes.set(target.id, discoveredAt);
+    if (this.backendConfigSync) {
+      try {
+        await this.backendConfigSync.syncTargetHealthy(target, models);
+      } catch (error) {
+        this.reportBackendSyncError?.(target, error);
+      }
+    }
+    return models;
   }
 
   async bootstrapTarget(target: CapacityTarget, capacityProvider: CapacityProvider, healthChecker: HealthChecker): Promise<void> {

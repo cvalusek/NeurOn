@@ -493,6 +493,9 @@ const targetFormSchema = z.object({
   providerId: z.string().min(1),
   modelIds: z.string().optional(),
   trafficModelPrefixes: z.string().optional(),
+  litellmCredentialName: z.string().optional(),
+  litellmApiKeyEnv: z.string().optional(),
+  litellmSyncDisabled: z.string().optional(),
   runtimeProfileId: z.string().optional(),
   runtimeProfileVariantId: z.string().optional(),
   healthUrl: z.string().optional(),
@@ -526,6 +529,15 @@ function targetFromForm(body: z.infer<typeof targetFormSchema>, provider: Capaci
   target.modelIds = listField(body.modelIds);
   const trafficModelPrefixes = listField(body.trafficModelPrefixes);
   if (trafficModelPrefixes.length > 0) target.trafficModelPrefixes = trafficModelPrefixes;
+  const litellmCredentialName = body.litellmCredentialName?.trim();
+  const litellmApiKeyEnv = body.litellmApiKeyEnv?.trim();
+  if (litellmCredentialName || litellmApiKeyEnv || body.litellmSyncDisabled === "on") {
+    target.litellm = {
+      ...(litellmCredentialName ? { credentialName: litellmCredentialName } : {}),
+      ...(litellmApiKeyEnv ? { apiKeyEnv: litellmApiKeyEnv } : {}),
+      ...(body.litellmSyncDisabled === "on" ? { syncDiscoveredModels: false } : {})
+    };
+  }
   if (profileDiscovery(profile)) target.modelDiscovery = { bootstrapOnStartup: true };
   if (body.healthUrl) target.healthUrl = body.healthUrl;
   if (body.apiUrl) target.apiUrl = body.apiUrl;

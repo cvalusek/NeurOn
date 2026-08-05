@@ -441,17 +441,23 @@ provisioning job is persisted so creation can be resumed or inspected after
 restart. Providers do not create resources during ordinary target start unless
 that behavior is added later as an explicit policy.
 
-`LITELLM_BACKEND_NAME` and target-level `LITELLM_API_BASE_URL` are optional.
-They are only for syncing a LiteLLM backend entry when a target becomes healthy;
-they are not required for RunPod start/stop or model discovery.
+When the global `LITELLM_API_BASE_URL` and `LITELLM_API_KEY` are configured,
+each successful runtime model discovery also synchronizes the target credential
+and its canonical model IDs to LiteLLM. `LITELLM_BACKEND_NAME` remains accepted
+for compatibility with older target definitions but is not used by the
+discovered-model sync. A target-level `LITELLM_API_BASE_URL` overrides the
+runtime API base stored in its LiteLLM credential; normally the provider-derived
+`API_URL` is used instead.
 
-Set `TRAFFIC_MODEL_PREFIXES` when LiteLLM logs model groups with a route prefix,
-for example `prefer/gemma-4b-e2b`. The prefix is target configuration; NeurOn
-does not require `prefer/` specifically.
+Set `TRAFFIC_MODEL_PREFIXES` to override the LiteLLM route prefixes for a target,
+for example `prefer/gemma-4b-e2b`. When omitted, NeurOn uses `<target-id>/`, so
+target `g6.xlarge.general` publishes and recognizes
+`g6.xlarge.general/gemma-4-e2b` without per-target prefix configuration.
 
 Set `LITELLM_DISPLAY_PREFIX` when client-facing LiteLLM model names differ from
-traffic log prefixes. By default, plugin clients can use the first
-`TRAFFIC_MODEL_PREFIXES` value as the display prefix. Set
+traffic log prefixes. By default, plugin clients use the first
+`TRAFFIC_MODEL_PREFIXES` value, or `<target-id>/` when no traffic prefix is
+configured. Set
 `CAPACITY_TARGET_<KEY>_LITELLM_DISPLAY_PREFIX=__empty__` to publish an empty
 prefix from environment config when LiteLLM aliases the prefix away. JSON config
 can use `"litellmDisplayPrefix": ""` directly.
@@ -577,6 +583,47 @@ CAPACITY_TARGET_MULTIPLE_MOE_96GB_MODEL_DISCOVERY_BOOTSTRAP_TIMEOUT_SECONDS=600
 When enabled and no persisted result exists, NeurOn starts the target once,
 waits for health, reads `/v1/models`, records runtime IDs, persists the result,
 and reconciles discovery-started capacity against current demand.
+
+### LiteLLM Discovered-Model Sync
+
+When global LiteLLM connectivity is configured, discovery creates or updates one
+reusable credential per target and one LiteLLM deployment per primary `id`
+returned by `/v1/models`. The defaults are:
+
+- credential name: `neuron/<target-id>`
+- callable model name: `<effective-prefix><runtime-model-id>`
+- provider: OpenAI-compatible (`custom_llm_provider=openai`)
+- runtime model: the primary `/v1/models` `id`, unchanged
+
+The credential carries the current runtime `api_base`, so a provider-derived EC2
+private-address change updates the credential once for every model on the
+target. Configure the runtime key by reference, never by value:
+
+```env
+CAPACITY_TARGET_G6_XLARGE_GENERAL_LITELLM_API_KEY_ENV=PREFER_G6_XLARGE_GENERAL_API_KEY
+PREFER_G6_XLARGE_GENERAL_API_KEY=<injected-secret>
+```
+
+Optional overrides and opt-out:
+
+```env
+CAPACITY_TARGET_G6_XLARGE_GENERAL_LITELLM_CREDENTIAL_NAME=neuron/g6.xlarge.general
+CAPACITY_TARGET_G6_XLARGE_GENERAL_LITELLM_SYNC_DISCOVERED_MODELS=false
+```
+
+NeurOn records `neuron_target_id` and `neuron_target_display_name` in LiteLLM
+credential/deployment metadata. It does not block, unblock, or delete LiteLLM
+deployments when capacity stops or a model is absent from a later discovery.
+This keeps routes available for LiteLLM queueing while capacity starts and does
+not override operator-managed block state. Runtime aliases are retained in
+NeurOn discovery metadata but are not yet published as LiteLLM aliases.
+
+LiteLLM must have database-backed model storage enabled. Its global API key must
+be allowed to manage models and reusable credentials. Because target API keys
+are sent to LiteLLM during credential upsert, use TLS for the NeurOn-to-LiteLLM
+connection outside an explicitly accepted trusted-network setup. LiteLLM marks
+its reusable-credentials endpoint as beta, so pin and test the LiteLLM version
+used by the deployment.
 
 ## Model Warmup
 

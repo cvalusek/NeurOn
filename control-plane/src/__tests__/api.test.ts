@@ -618,6 +618,8 @@ describe("API authentication context", () => {
         providerId: "runpod",
         modelIds: "qwen,gemma",
         trafficModelPrefixes: "clint-desktop/,prefer/",
+        litellmCredentialName: "neuron/runpod-prefer",
+        litellmApiKeyEnv: "PREFER_RUNPOD_API_KEY",
         runpodPodId: "pod-prefer",
         runpodRuntimePort: "8081"
       }).toString()
@@ -631,11 +633,20 @@ describe("API authentication context", () => {
     const storedTarget = targets.json().capacityTargets.find((target: { id: string }) => target.id === "runpod-prefer");
     expect(storedTarget).toMatchObject({
       trafficModelPrefixes: ["clint-desktop/", "prefer/"],
-      litellmDisplayPrefix: "clint-desktop/"
+      litellmDisplayPrefix: "clint-desktop/",
+      litellm: {
+        credentialName: "neuron/runpod-prefer",
+        apiKeyEnv: "PREFER_RUNPOD_API_KEY"
+      }
+    });
+    expect(targets.json().capacityTargets.find((target: { id: string }) => target.id === "t1")).toMatchObject({
+      trafficModelPrefixes: ["t1/"],
+      litellmDisplayPrefix: "t1/"
     });
     expect(refreshed.body).toContain("RunPod PreFer");
     expect(refreshed.body).toContain("pod-prefer");
     expect(refreshed.body).toContain("clint-desktop/");
+    expect(refreshed.body).toContain("PREFER_RUNPOD_API_KEY");
     expect(refreshed.body).toContain("LiteLLM model route prefixes");
     expect(refreshed.body).toContain("Save target");
   });

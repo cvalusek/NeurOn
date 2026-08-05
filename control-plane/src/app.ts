@@ -80,7 +80,17 @@ export async function buildApp(config: AppConfig, models: ModelDefinition[]) {
   const trafficKeepalive = new TrafficKeepaliveService(reservations, statuses);
   const healthChecker = new HealthChecker(config.healthCheckTimeoutSeconds);
   const targetOperations = new TargetOperationCoordinator();
-  const runtimeModelDiscovery = new RuntimeModelDiscovery(catalog, reservationRepository.targetModelDiscoveries, targetOperations, statuses);
+  const runtimeModelDiscovery = new RuntimeModelDiscovery(
+    catalog,
+    reservationRepository.targetModelDiscoveries,
+    targetOperations,
+    statuses,
+    backendConfigSync,
+    (target, error) => app.log.warn(
+      { targetId: target.id, error: errorForLog(error) },
+      "LiteLLM discovered-model synchronization failed"
+    )
+  );
   const startupDiscoveryRequestedTargetIds = new Set(
     catalog.listTargets().filter(shouldBootstrapRuntimeModels).map((target) => target.id)
   );

@@ -18,6 +18,61 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+describe("runtime model discovery synchronization", () => {
+  it("passes the primary runtime model IDs to backend synchronization", async () => {
+    const target: CapacityTarget = {
+      id: "g6.xlarge.general",
+      displayName: "G6 XL General",
+      provider: "aws-ec2",
+      modelIds: [],
+      apiUrl: "http://runtime.invalid/v1"
+    };
+    const syncTargetHealthy = vi.fn(async () => undefined);
+    const discovery = new RuntimeModelDiscovery(
+      new ModelCatalog([], [target]),
+      undefined,
+      undefined,
+      undefined,
+      { syncTargetHealthy }
+    );
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({
+      data: [{ id: "gemma-4-e2b", aliases: ["gemma"] }]
+    }), { status: 200, headers: { "content-type": "application/json" } })));
+
+    const models = await discovery.refreshTarget(target);
+
+    expect(models).toEqual([{ id: "gemma-4-e2b", aliases: ["gemma"] }]);
+    expect(syncTargetHealthy).toHaveBeenCalledWith(target, models);
+  });
+
+  it("keeps successful discovery independent from a LiteLLM synchronization failure", async () => {
+    const target: CapacityTarget = {
+      id: "g6.xlarge.general",
+      displayName: "G6 XL General",
+      provider: "aws-ec2",
+      modelIds: [],
+      apiUrl: "http://runtime.invalid/v1"
+    };
+    const catalog = new ModelCatalog([], [target]);
+    const reportBackendSyncError = vi.fn();
+    const discovery = new RuntimeModelDiscovery(
+      catalog,
+      undefined,
+      undefined,
+      undefined,
+      {
+        syncTargetHealthy: vi.fn(async () => { throw new Error("LiteLLM unavailable"); })
+      },
+      reportBackendSyncError
+    );
+    vi.stubGlobal("fetch", vi.fn(async () => modelsResponse("gemma-4-e2b")));
+
+    await expect(discovery.refreshTarget(target)).resolves.toEqual([{ id: "gemma-4-e2b" }]);
+    expect(catalog.listModelsForTarget(target.id).map((model) => model.id)).toEqual(["gemma-4-e2b"]);
+    expect(reportBackendSyncError).toHaveBeenCalledWith(target, expect.objectContaining({ message: "LiteLLM unavailable" }));
+  });
+});
+
 describe("runtime model discovery lifecycle coordination", () => {
   it("atomically publishes discovery demand before a reconcile queued at discovery start can stop the target", async () => {
     const harness = discoveryHarness();

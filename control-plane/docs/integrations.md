@@ -120,14 +120,22 @@ readiness signal.
 The plugin maps OpenCode's LiteLLM-facing model name to NeurOn model metadata
 using model IDs, aliases, backend IDs, runtime IDs, and each target's
 `litellmDisplayPrefix`. If `litellmDisplayPrefix` is not configured, NeurOn
-publishes the first `trafficModelPrefixes` value as the display prefix. Set the
-display prefix to `""` in JSON config, or `__empty__` in env-expanded config,
-when LiteLLM aliases the route prefix away for users.
+publishes the first `trafficModelPrefixes` value as the display prefix, or
+`<target-id>/` when no prefixes are configured. Set the display prefix to `""`
+in JSON config, or `__empty__` in env-expanded config, when LiteLLM aliases the
+route prefix away for users.
 The Admin target create and persisted-target edit forms expose
 `trafficModelPrefixes` as **LiteLLM model route prefixes**, so a value such as
 `clint-desktop/` links `clint-desktop/gemma-4-e2b` to the selected target
 without editing JSON. Declarative targets can set the field in JSON/env config
 or use **Copy to DB** before editing it in Admin.
+
+With global LiteLLM connectivity configured, successful runtime discovery
+upserts a `neuron/<target-id>` credential and publishes each primary runtime
+model ID under the effective display prefix. The friendly target display name
+is preserved in LiteLLM metadata as `neuron_target_display_name`; routing remains
+based on the stable target ID. Target stops do not block or delete deployments,
+allowing LiteLLM requests to remain queued while NeurOn starts capacity.
 
 LiteLLM traffic monitoring remains useful for clients that cannot run a plugin.
 The OpenCode plugin is a stronger signal when it is available because it can

@@ -1,6 +1,7 @@
 import type { TrafficSource } from "../domain/interfaces.js";
 import { ModelCatalog } from "./ModelCatalog.js";
 import { TrafficKeepaliveService } from "./TrafficKeepaliveService.js";
+import { litellmRoutePrefixes } from "../litellm/modelRouting.js";
 
 export class TrafficPoller {
   private running = false;
@@ -40,7 +41,7 @@ export class TrafficPoller {
 
     const matches: Array<{ target: ReturnType<ModelCatalog["listTargets"]>[number]; modelId: string }> = [];
     for (const target of this.catalog.listTargets()) {
-      const prefix = target.trafficModelPrefixes?.find((candidate) => modelId.startsWith(candidate));
+      const prefix = litellmRoutePrefixes(target).find((candidate) => modelId.startsWith(candidate));
       if (!prefix) continue;
       const unprefixedModelId = modelId.slice(prefix.length);
       const unprefixedModel = this.catalog.getModel(unprefixedModelId);
