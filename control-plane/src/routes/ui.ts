@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import type { AppConfig, AuthMethod, CapacityProviderDefinition, CapacityTarget, RuntimeProfile } from "../domain/types.js";
+import type { CapacityProvider } from "../domain/interfaces.js";
 import { SharedPasswordAuthProvider } from "../auth/SharedPasswordAuthProvider.js";
 import { ApiKeyService } from "../services/ApiKeyService.js";
 import { AuthMethodService } from "../services/AuthMethodService.js";
@@ -30,6 +31,7 @@ export function registerUiRoutes(
   targetService: TargetService,
   targetProvisioningService: TargetProvisioningService,
   costEstimation: CostEstimationService,
+  capacityProvider: CapacityProvider,
   hassleOffClient?: HassleOffClient
 ) {
   app.get("/login", async (_request, reply) => reply.type("text/html").send(loginPage("", await authMethodService.listEnabled("github"))));
@@ -323,6 +325,18 @@ export function registerUiRoutes(
     const query = z.object({ error: z.string().optional() }).parse(request.query);
     return reply.type("text/html").send(providerAdminPage(requireUser(request), await providerService.list(), await targetService.list(), config.runtimeProfiles, query.error));
   });
+  app.get("/api/admin/providers/:id/resources", async (request, reply) => {
+    try {
+      const { id } = z.object({ id: z.string() }).parse(request.params);
+      const provider = (await providerService.list()).find((candidate) => candidate.id === id);
+      if (!provider) throw new Error(`Provider not found: ${id}`);
+      if (!capacityProvider.discoverResources) throw new Error(`Provider ${id} does not support resource discovery`);
+      return { resources: await capacityProvider.discoverResources(provider) };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Could not discover provider resources";
+      return reply.code(400).send({ error: message });
+    }
+  });
   app.post("/admin/providers", async (request, reply) => {
     try {
       const body = providerFormSchema.parse(request.body ?? {});
@@ -330,7 +344,8 @@ export function registerUiRoutes(
         id: body.id,
         displayName: body.displayName || body.id,
         type: body.type,
-        provisioning: { enabled: body.provisioningEnabled === "on" }
+        provisioning: { enabled: body.provisioningEnabled === "on" },
+        config: providerConfigFromForm(body)
       });
       return reply.redirect("/admin/providers");
     } catch (error) {
@@ -346,7 +361,8 @@ export function registerUiRoutes(
         id: body.id,
         displayName: body.displayName || body.id,
         type: body.type,
-        provisioning: { enabled: body.provisioningEnabled === "on" }
+        provisioning: { enabled: body.provisioningEnabled === "on" },
+        config: providerConfigFromForm(body)
       });
       return reply.redirect("/admin/providers");
     } catch (error) {
@@ -447,8 +463,15 @@ const providerFormSchema = z.object({
   id: z.string().min(1),
   displayName: z.string().optional(),
   type: z.string().min(1),
-  provisioningEnabled: z.string().optional()
+  provisioningEnabled: z.string().optional(),
+  awsEc2InstanceNamePattern: z.string().optional()
 });
+
+function providerConfigFromForm(body: z.infer<typeof providerFormSchema>): CapacityProviderDefinition["config"] {
+  if (body.type !== "aws-ec2") return undefined;
+  const instanceNamePattern = body.awsEc2InstanceNamePattern?.trim();
+  return instanceNamePattern ? { awsEc2: { instanceNamePattern } } : undefined;
+}
 
 const authMethodFormSchema = z.object({
   id: z.string().min(1),
@@ -461,6 +484,8 @@ const authMethodFormSchema = z.object({
 });
 
 const optionalNumber = z.preprocess((value) => value === "" ? undefined : value, z.coerce.number().optional());
+const optionalNonnegativeNumber = z.preprocess((value) => value === "" ? undefined : value, z.coerce.number().nonnegative().optional());
+const optionalPort = z.preprocess((value) => value === "" ? undefined : value, z.coerce.number().int().positive().max(65_535).optional());
 
 const targetFormSchema = z.object({
   id: z.string().min(1),
@@ -478,6 +503,8 @@ const targetFormSchema = z.object({
   awsService: z.string().optional(),
   awsAsgName: z.string().optional(),
   awsInstanceId: z.string().optional(),
+  awsRuntimePort: optionalPort,
+  estimatedHourlyCostUsd: optionalNonnegativeNumber,
   dockerContainerName: z.string().optional(),
   dockerModelVolume: z.string().optional(),
   neuronTargetId: z.string().optional()
@@ -502,6 +529,7 @@ function targetFromForm(body: z.infer<typeof targetFormSchema>, provider: Capaci
   if (profileDiscovery(profile)) target.modelDiscovery = { bootstrapOnStartup: true };
   if (body.healthUrl) target.healthUrl = body.healthUrl;
   if (body.apiUrl) target.apiUrl = body.apiUrl;
+  if (body.estimatedHourlyCostUsd !== undefined) target.costEstimate = { hourlyUsd: body.estimatedHourlyCostUsd };
   if (provider.type === "runpod" && (body.runpodPodId || body.runpodRuntimePort)) {
     const create = runpodCreateFromProfile(profile);
     target.runpod = {
@@ -529,7 +557,13 @@ function targetFromForm(body: z.infer<typeof targetFormSchema>, provider: Capaci
   if (provider.type === "aws-ec2") {
     const instanceId = body.awsInstanceId?.trim();
     if (!instanceId) throw new Error("AWS EC2 instance ID is required");
-    target.aws = { instanceId };
+    target.aws = {
+      instanceId,
+      runtimePort: body.awsRuntimePort ?? profilePort(profile),
+      runtimeProtocol: "http",
+      healthPath: profileHealth(profile),
+      apiPath: profileApi(profile)
+    };
   }
   if (provider.type === "docker" && body.dockerContainerName) {
     const port = profilePort(profile);

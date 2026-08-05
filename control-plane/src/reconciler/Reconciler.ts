@@ -6,6 +6,7 @@ import type { ModelWarmupService } from "../services/ModelWarmupService.js";
 import type { TrafficPoller } from "../services/TrafficPoller.js";
 import type { CostEstimationService } from "../services/CostEstimationService.js";
 import type { TargetOperationCoordinator } from "../services/TargetOperationCoordinator.js";
+import { withProviderRuntimeEndpoints } from "../capacity/providerRuntime.js";
 
 export class Reconciler {
   private running?: Promise<void>;
@@ -74,17 +75,18 @@ export class Reconciler {
           now
         );
         const providerStatus = await this.capacityProvider.getTargetStatus(target);
+        const runtimeTarget = withProviderRuntimeEndpoints(target, providerStatus);
         let observed = desired === "off" && providerStatus.observed === "healthy" ? "stopping" : providerStatus.observed;
         let message = providerStatus.message;
-        if (desired === "on" && providerStatus.observed === "healthy" && this.healthChecker && target.healthUrl) {
-          const health = await this.healthChecker.check(target);
+        if (desired === "on" && providerStatus.observed === "healthy" && this.healthChecker && runtimeTarget.healthUrl) {
+          const health = await this.healthChecker.check(runtimeTarget);
           observed = health.ok ? "healthy" : "starting";
           message = health.message;
         }
         if (desired === "on" && observed === "healthy" && this.modelWarmup) {
           const modelIds = targetReservations.flatMap((reservation) => reservation.modelIds);
           try {
-            await this.modelWarmup.warmupTargetModels(target, modelIds);
+            await this.modelWarmup.warmupTargetModels(runtimeTarget, modelIds);
           } catch (error) {
             observed = "starting";
             message = error instanceof Error ? error.message : String(error);
@@ -93,10 +95,10 @@ export class Reconciler {
         const next = targetStatus(target.id, desired, observed, message, now, previous);
         this.statuses.set(next);
         if (previous?.observed !== "healthy" && next.observed === "healthy") {
-          await this.backendConfigSync.syncTargetHealthy(target);
+          await this.backendConfigSync.syncTargetHealthy(runtimeTarget);
         }
         if (next.observed === "healthy" && !this.targetOperations?.isDiscoveryActive(target.id)) {
-          await this.runtimeModelDiscovery?.refreshTarget(target).catch(() => undefined);
+          await this.runtimeModelDiscovery?.refreshTarget(runtimeTarget).catch(() => undefined);
         }
         if (next.observed === "failed") {
           await this.failActiveReservationsForTarget(target.id, next.message, now);

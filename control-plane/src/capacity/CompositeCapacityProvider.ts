@@ -1,5 +1,5 @@
 import type { CapacityProvider } from "../domain/interfaces.js";
-import type { CapacityProviderDefinition, CapacityProviderStatus, CapacityTarget, TargetCostEstimateConfig } from "../domain/types.js";
+import type { CapacityProviderDefinition, CapacityProviderResource, CapacityProviderStatus, CapacityTarget, TargetCostEstimateConfig } from "../domain/types.js";
 import { ProviderCatalog } from "../services/ProviderCatalog.js";
 
 export class CompositeCapacityProvider implements CapacityProvider {
@@ -49,6 +49,14 @@ export class CompositeCapacityProvider implements CapacityProvider {
   async getTargetCostEstimate(target: CapacityTarget): Promise<TargetCostEstimateConfig | undefined> {
     const resolved = this.resolve(target);
     return resolved.provider.getTargetCostEstimate?.(resolved.target);
+  }
+
+  async discoverResources(definition: CapacityProviderDefinition): Promise<CapacityProviderResource[]> {
+    const providerType = adapterKey(definition.type);
+    const provider = this.providers[providerType];
+    if (!provider) throw new Error(`No capacity provider registered for ${definition.type}`);
+    if (!provider.discoverResources) throw new Error(`Provider adapter ${definition.type} does not support resource discovery`);
+    return provider.discoverResources(definition);
   }
 
   async forceStopTarget(target: CapacityTarget): Promise<void> {

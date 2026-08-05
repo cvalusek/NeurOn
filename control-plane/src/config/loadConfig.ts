@@ -49,7 +49,11 @@ const targetSchema = z.object({
       clusterName: z.string().optional(),
       serviceName: z.string().optional(),
       autoScalingGroupName: z.string().optional(),
-      instanceId: z.string().optional()
+      instanceId: z.string().optional(),
+      runtimePort: z.number().int().positive().optional(),
+      runtimeProtocol: z.enum(["http", "https"]).optional(),
+      healthPath: z.string().optional(),
+      apiPath: z.string().optional()
     })
     .optional(),
   docker: z
@@ -152,6 +156,11 @@ const providerSchema = z.object({
   provisioning: z.object({ enabled: z.boolean().optional() }).optional(),
   config: z
     .object({
+      awsEc2: z
+        .object({
+          instanceNamePattern: z.string().optional()
+        })
+        .optional(),
       runpod: z
         .object({
           apiKey: z.string().optional(),
@@ -430,6 +439,13 @@ function loadProvidersFromEnv(): unknown[] {
 }
 
 function loadProviderConfigFromEnv(prefix: string, type: string): Record<string, unknown> | undefined {
+  if (type === "aws-ec2") {
+    return compactObject({
+      awsEc2: compactObject({
+        instanceNamePattern: env(`${prefix}_AWS_EC2_INSTANCE_NAME_PATTERN`)
+      })
+    });
+  }
   if (type === "runpod") {
     return compactObject({
       runpod: compactObject({
@@ -564,7 +580,11 @@ function loadModelsFromEnv(targetPrefix: string): unknown[] | undefined {
 function loadAwsTargetFromEnv(prefix: string, provider: string): unknown {
   if (provider === "aws-ec2") {
     return compactObject({
-      instanceId: requiredScopedEnv(`${prefix}_AWS_INSTANCE_ID`)
+      instanceId: requiredScopedEnv(`${prefix}_AWS_INSTANCE_ID`),
+      runtimePort: intOptionalEnv(`${prefix}_AWS_RUNTIME_PORT`),
+      runtimeProtocol: env(`${prefix}_AWS_RUNTIME_PROTOCOL`),
+      healthPath: env(`${prefix}_AWS_HEALTH_PATH`),
+      apiPath: env(`${prefix}_AWS_API_PATH`)
     });
   }
   return compactObject({

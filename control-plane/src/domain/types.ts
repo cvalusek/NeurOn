@@ -79,6 +79,10 @@ export interface AwsTargetConfig {
   serviceName?: string;
   autoScalingGroupName?: string;
   instanceId?: string;
+  runtimePort?: number;
+  runtimeProtocol?: "http" | "https";
+  healthPath?: string;
+  apiPath?: string;
 }
 
 export interface LiteLlmTargetConfig {
@@ -209,6 +213,9 @@ export interface CapacityProviderDefinition {
     enabled?: boolean;
   };
   config?: {
+    awsEc2?: {
+      instanceNamePattern?: string;
+    };
     runpod?: Pick<RunPodTargetConfig, "apiKey" | "apiKeyEnv" | "apiBaseUrl">;
     neuron?: NeuronProviderConfig;
     [key: string]: unknown;
@@ -356,6 +363,17 @@ export interface TargetStatus {
 export interface CapacityProviderStatus {
   observed: RuntimeState;
   message: string;
+  details?: Record<string, unknown>;
+  runtime?: {
+    apiUrl?: string;
+    healthUrl?: string;
+  };
+}
+
+export interface CapacityProviderResource {
+  id: string;
+  displayName: string;
+  state?: string;
   details?: Record<string, unknown>;
 }
 

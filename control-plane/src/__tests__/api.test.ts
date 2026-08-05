@@ -441,7 +441,8 @@ describe("API authentication context", () => {
       payload: new URLSearchParams({
         id: "aws-ec2",
         displayName: "AWS EC2",
-        type: "aws-ec2"
+        type: "aws-ec2",
+        awsEc2InstanceNamePattern: "epd.sandbox.prefer.*"
       }).toString()
     });
     expect(provider.statusCode).toBe(302);
@@ -455,7 +456,9 @@ describe("API authentication context", () => {
         displayName: "PreFer GPU",
         providerId: "aws-ec2",
         modelIds: "qwen",
-        awsInstanceId: "i-1234567890abcdef0"
+        awsInstanceId: "i-1234567890abcdef0",
+        awsRuntimePort: "8080",
+        estimatedHourlyCostUsd: "0.804"
       }).toString()
     });
     expect(target.statusCode).toBe(302);
@@ -465,6 +468,14 @@ describe("API authentication context", () => {
     expect(targetsPage.body).toContain("PreFer GPU");
     expect(targetsPage.body).toContain("i-1234567890abcdef0");
     expect(targetsPage.body).toContain("CAPACITY_TARGET_PREFER_GPU_AWS_INSTANCE_ID");
+    expect(targetsPage.body).toContain("CAPACITY_TARGET_PREFER_GPU_AWS_RUNTIME_PORT");
+    expect(targetsPage.body).toContain("CAPACITY_TARGET_PREFER_GPU_ESTIMATED_HOURLY_COST_USD");
+    expect(targetsPage.body).toContain("Find EC2 instances");
+    expect(providersPage.body).toContain("Instance Name-tag pattern");
+
+    const refreshedProviders = await app.inject({ method: "GET", url: "/admin/providers", headers: auth });
+    expect(refreshedProviders.body).toContain("epd.sandbox.prefer.*");
+    expect(refreshedProviders.body).toContain("CAPACITY_PROVIDER_AWS_EC2_AWS_EC2_INSTANCE_NAME_PATTERN");
 
     const missingInstance = await app.inject({
       method: "POST",

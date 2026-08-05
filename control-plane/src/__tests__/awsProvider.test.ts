@@ -1,6 +1,7 @@
 import { DescribeAutoScalingGroupsCommand, SetDesiredCapacityCommand } from "@aws-sdk/client-auto-scaling";
-import { DescribeInstancesCommand, StartInstancesCommand, StopInstancesCommand } from "@aws-sdk/client-ec2";
+import { DescribeInstancesCommand, DescribeSpotPriceHistoryCommand, StartInstancesCommand, StopInstancesCommand } from "@aws-sdk/client-ec2";
 import { DescribeServicesCommand, UpdateServiceCommand } from "@aws-sdk/client-ecs";
+import { GetProductsCommand } from "@aws-sdk/client-pricing";
 import { describe, expect, it } from "vitest";
 import { AwsEc2CapacityProvider } from "../capacity/AwsEc2CapacityProvider.js";
 import { AwsEcsAsgCapacityProvider } from "../capacity/AwsEcsAsgCapacityProvider.js";
@@ -26,9 +27,11 @@ describe("AWS EC2 provider", () => {
   it("starts and stops the configured instance", async () => {
     const commands: unknown[] = [];
     const provider = new AwsEc2CapacityProvider("us-east-1", {
-      send: async (command) => {
-        commands.push(command);
-        return {};
+      ec2: {
+        send: async (command) => {
+          commands.push(command);
+          return {};
+        }
       }
     });
 
@@ -43,40 +46,150 @@ describe("AWS EC2 provider", () => {
 
   it("maps instance lifecycle states to NeurOn status", async () => {
     const provider = new AwsEc2CapacityProvider("us-east-1", {
-      send: async (command) => {
-        expect(command).toBeInstanceOf(DescribeInstancesCommand);
-        return {
-          Reservations: [
-            {
-              Instances: [
-                {
-                  InstanceId: "i-1234567890abcdef0",
-                  State: { Name: "pending" },
-                  PrivateIpAddress: "10.0.0.10"
-                }
-              ]
-            }
-          ]
-        };
+      ec2: {
+        send: async (command) => {
+          expect(command).toBeInstanceOf(DescribeInstancesCommand);
+          return {
+            Reservations: [
+              {
+                Instances: [
+                  {
+                    InstanceId: "i-1234567890abcdef0",
+                    State: { Name: "pending" },
+                    PrivateIpAddress: "10.0.0.10"
+                  }
+                ]
+              }
+            ]
+          };
+        }
       }
     });
 
     await expect(provider.getTargetStatus(ec2Target)).resolves.toMatchObject({
       observed: "starting",
       message: "EC2 instance starting",
-      details: { instanceId: "i-1234567890abcdef0", state: "pending", privateIpAddress: "10.0.0.10" }
+      details: { instanceId: "i-1234567890abcdef0", state: "pending", privateIpAddress: "10.0.0.10" },
+      runtime: {
+        apiUrl: "http://10.0.0.10:8080/v1",
+        healthUrl: "http://10.0.0.10:8080/health"
+      }
     });
   });
 
+  it("uses target runtime endpoint overrides with the discovered private address", async () => {
+    const provider = new AwsEc2CapacityProvider("us-east-2", {
+      ec2: {
+        send: async () => ({
+          Reservations: [{ Instances: [{ InstanceId: "i-1234567890abcdef0", State: { Name: "running" }, PrivateDnsName: "ip-10-0-0-20.internal" }] }]
+        })
+      }
+    });
+
+    await expect(provider.getTargetStatus({
+      ...ec2Target,
+      aws: { ...ec2Target.aws, runtimePort: 9000, runtimeProtocol: "https", apiPath: "openai/v1", healthPath: "/ready" }
+    })).resolves.toMatchObject({
+      runtime: {
+        apiUrl: "https://ip-10-0-0-20.internal:9000/openai/v1",
+        healthUrl: "https://ip-10-0-0-20.internal:9000/ready"
+      }
+    });
+  });
+
+  it("discovers active instances using the provider Name-tag pattern", async () => {
+    const commands: unknown[] = [];
+    const provider = new AwsEc2CapacityProvider("us-east-2", {
+      ec2: {
+        send: async (command) => {
+          commands.push(command);
+          return {
+            Reservations: [{ Instances: [{
+              InstanceId: "i-1234567890abcdef0",
+              InstanceType: "g6.xlarge",
+              State: { Name: "stopped" },
+              Placement: { AvailabilityZone: "us-east-2a" },
+              PrivateIpAddress: "10.0.0.10",
+              Tags: [{ Key: "Name", Value: "epd.sandbox.prefer.g6.xlarge.general" }]
+            }] }]
+          };
+        }
+      }
+    });
+
+    await expect(provider.discoverResources({
+      id: "ec2",
+      displayName: "EC2",
+      type: "aws-ec2",
+      config: { awsEc2: { instanceNamePattern: "epd.sandbox.prefer.*" } }
+    })).resolves.toEqual([{
+      id: "i-1234567890abcdef0",
+      displayName: "epd.sandbox.prefer.g6.xlarge.general",
+      state: "stopped",
+      details: {
+        instanceType: "g6.xlarge",
+        availabilityZone: "us-east-2a",
+        privateIpAddress: "10.0.0.10",
+        privateDnsName: undefined
+      }
+    }]);
+    expect(commandInput(commands[0])).toEqual({ Filters: [
+      { Name: "tag:Name", Values: ["epd.sandbox.prefer.*"] },
+      { Name: "instance-state-name", Values: ["pending", "running", "stopping", "stopped"] }
+    ] });
+  });
+
+  it("discovers the current on-demand hourly price", async () => {
+    const pricingCommands: unknown[] = [];
+    const provider = new AwsEc2CapacityProvider("us-east-2", {
+      ec2: { send: async () => ({ Reservations: [{ Instances: [{
+        InstanceId: "i-1234567890abcdef0",
+        InstanceType: "g6.xlarge",
+        PlatformDetails: "Linux/UNIX",
+        Placement: { Tenancy: "default" },
+        UsageOperation: "RunInstances"
+      }] }] }) },
+      pricing: { send: async (command) => {
+        pricingCommands.push(command);
+        return { PriceList: [JSON.stringify({ terms: { OnDemand: { term: { priceDimensions: { hourly: { unit: "Hrs", pricePerUnit: { USD: "0.804" } } } } } } })] };
+      } }
+    });
+
+    await expect(provider.getTargetCostEstimate(ec2Target)).resolves.toEqual({ hourlyUsd: 0.804 });
+    expect(pricingCommands[0]).toBeInstanceOf(GetProductsCommand);
+    expect(commandInput(pricingCommands[0])).toMatchObject({ ServiceCode: "AmazonEC2" });
+    expect(commandInput(pricingCommands[0])).toMatchObject({ Filters: expect.arrayContaining([{ Type: "TERM_MATCH", Field: "regionCode", Value: "us-east-2" }]) });
+  });
+
+  it("discovers the newest spot hourly price", async () => {
+    const ec2Commands: unknown[] = [];
+    const provider = new AwsEc2CapacityProvider("us-east-2", {
+      ec2: { send: async (command) => {
+        ec2Commands.push(command);
+        if (command instanceof DescribeInstancesCommand) return { Reservations: [{ Instances: [{
+          InstanceId: "i-1234567890abcdef0",
+          InstanceLifecycle: "spot",
+          InstanceType: "g6.xlarge",
+          PlatformDetails: "Linux/UNIX",
+          Placement: { AvailabilityZone: "us-east-2a" }
+        }] }] };
+        return { SpotPriceHistory: [{ SpotPrice: "0.34", Timestamp: new Date("2026-08-05T12:00:00Z") }] };
+      } }
+    });
+
+    await expect(provider.getTargetCostEstimate(ec2Target)).resolves.toEqual({ hourlyUsd: 0.34 });
+    expect(ec2Commands[1]).toBeInstanceOf(DescribeSpotPriceHistoryCommand);
+  });
+
   it("requires an instance ID", async () => {
-    const provider = new AwsEc2CapacityProvider("us-east-1", { send: async () => ({}) });
+    const provider = new AwsEc2CapacityProvider("us-east-1", { ec2: { send: async () => ({}) } });
 
     await expect(provider.ensureTargetOn({ ...ec2Target, aws: {} })).rejects.toThrow("missing AWS EC2 instanceId config");
   });
 
   it("treats a terminated instance as failed capacity", async () => {
     const provider = new AwsEc2CapacityProvider("us-east-1", {
-      send: async () => ({ Reservations: [{ Instances: [{ InstanceId: "i-1234567890abcdef0", State: { Name: "terminated" } }] }] })
+      ec2: { send: async () => ({ Reservations: [{ Instances: [{ InstanceId: "i-1234567890abcdef0", State: { Name: "terminated" } }] }] }) }
     });
 
     await expect(provider.getTargetStatus(ec2Target)).resolves.toMatchObject({

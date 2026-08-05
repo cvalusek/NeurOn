@@ -43,6 +43,8 @@ reprovisionTarget?(target)
 ensureTargetOn(target)
 ensureTargetOff(target)
 getTargetStatus(target)
+getTargetCostEstimate?(target)
+discoverResources?(provider)
 forceStopTarget(target)
 ```
 
@@ -84,8 +86,28 @@ admin action only, because AMI IDs vary by region and runtime projects own the
 image and model-loading details.
 
 In the Admin UI, create an `aws-ec2` provider with provisioning disabled, then
-create a target under it and enter the existing EC2 instance ID. The target can
-also be supplied declaratively with the JSON or environment forms below.
+set its optional instance Name-tag pattern (for example
+`epd.sandbox.prefer.*`). When creating a target, **Find EC2 instances** lists
+matching pending, running, stopping, and stopped instances and fills the chosen
+instance ID. This discovery is read-only and uses the same
+`ec2:DescribeInstances` permission as status checks. The target can also be
+supplied declaratively with the JSON or environment forms below.
+
+While the instance is available, the provider derives runtime endpoints from
+its current private IP address, falling back to its private DNS name. Defaults
+are `http`, port `8080`, health path `/health`, and API path `/v1`. This means a
+stop/start that changes the private IP is picked up on the next status read.
+Target-level `healthUrl` and `apiUrl` remain explicit overrides and win over
+the derived URLs. The runtime security group must allow NeurOn to reach the
+configured port.
+
+When a manual `costEstimate.hourlyUsd` is absent, NeurOn discovers the hourly
+price at activation or reservation-estimate time. On-demand instances use the
+AWS Price List `GetProducts` API; Spot instances use the latest matching EC2
+Spot price for the instance's Availability Zone. Results are cached for one
+hour. These are current list/Spot estimates, not invoice data, negotiated
+discounts, Savings Plans, or Reserved Instance effective prices. A manual
+hourly-cost override always wins.
 
 ### Target config
 
@@ -96,7 +118,26 @@ also be supplied declaratively with the JSON or environment forms below.
   "provider": "aws-ec2",
   "modelIds": ["qwen"],
   "aws": {
-    "instanceId": "i-1234567890abcdef0"
+    "instanceId": "i-1234567890abcdef0",
+    "runtimePort": 8080,
+    "runtimeProtocol": "http",
+    "healthPath": "/health",
+    "apiPath": "/v1"
+  }
+}
+```
+
+Provider discovery config:
+
+```json
+{
+  "id": "aws-main",
+  "displayName": "AWS Main",
+  "type": "aws-ec2",
+  "config": {
+    "awsEc2": {
+      "instanceNamePattern": "epd.sandbox.prefer.*"
+    }
   }
 }
 ```
@@ -125,7 +166,16 @@ specific instance IDs NeurOn may control.
     {
       "Sid": "ReadInstanceStatus",
       "Effect": "Allow",
-      "Action": "ec2:DescribeInstances",
+      "Action": [
+        "ec2:DescribeInstances",
+        "ec2:DescribeSpotPriceHistory"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "ReadOnDemandPrices",
+      "Effect": "Allow",
+      "Action": "pricing:GetProducts",
       "Resource": "*"
     }
   ]
@@ -135,6 +185,11 @@ specific instance IDs NeurOn may control.
 `ec2:DescribeInstances` does not support resource-level permissions for this
 use case, so it remains `Resource: "*"`. Prefer a separate NeurOn IAM role per
 environment/account and keep start/stop resources tightly scoped.
+`ec2:DescribeSpotPriceHistory` is only needed for Spot targets.
+`pricing:GetProducts` is only needed for automatic on-demand estimates; AWS
+Price List requests use its `us-east-1` API endpoint while filtering products
+for the workload region. Neither pricing action is required when all EC2
+targets have manual hourly-cost overrides.
 
 ### Future IAM for Provisioning
 

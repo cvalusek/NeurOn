@@ -1,4 +1,4 @@
-import type { ApiKey, AuthenticatedUser, AuthMethod, CapacityProviderDefinition, CapacityProviderStatus, CapacityTarget, Reservation, ReservationProfile, TargetCostEstimateConfig, TargetModelDiscoveryRecord, TargetProvisioningJob, TargetActivation, TargetActivationReservation, TargetStatus } from "./types.js";
+import type { ApiKey, AuthenticatedUser, AuthMethod, CapacityProviderDefinition, CapacityProviderResource, CapacityProviderStatus, CapacityTarget, Reservation, ReservationProfile, TargetCostEstimateConfig, TargetModelDiscoveryRecord, TargetProvisioningJob, TargetActivation, TargetActivationReservation, TargetStatus } from "./types.js";
 
 export interface CapacityProvider {
   provisionTarget(target: CapacityTarget): Promise<Partial<CapacityTarget> | void>;
@@ -7,6 +7,7 @@ export interface CapacityProvider {
   ensureTargetOff(target: CapacityTarget): Promise<void>;
   getTargetStatus(target: CapacityTarget): Promise<CapacityProviderStatus>;
   getTargetCostEstimate?(target: CapacityTarget): Promise<TargetCostEstimateConfig | undefined>;
+  discoverResources?(provider: CapacityProviderDefinition): Promise<CapacityProviderResource[]>;
   forceStopTarget(target: CapacityTarget): Promise<void>;
 }
 

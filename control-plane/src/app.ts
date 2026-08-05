@@ -193,6 +193,7 @@ export async function buildApp(config: AppConfig, models: ModelDefinition[]) {
     targetService,
     targetProvisioningService,
     costEstimation,
+    capacityProvider,
     config.maintenanceMode ? undefined : hassleOffClient
   );
 

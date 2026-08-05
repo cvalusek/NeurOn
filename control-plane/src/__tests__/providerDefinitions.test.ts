@@ -16,6 +16,15 @@ const managedEnv = [
   "CAPACITY_TARGET_EC2_GPU_DISPLAY_NAME",
   "CAPACITY_TARGET_EC2_GPU_PROVIDER",
   "CAPACITY_TARGET_EC2_GPU_AWS_INSTANCE_ID",
+  "CAPACITY_TARGET_EC2_GPU_AWS_RUNTIME_PORT",
+  "CAPACITY_TARGET_EC2_GPU_AWS_RUNTIME_PROTOCOL",
+  "CAPACITY_TARGET_EC2_GPU_AWS_HEALTH_PATH",
+  "CAPACITY_TARGET_EC2_GPU_AWS_API_PATH",
+  "CAPACITY_PROVIDER_KEYS",
+  "CAPACITY_PROVIDER_AWS_MAIN_ID",
+  "CAPACITY_PROVIDER_AWS_MAIN_DISPLAY_NAME",
+  "CAPACITY_PROVIDER_AWS_MAIN_TYPE",
+  "CAPACITY_PROVIDER_AWS_MAIN_AWS_EC2_INSTANCE_NAME_PATTERN",
   "RUNTIME_PROFILES_JSON",
   "SHARED_PASSWORD"
 ];
@@ -355,6 +364,10 @@ describe("provider definitions", () => {
     process.env.CAPACITY_TARGET_EC2_GPU_DISPLAY_NAME = "EC2 GPU";
     process.env.CAPACITY_TARGET_EC2_GPU_PROVIDER = "aws-ec2";
     process.env.CAPACITY_TARGET_EC2_GPU_AWS_INSTANCE_ID = "i-1234567890abcdef0";
+    process.env.CAPACITY_TARGET_EC2_GPU_AWS_RUNTIME_PORT = "9000";
+    process.env.CAPACITY_TARGET_EC2_GPU_AWS_RUNTIME_PROTOCOL = "https";
+    process.env.CAPACITY_TARGET_EC2_GPU_AWS_HEALTH_PATH = "/ready";
+    process.env.CAPACITY_TARGET_EC2_GPU_AWS_API_PATH = "/openai/v1";
 
     const { config } = await loadConfig();
 
@@ -363,8 +376,30 @@ describe("provider definitions", () => {
       displayName: "EC2 GPU",
       provider: "aws-ec2",
       providerId: "aws-ec2",
-      aws: { instanceId: "i-1234567890abcdef0" }
+      aws: {
+        instanceId: "i-1234567890abcdef0",
+        runtimePort: 9000,
+        runtimeProtocol: "https",
+        healthPath: "/ready",
+        apiPath: "/openai/v1"
+      }
     });
+  });
+
+  it("loads the AWS EC2 provider instance discovery pattern from expanded environment config", async () => {
+    process.env.CAPACITY_PROVIDER_KEYS = "AWS_MAIN";
+    process.env.CAPACITY_PROVIDER_AWS_MAIN_ID = "aws-main";
+    process.env.CAPACITY_PROVIDER_AWS_MAIN_DISPLAY_NAME = "AWS Main";
+    process.env.CAPACITY_PROVIDER_AWS_MAIN_TYPE = "aws-ec2";
+    process.env.CAPACITY_PROVIDER_AWS_MAIN_AWS_EC2_INSTANCE_NAME_PATTERN = "epd.sandbox.prefer.*";
+
+    const { config } = await loadConfig();
+
+    expect(config.capacityProviders).toMatchObject([{
+      id: "aws-main",
+      type: "aws-ec2",
+      config: { awsEc2: { instanceNamePattern: "epd.sandbox.prefer.*" } }
+    }]);
   });
 
   it("resolves AWS EC2 target validation through a provider ID", async () => {

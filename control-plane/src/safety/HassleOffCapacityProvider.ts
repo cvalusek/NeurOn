@@ -1,5 +1,5 @@
 import type { CapacityProvider } from "../domain/interfaces.js";
-import type { CapacityProviderStatus, CapacityTarget, TargetCostEstimateConfig } from "../domain/types.js";
+import type { CapacityProviderDefinition, CapacityProviderResource, CapacityProviderStatus, CapacityTarget, TargetCostEstimateConfig } from "../domain/types.js";
 import type { HassleOffClient } from "./HassleOffClient.js";
 
 export class HassleOffCapacityProvider implements CapacityProvider {
@@ -41,6 +41,11 @@ export class HassleOffCapacityProvider implements CapacityProvider {
 
   async getTargetCostEstimate(target: CapacityTarget): Promise<TargetCostEstimateConfig | undefined> {
     return this.delegate.getTargetCostEstimate?.(target);
+  }
+
+  async discoverResources(provider: CapacityProviderDefinition): Promise<CapacityProviderResource[]> {
+    if (!this.delegate.discoverResources) throw new Error(`Provider ${provider.id} does not support resource discovery`);
+    return this.delegate.discoverResources(provider);
   }
 
   async forceStopTarget(target: CapacityTarget): Promise<void> {

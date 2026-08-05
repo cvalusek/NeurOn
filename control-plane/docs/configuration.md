@@ -38,6 +38,7 @@ CAPACITY_PROVIDER_RUNPOD_MAIN_PROVISIONING_ENABLED=false
 
 Provider-specific env-expanded fields include:
 
+- AWS EC2: `CAPACITY_PROVIDER_<KEY>_AWS_EC2_INSTANCE_NAME_PATTERN`
 - RunPod: `CAPACITY_PROVIDER_<KEY>_RUNPOD_API_KEY_ENV`,
   `CAPACITY_PROVIDER_<KEY>_RUNPOD_API_BASE_URL`
 - NeurOn: `CAPACITY_PROVIDER_<KEY>_NEURON_API_BASE_URL`,
@@ -332,6 +333,9 @@ For RunPod targets, `ESTIMATED_HOURLY_COST_USD` is usually not required.
 When a target has a RunPod Pod ID and API key, NeurOn asks RunPod for the
 Pod's hourly cost when an activation opens. A configured
 `ESTIMATED_HOURLY_COST_USD` still wins when you need a manual override.
+For AWS EC2 targets, NeurOn similarly discovers current on-demand or Spot
+hourly prices when the appropriate task-role read permissions are present.
+The override still takes precedence and requires no pricing permissions.
 
 Model keys are nested under a target:
 
@@ -352,6 +356,24 @@ Use `aws-ec2` when NeurOn should start and stop one existing EC2 instance:
 ```env
 CAPACITY_TARGET_GPU_INSTANCE_PROVIDER=aws-ec2
 CAPACITY_TARGET_GPU_INSTANCE_AWS_INSTANCE_ID=i-1234567890abcdef0
+# Optional; these are the defaults used for runtime endpoint discovery.
+CAPACITY_TARGET_GPU_INSTANCE_AWS_RUNTIME_PORT=8080
+CAPACITY_TARGET_GPU_INSTANCE_AWS_RUNTIME_PROTOCOL=http
+CAPACITY_TARGET_GPU_INSTANCE_AWS_HEALTH_PATH=/health
+CAPACITY_TARGET_GPU_INSTANCE_AWS_API_PATH=/v1
+```
+
+The EC2 provider reads the instance's current private IP address (or private DNS
+name) and derives the health and API URLs. Explicit target `HEALTH_URL` and
+`API_URL` values override the derived values. Reusable EC2 providers can limit
+the Admin UI's **Find EC2 instances** result set by Name tag:
+
+```env
+CAPACITY_PROVIDER_KEYS=AWS_MAIN
+CAPACITY_PROVIDER_AWS_MAIN_ID=aws-main
+CAPACITY_PROVIDER_AWS_MAIN_DISPLAY_NAME=AWS Main
+CAPACITY_PROVIDER_AWS_MAIN_TYPE=aws-ec2
+CAPACITY_PROVIDER_AWS_MAIN_AWS_EC2_INSTANCE_NAME_PATTERN=epd.sandbox.prefer.*
 ```
 
 Use `aws-ecs` or `aws-ecs-asg` when NeurOn should control an ECS service backed

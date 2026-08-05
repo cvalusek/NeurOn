@@ -147,6 +147,32 @@ describe("runtime model discovery lifecycle coordination", () => {
     expect(await harness.reservations.list()).toEqual([]);
   });
 
+  it("uses runtime endpoints discovered from provider status", async () => {
+    const harness = discoveryHarness({ targetPatch: { apiUrl: undefined, healthUrl: undefined } });
+    harness.provider.getTargetStatus.mockResolvedValue({
+      observed: "healthy",
+      message: "Running",
+      runtime: {
+        apiUrl: "http://10.0.0.10:8080/v1",
+        healthUrl: "http://10.0.0.10:8080/health"
+      }
+    });
+    const fetchMock = vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      return url.endsWith("/health") ? new Response(null, { status: 200 }) : modelsResponse("runtime-model");
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await harness.discovery.bootstrapTarget(harness.target, harness.provider, harness.healthChecker);
+
+    expect(fetchMock.mock.calls.map(([input]) => String(input))).toEqual([
+      "http://10.0.0.10:8080/health",
+      "http://10.0.0.10:8080/health",
+      "http://10.0.0.10:8080/v1/models"
+    ]);
+    expect(harness.catalog.listModelsForTarget(harness.target.id).map((model) => model.id)).toEqual(["runtime-model"]);
+  });
+
   it("preserves pre-existing reservation demand and converges when that demand ends during discovery", async () => {
     const harness = discoveryHarness({ initialStatus: { observed: "healthy", message: "Already running" } });
     const reservation = await harness.reservations.create({

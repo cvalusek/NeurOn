@@ -62,8 +62,10 @@ contributed to it. They accumulate estimated cost allocated back to each
 reservation. Reservation API payloads expose their sum as
 `costEstimate`.
 
-The first draft uses configured hourly target estimates only. It does not query
-cloud billing APIs or provider invoices.
+Configured hourly target estimates take precedence. Providers may otherwise
+return a current hourly estimate through `getTargetCostEstimate`; AWS EC2 uses
+on-demand catalog or Spot market data and RunPod uses Pod details. These remain
+operational estimates, not provider invoices or negotiated-discount accounting.
 
 ### CapacityTarget
 

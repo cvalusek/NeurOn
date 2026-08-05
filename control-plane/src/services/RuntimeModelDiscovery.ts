@@ -3,6 +3,7 @@ import type { CapacityTarget, RuntimeDiscoveredModel } from "../domain/types.js"
 import type { HealthChecker } from "../reconciler/HealthChecker.js";
 import { ModelCatalog } from "./ModelCatalog.js";
 import type { TargetOperationCoordinator } from "./TargetOperationCoordinator.js";
+import { withProviderRuntimeEndpoints } from "../capacity/providerRuntime.js";
 
 interface OpenAiModelsResponse {
   data?: RuntimeModelInfo[];
@@ -94,10 +95,11 @@ export class RuntimeModelDiscovery {
           while (Date.now() - startedAt < timeoutMs) {
             const providerStatus = await capacityProvider.getTargetStatus(target);
             if (providerStatus.observed === "healthy") {
-              const health = await healthChecker.check(target);
+              const runtimeTarget = withProviderRuntimeEndpoints(target, providerStatus);
+              const health = await healthChecker.check(runtimeTarget);
               if (health.ok) {
                 try {
-                  await this.refreshTarget(target);
+                  await this.refreshTarget(runtimeTarget);
                   return;
                 } catch (error) {
                   // Runtime may be running before the OpenAI-compatible API is ready.

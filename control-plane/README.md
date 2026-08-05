@@ -239,9 +239,13 @@ For AWS EC2 targets that use pre-created instances, the task role needs:
 - `ec2:StartInstances`
 - `ec2:StopInstances`
 - `ec2:DescribeInstances`
+- `pricing:GetProducts` for automatic on-demand price estimates
+- `ec2:DescribeSpotPriceHistory` for automatic Spot price estimates
 
 Scope start/stop to the specific instance ARNs NeurOn may control. EC2 targets
-use `aws.instanceId` and do not use an Auto Scaling Group.
+use `aws.instanceId` and do not use an Auto Scaling Group. Instance discovery
+does not add another permission beyond `ec2:DescribeInstances`. The pricing
+permissions are optional when targets use manual hourly-cost overrides.
 
 For AWS ECS/ASG targets, the task role needs:
 

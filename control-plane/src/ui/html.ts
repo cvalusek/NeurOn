@@ -956,7 +956,9 @@ function targetCreateModal(providers: ProviderView[], runtimeProfiles: RuntimePr
       </div>
       <div id="aws-ec2-target-fields">
         <p><label>AWS EC2 instance ID<br><input name="awsInstanceId" type="text" placeholder="i-1234567890abcdef0"></label></p>
-        <p class="muted">NeurOn starts, stops, and inspects this pre-created instance.</p>
+        ${ec2InstanceDiscoveryControls()}
+        <p><label>Runtime port<br><input name="awsRuntimePort" type="number" min="1" max="65535" placeholder="8080"></label></p>
+        <p class="muted">NeurOn starts, stops, and inspects this pre-created instance. Runtime URLs default to <code>http://&lt;private-ip&gt;:8080/v1</code> and <code>/health</code>.</p>
       </div>
       <div id="docker-target-fields">
         <p><label>Docker container name<br><input name="dockerContainerName" type="text" placeholder="prefer"></label></p>
@@ -971,6 +973,7 @@ function targetCreateModal(providers: ProviderView[], runtimeProfiles: RuntimePr
         <summary>Overrides</summary>
         <p><label>API URL override<br><input name="apiUrl" type="text" placeholder="http://runtime.internal:8080/v1"></label></p>
         <p><label>Health URL override<br><input name="healthUrl" type="text" placeholder="http://runtime.internal:8080/health"></label></p>
+        <p><label>Hourly cost override (USD)<br><input name="estimatedHourlyCostUsd" type="number" min="0" step="0.000001" placeholder="leave empty for provider discovery"></label></p>
         <p><label>Configured model IDs<br><input name="modelIds" type="text" placeholder="qwen-3.6,gemma-4"></label></p>
         <p><label>LiteLLM model route prefixes<br><input name="trafficModelPrefixes" type="text" placeholder="clint-desktop/,prefer/"></label></p>
         <p class="muted">Comma-separated prefixes link matching LiteLLM model names and traffic to this target.</p>
@@ -980,6 +983,55 @@ function targetCreateModal(providers: ProviderView[], runtimeProfiles: RuntimePr
     </form>
     </div>
   </div>`;
+}
+
+function ec2InstanceDiscoveryControls(): string {
+  return `<div class="inline-actions"><button class="secondary" type="button" data-discover-ec2-instances>Find EC2 instances</button></div>
+  <p><label>Discovered instances<br><select data-ec2-instance-results hidden><option value="">Choose an instance</option></select></label></p>
+  <p class="muted" data-ec2-discovery-status>Uses the selected provider's Name-tag pattern.</p>`;
+}
+
+function ec2InstanceDiscoveryScript(): string {
+  return `
+    document.addEventListener('click', async (event) => {
+      const button = event.target.closest('[data-discover-ec2-instances]');
+      if (!button) return;
+      event.preventDefault();
+      const form = button.closest('form');
+      const providerId = form?.querySelector('select[name="providerId"]')?.value;
+      const results = form?.querySelector('[data-ec2-instance-results]');
+      const status = form?.querySelector('[data-ec2-discovery-status]');
+      if (!providerId || !results || !status) return;
+      button.disabled = true;
+      status.textContent = 'Looking for EC2 instances...';
+      try {
+        const response = await fetch('/api/admin/providers/' + encodeURIComponent(providerId) + '/resources');
+        const body = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(body.error || 'EC2 instance discovery failed');
+        const resources = body.resources ?? [];
+        results.innerHTML = '<option value="">Choose an instance</option>' + resources.map(resource => {
+          const details = resource.details ?? {};
+          const suffix = [resource.state, details.instanceType, details.availabilityZone, details.privateIpAddress].filter(Boolean).join(' | ');
+          const label = resource.displayName + ' (' + resource.id + ')' + (suffix ? ' — ' + suffix : '');
+          return '<option value="' + escapeText(resource.id) + '">' + escapeText(label) + '</option>';
+        }).join('');
+        results.hidden = resources.length === 0;
+        status.textContent = resources.length === 0 ? 'No matching EC2 instances were found.' : 'Found ' + resources.length + ' instance' + (resources.length === 1 ? '.' : 's.');
+      } catch (error) {
+        results.hidden = true;
+        status.textContent = error instanceof Error ? error.message : String(error);
+      } finally {
+        button.disabled = false;
+      }
+    });
+    document.addEventListener('change', (event) => {
+      const results = event.target.closest?.('[data-ec2-instance-results]');
+      if (!results?.value) return;
+      const form = results.closest('form');
+      const instanceInput = form?.querySelector('input[name="awsInstanceId"]');
+      if (instanceInput) instanceInput.value = results.value;
+    });
+  `;
 }
 
 function targetAdminScript(providers: ProviderView[], runtimeProfiles: RuntimeProfile[]): string {
@@ -1041,6 +1093,7 @@ function targetAdminScript(providers: ProviderView[], runtimeProfiles: RuntimePr
     const providers = ${safeJson(Object.fromEntries(providers.map((provider) => [provider.id, provider.type])))};
     const runtimeProfiles = ${safeJson(Object.fromEntries(runtimeProfiles.map((profile) => [profile.id, profile])))};
     const escapeText = (value) => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' }[char]));
+    ${ec2InstanceDiscoveryScript()}
     const provider = document.querySelector('#target-modal select[name="providerId"]');
     const runtimeProfile = document.querySelector('#target-modal select[name="runtimeProfileId"]');
     const runtimeProfileVariant = document.querySelector('#target-modal select[name="runtimeProfileVariantId"]');
@@ -1265,7 +1318,9 @@ function targetEditPanel(target: TargetView, providers: ProviderView[], runtimeP
     </div>
     <div data-edit-provider-fields="aws-ec2">
       <p><label>AWS EC2 instance ID<br><input name="awsInstanceId" type="text" value="${escapeHtml(target.aws?.instanceId ?? "")}"></label></p>
-      <p class="muted">NeurOn starts, stops, and inspects this pre-created instance.</p>
+      ${ec2InstanceDiscoveryControls()}
+      <p><label>Runtime port<br><input name="awsRuntimePort" type="number" min="1" max="65535" value="${escapeHtml(String(target.aws?.runtimePort ?? ""))}" placeholder="8080"></label></p>
+      <p class="muted">Runtime URLs default from the instance private address; explicit URL overrides still win.</p>
     </div>
     <div data-edit-provider-fields="docker">
       <p><label>Docker container name<br><input name="dockerContainerName" type="text" value="${escapeHtml(target.docker?.containerName ?? "")}"></label></p>
@@ -1279,6 +1334,7 @@ function targetEditPanel(target: TargetView, providers: ProviderView[], runtimeP
       <summary>Overrides</summary>
       <p><label>API URL override<br><input name="apiUrl" type="text" value="${escapeHtml(target.apiUrl ?? "")}"></label></p>
       <p><label>Health URL override<br><input name="healthUrl" type="text" value="${escapeHtml(target.healthUrl ?? "")}"></label></p>
+      <p><label>Hourly cost override (USD)<br><input name="estimatedHourlyCostUsd" type="number" min="0" step="0.000001" value="${escapeHtml(String(target.costEstimate?.hourlyUsd ?? ""))}" placeholder="leave empty for provider discovery"></label></p>
       <p><label>Configured model IDs<br><input name="modelIds" type="text" value="${escapeHtml(target.modelIds.join(","))}"></label></p>
       <p><label>LiteLLM model route prefixes<br><input name="trafficModelPrefixes" type="text" value="${escapeHtml(target.trafficModelPrefixes?.join(",") ?? "")}"></label></p>
       <p class="muted">Comma-separated prefixes link matching LiteLLM model names and traffic to this target.</p>
@@ -1314,6 +1370,8 @@ function targetDetails(target: CapacityTarget): string {
     ["AWS service", target.aws?.service ?? target.aws?.serviceName],
     ["AWS ASG", target.aws?.autoScalingGroupName],
     ["AWS EC2 instance", target.aws?.instanceId],
+    ["AWS runtime port", target.aws?.runtimePort === undefined ? undefined : String(target.aws.runtimePort)],
+    ["Hourly cost override", target.costEstimate?.hourlyUsd === undefined ? undefined : `$${target.costEstimate.hourlyUsd.toFixed(6)}`],
     ["Remote NeurOn target", target.neuron?.targetId]
   ].filter((entry): entry is [string, string] => entry[1] !== undefined && entry[1] !== "");
   const view = `<table><tbody>${viewRows.map(([label, value]) => `<tr><th>${escapeHtml(label)}</th><td>${escapeHtml(String(value))}</td></tr>`).join("")}</tbody></table>`;
@@ -1361,7 +1419,8 @@ function declarativeTargetJson(target: CapacityTarget): string {
     neuron: target.neuron,
     healthUrl: target.healthUrl,
     apiUrl: target.apiUrl,
-    litellm: target.litellm
+    litellm: target.litellm,
+    costEstimate: target.costEstimate
   }), null, 2);
 }
 
@@ -1390,6 +1449,11 @@ function declarativeTargetEnv(target: CapacityTarget): string {
     target.aws?.serviceName ? envLine(`${prefix}_AWS_SERVICE_NAME`, target.aws.serviceName) : "",
     target.aws?.autoScalingGroupName ? envLine(`${prefix}_AWS_ASG_NAME`, target.aws.autoScalingGroupName) : "",
     target.aws?.instanceId ? envLine(`${prefix}_AWS_INSTANCE_ID`, target.aws.instanceId) : "",
+    target.aws?.runtimePort ? envLine(`${prefix}_AWS_RUNTIME_PORT`, String(target.aws.runtimePort)) : "",
+    target.aws?.runtimeProtocol ? envLine(`${prefix}_AWS_RUNTIME_PROTOCOL`, target.aws.runtimeProtocol) : "",
+    target.aws?.healthPath ? envLine(`${prefix}_AWS_HEALTH_PATH`, target.aws.healthPath) : "",
+    target.aws?.apiPath ? envLine(`${prefix}_AWS_API_PATH`, target.aws.apiPath) : "",
+    target.costEstimate?.hourlyUsd !== undefined ? envLine(`${prefix}_ESTIMATED_HOURLY_COST_USD`, String(target.costEstimate.hourlyUsd)) : "",
     target.runpod?.podId ? envLine(`${prefix}_RUNPOD_POD_ID`, target.runpod.podId) : "",
     target.runpod?.apiKeyEnv ? envLine(`${prefix}_RUNPOD_API_KEY_ENV`, target.runpod.apiKeyEnv) : "",
     target.runpod?.apiBaseUrl ? envLine(`${prefix}_RUNPOD_API_BASE_URL`, target.runpod.apiBaseUrl) : "",
@@ -1439,6 +1503,10 @@ export function providerAdminPage(user: AuthenticatedUser, providers: ProviderVi
         <p><label>Display name<br><input name="displayName" type="text" placeholder="RunPod Main"></label></p>
       </div>
       <p><label><input name="provisioningEnabled" type="checkbox"> Allow this provider to provision resources</label></p>
+      <div id="aws-ec2-provider-fields">
+        <p><label>Instance Name-tag pattern<br><input name="awsEc2InstanceNamePattern" type="text" placeholder="epd.sandbox.prefer.*"></label></p>
+        <p class="muted">Find instances limits discovery to this wildcard pattern. Start/stop authorization remains enforced by IAM.</p>
+      </div>
       <p id="provider-type-note" class="muted"></p>
       <div class="actions"><button type="submit">Add provider</button></div>
     </form>
@@ -1477,6 +1545,7 @@ export function providerAdminPage(user: AuthenticatedUser, providers: ProviderVi
     });
     const type = document.querySelector('#provider-modal select[name="type"]');
     const note = document.querySelector('#provider-type-note');
+    const awsEc2ProviderFields = document.querySelector('#aws-ec2-provider-fields');
     const notes = {
       runpod: 'RunPod account access will come from the runtime environment or a future credentials record.',
       neuron: 'External NeurOn providers will need a NeurOn API key once credentials are modeled.',
@@ -1485,12 +1554,54 @@ export function providerAdminPage(user: AuthenticatedUser, providers: ProviderVi
       docker: 'Docker providers use the local Docker daemon available to NeurOn.',
       'docker-compose': 'Docker Compose providers use target-level project and service settings.'
     };
-    const sync = () => { note.textContent = notes[type.value] ?? ''; };
+    const sync = () => {
+      note.textContent = notes[type.value] ?? '';
+      awsEc2ProviderFields.hidden = type.value !== 'aws-ec2';
+    };
     type?.addEventListener('change', sync);
     sync();
+    document.querySelectorAll('[data-provider-edit-form]').forEach(form => {
+      const providerType = form.querySelector('select[name="type"]');
+      const sections = [...form.querySelectorAll('[data-provider-config-fields]')];
+      const syncProviderEdit = () => sections.forEach(section => {
+        section.hidden = section.dataset.providerConfigFields !== providerType.value;
+      });
+      providerType?.addEventListener('change', syncProviderEdit);
+      syncProviderEdit();
+    });
     const targetProviders = ${safeJson(Object.fromEntries(providers.map((provider) => [provider.id, provider.type])))};
     const runtimeProfiles = ${safeJson(Object.fromEntries(runtimeProfiles.map((profile) => [profile.id, profile])))};
     const escapeText = (value) => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' }[char]));
+    document.addEventListener('click', async (event) => {
+      const button = event.target.closest('[data-discover-provider-resources]');
+      if (!button) return;
+      event.preventDefault();
+      const panel = button.closest('[data-provider-resource-discovery]');
+      const providerId = panel?.dataset.providerId;
+      const status = panel?.querySelector('[data-provider-resource-status]');
+      const list = panel?.querySelector('[data-provider-resource-list]');
+      if (!providerId || !status || !list) return;
+      button.disabled = true;
+      status.textContent = 'Looking for EC2 instances...';
+      try {
+        const response = await fetch('/api/admin/providers/' + encodeURIComponent(providerId) + '/resources');
+        const body = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(body.error || 'EC2 instance discovery failed');
+        const resources = body.resources ?? [];
+        status.textContent = resources.length === 0 ? 'No matching EC2 instances were found.' : 'Found ' + resources.length + ' instance' + (resources.length === 1 ? '.' : 's.');
+        list.innerHTML = resources.map(resource => {
+          const details = resource.details ?? {};
+          const metadata = [resource.state, details.instanceType, details.availabilityZone, details.privateIpAddress].filter(Boolean).join(' | ');
+          return '<div class="target-status-card"><strong>' + escapeText(resource.displayName) + '</strong><div><code>' + escapeText(resource.id) + '</code></div><div class="muted">' + escapeText(metadata) + '</div></div>';
+        }).join('');
+      } catch (error) {
+        status.textContent = error instanceof Error ? error.message : String(error);
+        list.innerHTML = '';
+      } finally {
+        button.disabled = false;
+      }
+    });
+    ${ec2InstanceDiscoveryScript()}
     const targetProvider = document.querySelector('#provider-target-modal select[name="providerId"]');
     const runtimeProfile = document.querySelector('#provider-target-modal select[name="runtimeProfileId"]');
     const runtimeProfileVariant = document.querySelector('#provider-target-modal select[name="runtimeProfileVariantId"]');
@@ -1561,18 +1672,26 @@ function providerRow(provider: ProviderView, targets: TargetView[]): string {
     ? providerEditPanel(provider)
     : `<form method="post" action="/admin/providers/${escapeHtml(provider.id)}/copy-to-db"><button class="secondary" type="submit">Copy config provider to DB</button></form>`;
   const deleteAction = provider.editable ? providerDeletePanel(provider) : `<p class="muted">This provider is loaded from declarative config. Remove it from configuration or copy it to the database before deleting it here.</p>`;
-  const viewConfig = `<p><strong>Resource creation:</strong> ${provider.provisioning?.enabled ? "enabled" : "disabled"}</p>${provider.config ? `<pre>${escapeHtml(JSON.stringify(provider.config, null, 2))}</pre>` : `<p class="muted">No provider-level config.</p>`}`;
+  const resourceDiscovery = provider.type === "aws-ec2"
+    ? `<div data-provider-resource-discovery data-provider-id="${escapeHtml(provider.id)}"><div class="inline-actions"><button class="secondary" type="button" data-discover-provider-resources>Find EC2 instances</button></div><p class="muted" data-provider-resource-status>Uses this provider's Name-tag pattern.</p><div class="summary-list" data-provider-resource-list></div></div>`
+    : "";
+  const viewConfig = `<p><strong>Resource creation:</strong> ${provider.provisioning?.enabled ? "enabled" : "disabled"}</p>${provider.config ? `<pre>${escapeHtml(JSON.stringify(provider.config, null, 2))}</pre>` : `<p class="muted">No provider-level config.</p>`}${resourceDiscovery}`;
   return `<details class="drilldown"><summary><div><strong>${escapeHtml(provider.displayName)}</strong><div class="muted"><code>${escapeHtml(provider.id)}</code> | ${escapeHtml(provider.type)} | ${providerTargets.length} targets</div></div><span class="badge ${provider.source === "persisted" ? "active" : "done"}">${escapeHtml(provider.source)}</span></summary><div class="drilldown-body" data-tabs><div class="tabbar"><button type="button" data-tab="view" aria-selected="true">View</button><button type="button" data-tab="targets" aria-selected="false">Targets</button><button type="button" data-tab="json" aria-selected="false">JSON</button><button type="button" data-tab="env" aria-selected="false">ENV</button><button type="button" data-tab="edit" aria-selected="false">Edit</button><button type="button" data-tab="delete" aria-selected="false">Delete</button></div><section class="tab-panel" data-tab-panel="view">${viewConfig}</section><section class="tab-panel" data-tab-panel="targets" hidden>${providerTargetsPanel(provider, providerTargets)}</section><section class="tab-panel" data-tab-panel="json" hidden><div class="inline-actions"><button type="button" data-copy="${escapeHtml(declarative)}">Copy JSON</button></div><pre>${escapeHtml(declarative)}</pre></section><section class="tab-panel" data-tab-panel="env" hidden><div class="inline-actions"><button type="button" data-copy="${escapeHtml(env)}">Copy ENV</button></div><pre>${escapeHtml(env)}</pre></section><section class="tab-panel" data-tab-panel="edit" hidden><p class="muted">${provider.editable ? "This provider is stored in the database." : "This provider is loaded from declarative config."}</p>${editAction}</section><section class="tab-panel" data-tab-panel="delete" hidden>${deleteAction}</section></div></details>`;
 }
 
 function providerEditPanel(provider: ProviderView): string {
-  return `<form method="post" action="/admin/providers/${escapeHtml(provider.id)}/update">
+  const instanceNamePattern = provider.config?.awsEc2?.instanceNamePattern ?? "";
+  return `<form method="post" action="/admin/providers/${escapeHtml(provider.id)}/update" data-provider-edit-form>
     <p><label>Type<br>${providerTypeSelect(provider.type)}</label></p>
     <div class="field-grid">
       <p><label>ID<br><input name="id" type="text" value="${escapeHtml(provider.id)}" required></label></p>
       <p><label>Display name<br><input name="displayName" type="text" value="${escapeHtml(provider.displayName)}"></label></p>
     </div>
     <p><label><input name="provisioningEnabled" type="checkbox" ${provider.provisioning?.enabled ? "checked" : ""}> Allow this provider to provision resources</label></p>
+    <div data-provider-config-fields="aws-ec2" ${provider.type === "aws-ec2" ? "" : "hidden"}>
+      <p><label>Instance Name-tag pattern<br><input name="awsEc2InstanceNamePattern" type="text" value="${escapeHtml(instanceNamePattern)}" placeholder="epd.sandbox.prefer.*"></label></p>
+      <p class="muted">Used by Find EC2 instances; IAM separately controls which instances may be started or stopped.</p>
+    </div>
     <div class="actions"><button type="submit">Save provider</button></div>
   </form>`;
 }
@@ -1628,7 +1747,9 @@ function createTargetFromProviderModal(providers: ProviderView[], runtimeProfile
         </div>
         <div data-provider-fields="aws-ec2">
           <p><label>AWS EC2 instance ID<br><input name="awsInstanceId" type="text" placeholder="i-1234567890abcdef0"></label></p>
-          <p class="muted">NeurOn starts, stops, and inspects this pre-created instance.</p>
+          ${ec2InstanceDiscoveryControls()}
+          <p><label>Runtime port<br><input name="awsRuntimePort" type="number" min="1" max="65535" placeholder="8080"></label></p>
+          <p class="muted">Runtime URLs default from the instance private address; explicit URL overrides still win.</p>
         </div>
         <div data-provider-fields="neuron">
           <p><label>Remote NeurOn target ID<br><input name="neuronTargetId" type="text" placeholder="gpu-pool-west"></label></p>
@@ -1638,6 +1759,7 @@ function createTargetFromProviderModal(providers: ProviderView[], runtimeProfile
           <summary>Overrides</summary>
           <p><label>API URL override<br><input name="apiUrl" type="text" placeholder="http://runtime.internal:8080/v1"></label></p>
           <p><label>Health URL override<br><input name="healthUrl" type="text" placeholder="http://runtime.internal:8080/health"></label></p>
+          <p><label>Hourly cost override (USD)<br><input name="estimatedHourlyCostUsd" type="number" min="0" step="0.000001" placeholder="leave empty for provider discovery"></label></p>
           <p><label>Configured model IDs<br><input name="modelIds" type="text" placeholder="qwen-3.6,gemma-4"></label></p>
           <p><label>LiteLLM model route prefixes<br><input name="trafficModelPrefixes" type="text" placeholder="clint-desktop/,prefer/"></label></p>
           <p class="muted">Comma-separated prefixes link matching LiteLLM model names and traffic to this target.</p>
@@ -1695,7 +1817,8 @@ function declarativeProviderEnv(provider: ProviderView): string {
     provider.config?.runpod && typeof provider.config.runpod === "object" && "apiKeyEnv" in provider.config.runpod ? envLine(`${prefix}_RUNPOD_API_KEY_ENV`, String(provider.config.runpod.apiKeyEnv)) : "",
     provider.config?.runpod && typeof provider.config.runpod === "object" && "apiBaseUrl" in provider.config.runpod ? envLine(`${prefix}_RUNPOD_API_BASE_URL`, String(provider.config.runpod.apiBaseUrl)) : "",
     provider.config?.neuron && typeof provider.config.neuron === "object" && "apiBaseUrl" in provider.config.neuron ? envLine(`${prefix}_NEURON_API_BASE_URL`, String(provider.config.neuron.apiBaseUrl)) : "",
-    provider.config?.neuron && typeof provider.config.neuron === "object" && "apiKeyEnv" in provider.config.neuron ? envLine(`${prefix}_NEURON_API_KEY_ENV`, String(provider.config.neuron.apiKeyEnv)) : ""
+    provider.config?.neuron && typeof provider.config.neuron === "object" && "apiKeyEnv" in provider.config.neuron ? envLine(`${prefix}_NEURON_API_KEY_ENV`, String(provider.config.neuron.apiKeyEnv)) : "",
+    provider.config?.awsEc2?.instanceNamePattern ? envLine(`${prefix}_AWS_EC2_INSTANCE_NAME_PATTERN`, provider.config.awsEc2.instanceNamePattern) : ""
   ].filter((line) => line !== "");
   return lines.join("\n");
 }
