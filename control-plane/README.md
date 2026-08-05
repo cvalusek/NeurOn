@@ -211,7 +211,9 @@ publishes each target's primary OpenAI-compatible model IDs to LiteLLM. Model
 routes default to `<target-id>/<runtime-model-id>`, and each target gets one
 reusable `neuron/<target-id>` credential containing its current runtime API base.
 Set the target's `litellm.apiKeyEnv` to the name of an injected runtime secret
-when the runtime requires authentication. See
+when the runtime requires authentication; otherwise NeurOn supplies the
+non-empty placeholder `noapikey` required by the OpenAI-compatible LiteLLM
+client. See
 [docs/configuration.md](docs/configuration.md#litellm-discovered-model-sync).
 
 NeurOn never changes LiteLLM deployment block state when capacity stops. The

@@ -74,15 +74,17 @@ export class LiteLlmBackendConfigSync implements BackendConfigSync {
     target: CapacityTarget,
     credentialName: string,
     apiBaseUrl: string,
-    runtimeApiKey?: string
+    runtimeApiKey: string
   ): Promise<void> {
     const credential = {
       credential_name: credentialName,
       credential_values: {
         api_base: apiBaseUrl.replace(/\/$/, ""),
-        ...(runtimeApiKey ? { api_key: runtimeApiKey } : {})
+        api_key: runtimeApiKey
       },
       credential_info: {
+        custom_llm_provider: "openai",
+        provider: "openai",
         managed_by: "neuron",
         neuron_target_id: target.id,
         neuron_target_display_name: target.displayName
@@ -127,9 +129,9 @@ function uniqueRuntimeModelIds(models: RuntimeDiscoveredModel[]): string[] {
   return Array.from(new Set(models.map((model) => model.id?.trim()).filter((id): id is string => Boolean(id)))).sort();
 }
 
-function runtimeApiKeyFor(target: CapacityTarget): string | undefined {
+function runtimeApiKeyFor(target: CapacityTarget): string {
   const envName = target.litellm?.apiKeyEnv;
-  if (!envName) return undefined;
+  if (!envName) return "noapikey";
   const apiKey = process.env[envName];
   if (!apiKey) throw new Error(`Target ${target.id} LiteLLM API key environment variable ${envName} is not set`);
   return apiKey;
@@ -162,7 +164,7 @@ function syncFingerprint(
   runtimeModelIds: string[],
   apiBaseUrl: string,
   credentialName: string,
-  runtimeApiKey?: string
+  runtimeApiKey: string
 ): string {
   return createHash("sha256")
     .update(JSON.stringify({
@@ -172,7 +174,7 @@ function syncFingerprint(
       apiBaseUrl: apiBaseUrl.replace(/\/$/, ""),
       credentialName,
       modelNames: runtimeModelIds.map((modelId) => litellmModelName(target, modelId)),
-      runtimeApiKeyHash: runtimeApiKey ? createHash("sha256").update(runtimeApiKey).digest("hex") : undefined
+      runtimeApiKeyHash: createHash("sha256").update(runtimeApiKey).digest("hex")
     }))
     .digest("hex");
 }

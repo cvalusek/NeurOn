@@ -67,6 +67,8 @@ describe("LiteLlmBackendConfigSync", () => {
       credential_name: "neuron/g6.xlarge.general",
       credential_values: { api_base: target.apiUrl, api_key: "runtime-secret" },
       credential_info: {
+        custom_llm_provider: "openai",
+        provider: "openai",
         managed_by: "neuron",
         neuron_target_id: target.id,
         neuron_target_display_name: target.displayName
@@ -127,6 +129,10 @@ describe("LiteLlmBackendConfigSync", () => {
       .syncTargetHealthy(configuredTarget, [{ id: "gemma-4-e2b" }]);
 
     expect(calls.some((call) => call.url.endsWith("/credentials/neuron/custom-g6") && call.method === "PATCH")).toBe(true);
+    expect(calls.find((call) => call.url.endsWith("/credentials/neuron/custom-g6"))?.body).toMatchObject({
+      credential_values: { api_key: "noapikey" },
+      credential_info: { custom_llm_provider: "openai", provider: "openai" }
+    });
     expect(calls.find((call) => call.url.endsWith("/model/new"))?.body).toMatchObject({
       model_name: "prefer.g6.xlarge.general/gemma-4-e2b",
       litellm_params: { litellm_credential_name: "neuron/custom-g6", model: "gemma-4-e2b" }

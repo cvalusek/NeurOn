@@ -134,8 +134,10 @@ With global LiteLLM connectivity configured, successful runtime discovery
 upserts a `neuron/<target-id>` credential and publishes each primary runtime
 model ID under the effective display prefix. The friendly target display name
 is preserved in LiteLLM metadata as `neuron_target_display_name`; routing remains
-based on the stable target ID. Target stops do not block or delete deployments,
-allowing LiteLLM requests to remain queued while NeurOn starts capacity.
+based on the stable target ID. Credentials identify `openai` as their provider
+and use `noapikey` when the target has no configured runtime key. Target stops
+do not block or delete deployments, allowing LiteLLM requests to remain queued
+while NeurOn starts capacity.
 
 LiteLLM traffic monitoring remains useful for clients that cannot run a plugin.
 The OpenCode plugin is a stronger signal when it is available because it can

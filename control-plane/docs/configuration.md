@@ -593,6 +593,8 @@ returned by `/v1/models`. The defaults are:
 - credential name: `neuron/<target-id>`
 - callable model name: `<effective-prefix><runtime-model-id>`
 - provider: OpenAI-compatible (`custom_llm_provider=openai`)
+- API key: the target key environment variable, or `noapikey` when the runtime
+  does not require authentication
 - runtime model: the primary `/v1/models` `id`, unchanged
 
 The credential carries the current runtime `api_base`, so a provider-derived EC2
@@ -612,8 +614,11 @@ CAPACITY_TARGET_G6_XLARGE_GENERAL_LITELLM_SYNC_DISCOVERED_MODELS=false
 ```
 
 NeurOn records `neuron_target_id` and `neuron_target_display_name` in LiteLLM
-credential/deployment metadata. It does not block, unblock, or delete LiteLLM
-deployments when capacity stops or a model is absent from a later discovery.
+credential/deployment metadata. Credential metadata also identifies the provider
+as `openai`; a non-empty `noapikey` placeholder keeps LiteLLM's OpenAI-compatible
+client usable for unauthenticated runtimes. NeurOn does not block, unblock, or
+delete LiteLLM deployments when capacity stops or a model is absent from a later
+discovery.
 This keeps routes available for LiteLLM queueing while capacity starts and does
 not override operator-managed block state. Runtime aliases are retained in
 NeurOn discovery metadata but are not yet published as LiteLLM aliases.
