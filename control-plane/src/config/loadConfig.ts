@@ -283,9 +283,9 @@ export async function loadConfig(): Promise<{ config: AppConfig; models: ModelDe
       runtimeProfiles,
       capacityProviders: configuredProviders,
       capacityTargets,
-      reconcilerIntervalSeconds: intEnv("RECONCILER_INTERVAL_SECONDS", 60),
-      reservationStatusPollSeconds: intEnv("RESERVATION_STATUS_POLL_SECONDS", 10),
-      adminStatusPollSeconds: intEnv("ADMIN_STATUS_POLL_SECONDS", 30),
+      reconcilerIntervalSeconds: intEnv("RECONCILER_INTERVAL_SECONDS", 10),
+      reservationStatusPollSeconds: intEnv("RESERVATION_STATUS_POLL_SECONDS", 5),
+      adminStatusPollSeconds: intEnv("ADMIN_STATUS_POLL_SECONDS", 5),
       healthCheckTimeoutSeconds: intEnv("HEALTH_CHECK_TIMEOUT_SECONDS", 5),
       healthCheckIntervalSeconds: intEnv("HEALTH_CHECK_INTERVAL_SECONDS", 15),
       adminUsers: (process.env.ADMIN_USERS ?? "")

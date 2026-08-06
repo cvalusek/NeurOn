@@ -85,7 +85,7 @@ export function registerUiRoutes(
     const targets = catalog.listTargets().map((target) => ({ target, models: catalog.listModelsForTarget(target.id) }));
     const costEstimates = await startCostEstimates(targets.map(({ target }) => target), costEstimation);
     const user = requireUser(request);
-    return reply.type("text/html").send(startPage(user, targets, await reservationProfileService.listForUser(user), query.error, costEstimates));
+    return reply.type("text/html").send(startPage(user, targets, await reservationProfileService.listForUser(user), query.error, costEstimates, config.adminStatusPollSeconds));
   });
   app.get("/api-keys", async (request, reply) => {
     const user = requireUser(request);
@@ -394,7 +394,7 @@ export function registerUiRoutes(
   });
   app.get("/admin/targets", async (request, reply) => {
     const query = z.object({ error: z.string().optional(), created: z.string().optional() }).parse(request.query);
-    return reply.type("text/html").send(targetAdminPage(requireUser(request), await targetService.list(), await providerService.list(), config.runtimeProfiles, query.error, query.created));
+    return reply.type("text/html").send(targetAdminPage(requireUser(request), await targetService.list(), await providerService.list(), config.runtimeProfiles, query.error, query.created, config.adminStatusPollSeconds));
   });
   app.post("/admin/targets", async (request, reply) => {
     try {

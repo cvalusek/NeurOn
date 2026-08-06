@@ -256,7 +256,7 @@ export function loginPage(error = "", githubMethods: Array<{ id: string; display
   </section>`);
 }
 
-export function startPage(user: AuthenticatedUser, targets: Array<{ target: CapacityTarget; models: ModelDefinition[] }>, profiles: ReservationProfile[] = [], error = "", costEstimates: Record<string, { hourlyUsd: number }> = {}): string {
+export function startPage(user: AuthenticatedUser, targets: Array<{ target: CapacityTarget; models: ModelDefinition[] }>, profiles: ReservationProfile[] = [], error = "", costEstimates: Record<string, { hourlyUsd: number }> = {}, statusPollSeconds = 5): string {
   const initialTargetId = targets[0]?.target.id ?? "";
   return layout("NeurOn", user, `<div class="home-grid"><div><section class="panel">
     <h2>Your reservation</h2>
@@ -602,7 +602,7 @@ export function startPage(user: AuthenticatedUser, targets: Array<{ target: Capa
     }
     refreshServerStatus();
     setInterval(updateCountdowns, 1000);
-    setInterval(refreshServerStatus, 10000);
+    setInterval(refreshServerStatus, ${statusPollSeconds * 1000});
   </script>`);
 }
 
@@ -914,7 +914,7 @@ function authMethodDeletePanel(method: AuthMethodView): string {
   </form>`;
 }
 
-export function targetAdminPage(user: AuthenticatedUser, targets: TargetView[], providers: ProviderView[], runtimeProfiles: RuntimeProfile[] = [], error = "", createdTargetId = ""): string {
+export function targetAdminPage(user: AuthenticatedUser, targets: TargetView[], providers: ProviderView[], runtimeProfiles: RuntimeProfile[] = [], error = "", createdTargetId = "", statusPollSeconds = 5): string {
   const rows = targets.length
     ? targets.map((target) => targetRow(target, providers, runtimeProfiles)).join("")
     : `<p class="muted">No targets configured</p>`;
@@ -930,7 +930,7 @@ export function targetAdminPage(user: AuthenticatedUser, targets: TargetView[], 
   </section>
   ${modal}
   <script type="module">
-    ${targetAdminScript(providers, runtimeProfiles)}
+    ${targetAdminScript(providers, runtimeProfiles, statusPollSeconds)}
   </script>`);
 }
 
@@ -1040,7 +1040,7 @@ function ec2InstanceDiscoveryScript(): string {
   `;
 }
 
-function targetAdminScript(providers: ProviderView[], runtimeProfiles: RuntimeProfile[]): string {
+function targetAdminScript(providers: ProviderView[], runtimeProfiles: RuntimeProfile[], statusPollSeconds: number): string {
   return `
     document.addEventListener('click', async (event) => {
       const button = event.target.closest('[data-copy]');
@@ -1193,6 +1193,7 @@ function targetAdminScript(providers: ProviderView[], runtimeProfiles: RuntimePr
       });
     }
     refreshTargetStatus();
+    setInterval(refreshTargetStatus, ${statusPollSeconds * 1000});
   `;
 }
 

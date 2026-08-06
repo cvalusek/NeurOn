@@ -149,14 +149,16 @@ RUNTIME_PROFILES_JSON=[{"id":"prefer-nightly","name":"PreFer Nightly","type":"do
 - `HASSLEOFF_REQUEST_TIMEOUT_SECONDS`
 - `HASSLEOFF_FAILSAFE_TEST_TARGET_ID`
 
-Production-friendly defaults are intentionally calmer than local development:
+The defaults favor responsive scheduling and status feedback while keeping
+provider calls bounded:
 
-- Reconciler: 60 seconds
-- Reservation page polling: 10 seconds
-- Main/admin status polling: 30 seconds
+- Reconciler: 10 seconds
+- Reservation page polling: 5 seconds
+- Main/admin status polling: 5 seconds
 - LiteLLM traffic polling: 60 seconds when LiteLLM API config is present
 
-Local compose overrides the important polling settings for faster iteration.
+The main and Admin Targets pages use `ADMIN_STATUS_POLL_SECONDS`; the reservation
+detail page uses `RESERVATION_STATUS_POLL_SECONDS`.
 
 ## Storage
 

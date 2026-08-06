@@ -29,6 +29,9 @@ const managedEnv = [
   "CAPACITY_PROVIDER_AWS_MAIN_TYPE",
   "CAPACITY_PROVIDER_AWS_MAIN_AWS_EC2_INSTANCE_NAME_PATTERN",
   "RUNTIME_PROFILES_JSON",
+  "RECONCILER_INTERVAL_SECONDS",
+  "RESERVATION_STATUS_POLL_SECONDS",
+  "ADMIN_STATUS_POLL_SECONDS",
   "SHARED_PASSWORD"
 ];
 
@@ -38,6 +41,18 @@ afterEach(() => {
 });
 
 describe("provider definitions", () => {
+  it("uses responsive scheduling and UI polling defaults", async () => {
+    delete process.env.RECONCILER_INTERVAL_SECONDS;
+    delete process.env.RESERVATION_STATUS_POLL_SECONDS;
+    delete process.env.ADMIN_STATUS_POLL_SECONDS;
+
+    const { config } = await loadConfig();
+
+    expect(config.reconcilerIntervalSeconds).toBe(10);
+    expect(config.reservationStatusPollSeconds).toBe(5);
+    expect(config.adminStatusPollSeconds).toBe(5);
+  });
+
   it("loads reusable providers and lets targets reference provider IDs", async () => {
     process.env.CAPACITY_PROVIDERS_JSON = JSON.stringify([
       {

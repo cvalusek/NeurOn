@@ -133,9 +133,9 @@ Environment variables:
 | `CAPACITY_TARGETS_JSON` | unset | JSON array of targets |
 | `CAPACITY_TARGET_KEYS` | unset | Comma-separated target keys for env-expanded config |
 | `CAPACITY_TARGETS_FILE` | unset | Local target config file |
-| `RECONCILER_INTERVAL_SECONDS` | `60` | Background reconcile loop |
-| `RESERVATION_STATUS_POLL_SECONDS` | `10` | Reservation detail polling |
-| `ADMIN_STATUS_POLL_SECONDS` | `30` | Main/admin status polling |
+| `RECONCILER_INTERVAL_SECONDS` | `10` | Background scheduling and target reconcile loop |
+| `RESERVATION_STATUS_POLL_SECONDS` | `5` | Reservation detail polling |
+| `ADMIN_STATUS_POLL_SECONDS` | `5` | Main/admin status polling |
 | `HEALTH_CHECK_TIMEOUT_SECONDS` | `5` | Per-target health check timeout |
 | `HEALTH_CHECK_INTERVAL_SECONDS` | `15` | Reserved for health tuning |
 | `AWS_REGION` | `us-east-1` | AWS region for EC2 and ECS/ASG providers |

@@ -67,6 +67,7 @@ describe("maintenance mode", () => {
     expect(health.json()).toEqual({ ok: true, storageDriver: "memory", maintenanceMode: true });
     expect(mutation.statusCode).toBe(503);
     expect(home.statusCode).toBe(200);
+    expect(home.body).toContain("setInterval(refreshServerStatus, 10000)");
     expect(hassleOff.statusCode).toBe(200);
     expect(fetchMock).not.toHaveBeenCalled();
   });
@@ -471,6 +472,7 @@ describe("API authentication context", () => {
     expect(targetsPage.body).toContain("CAPACITY_TARGET_PREFER_GPU_AWS_RUNTIME_PORT");
     expect(targetsPage.body).toContain("CAPACITY_TARGET_PREFER_GPU_ESTIMATED_HOURLY_COST_USD");
     expect(targetsPage.body).toContain("Find EC2 instances");
+    expect(targetsPage.body).toContain("setInterval(refreshTargetStatus, 10000)");
     expect(providersPage.body).toContain("Instance Name-tag pattern");
 
     const refreshedProviders = await app.inject({ method: "GET", url: "/admin/providers", headers: auth });
