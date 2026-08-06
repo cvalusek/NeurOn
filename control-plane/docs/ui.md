@@ -54,6 +54,10 @@ cost so far, which is allocated from activation records, and projected total,
 which adds the remaining reservation window plus keepalive at the current
 target hourly estimate.
 
+Active reservation countdowns update locally once per second and display total
+minutes plus seconds. Server status polling remains independently configurable,
+so the live countdown does not increase API traffic.
+
 Reservation profiles are user-owned saved launch shapes. The home page treats
 profiles as the main reservation path: users pick from a compact profile
 selector, adjust duration/keepalive if needed, and reserve. Target and model

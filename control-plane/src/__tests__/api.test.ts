@@ -67,6 +67,7 @@ describe("maintenance mode", () => {
     expect(health.json()).toEqual({ ok: true, storageDriver: "memory", maintenanceMode: true });
     expect(mutation.statusCode).toBe(503);
     expect(home.statusCode).toBe(200);
+    expect(home.body).toContain("setInterval(updateCountdowns, 1000)");
     expect(home.body).toContain("setInterval(refreshServerStatus, 10000)");
     expect(hassleOff.statusCode).toBe(200);
     expect(fetchMock).not.toHaveBeenCalled();
@@ -185,11 +186,18 @@ describe("API authentication context", () => {
       headers: { authorization: `Basic ${Buffer.from("actual:secret").toString("base64")}` },
       payload: { modelIds: ["m1"], targetIds: ["t1"], durationMinutes: 10 }
     });
+    const page = await app.inject({
+      method: "GET",
+      url: `/reservations/${response.json().reservationId}`,
+      headers: { authorization: `Basic ${Buffer.from("actual:secret").toString("base64")}` }
+    });
     await app.close();
 
     expect(response.statusCode).toBe(201);
     expect(response.json()).toMatchObject({ modelIds: ["m1"], targets: [{ id: "t1" }] });
     expect(response.json().profileId).toBeUndefined();
+    expect(page.body).toContain("setInterval(updateReservationTime, 1000)");
+    expect(page.body).toContain("String(seconds).padStart(2, '0')");
   });
 
   it("hides expired reservations from the default status payload", async () => {

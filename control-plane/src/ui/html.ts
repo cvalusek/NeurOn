@@ -460,12 +460,10 @@ export function startPage(user: AuthenticatedUser, targets: Array<{ target: Capa
     const timeLeft = (iso) => {
       const ms = new Date(iso).getTime() - Date.now();
       if (ms <= 0) return 'expired';
-      if (ms < 60000) return '<1m left';
-      const minutes = Math.floor(ms / 60000);
-      if (minutes < 60) return minutes + 'm left';
-      const hours = Math.floor(minutes / 60);
-      const rest = minutes % 60;
-      return rest ? hours + 'h ' + rest + 'm left' : hours + 'h left';
+      const totalSeconds = Math.ceil(ms / 1000);
+      const minutes = Math.floor(totalSeconds / 60);
+      const seconds = totalSeconds % 60;
+      return minutes ? minutes + 'm ' + String(seconds).padStart(2, '0') + 's left' : seconds + 's left';
     };
     const friendlyExpiration = (iso) => formatDateTime(iso) + ' (' + timeLeft(iso) + ')';
     const reservationCostLine = (cost) => {
@@ -623,27 +621,31 @@ export function reservationPage(user: AuthenticatedUser, reservation: Reservatio
     const timeLeft = (iso) => {
       const ms = new Date(iso).getTime() - Date.now();
       if (ms <= 0) return 'expired';
-      if (ms < 60000) return '<1m left';
-      const minutes = Math.floor(ms / 60000);
-      if (minutes < 60) return minutes + 'm left';
-      const hours = Math.floor(minutes / 60);
-      const rest = minutes % 60;
-      return rest ? hours + 'h ' + rest + 'm left' : hours + 'h left';
+      const totalSeconds = Math.ceil(ms / 1000);
+      const minutes = Math.floor(totalSeconds / 60);
+      const seconds = totalSeconds % 60;
+      return minutes ? minutes + 'm ' + String(seconds).padStart(2, '0') + 's left' : seconds + 's left';
     };
     const friendlyExpiration = (iso) => formatDateTime(iso) + ' (' + timeLeft(iso) + ')';
     const reservationTime = (data) => data.endedAt ? 'ended ' + formatDateTime(data.endedAt) : friendlyExpiration(data.expiresAt);
     const formatUsd = (value) => '$' + new Intl.NumberFormat(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(value ?? 0);
+    let currentReservation;
+    const updateReservationTime = () => {
+      if (currentReservation) document.querySelector('#reservation-expires').textContent = reservationTime(currentReservation);
+    };
     async function refresh() {
       const res = await fetch('/api/reservations/' + reservationId + '/status');
       if (!res.ok) return;
       const data = await res.json();
+      currentReservation = data;
       document.querySelector('#reservation-status').textContent = data.status;
-      document.querySelector('#reservation-expires').textContent = reservationTime(data);
+      updateReservationTime();
       document.querySelector('#reservation-cost-so-far').textContent = data.costEstimate ? formatUsd(data.costEstimate.estimatedCostUsd) : 'Not allocated yet';
       document.querySelector('#reservation-cost-projected').textContent = data.costEstimate?.projectedTotalCostUsd !== undefined ? formatUsd(data.costEstimate.projectedTotalCostUsd) : 'Not available';
       document.querySelector('#target-status').innerHTML = data.targets.map(t => '<p><strong>' + t.id + '</strong>: ' + t.observed + ' - ' + t.message + '</p>').join('');
     }
     refresh();
+    setInterval(updateReservationTime, 1000);
     setInterval(refresh, ${config.reservationStatusPollSeconds * 1000});
   </script>`);
 }
