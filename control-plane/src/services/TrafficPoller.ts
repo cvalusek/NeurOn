@@ -5,6 +5,8 @@ import { litellmRoutePrefixes } from "../litellm/modelRouting.js";
 
 export class TrafficPoller {
   private running = false;
+  private stopped = false;
+  private interval?: NodeJS.Timeout;
 
   constructor(
     private readonly source: TrafficSource,
@@ -13,11 +15,12 @@ export class TrafficPoller {
   ) {}
 
   async poll(now = new Date()): Promise<void> {
-    if (this.running) return;
+    if (this.running || this.stopped) return;
     this.running = true;
     try {
       const events = await this.source.pollRecentTraffic(now);
       for (const event of events) {
+        if (this.stopped) return;
         const matches = this.resolveTraffic(event.modelId);
         for (const match of matches) {
           await this.keepalive.recordTraffic(match.target, [match.modelId], event.seenAt, now);
@@ -29,8 +32,18 @@ export class TrafficPoller {
   }
 
   start(intervalSeconds: number): NodeJS.Timeout {
+    this.stop();
+    this.stopped = false;
     void this.poll().catch(() => undefined);
-    return setInterval(() => void this.poll().catch(() => undefined), intervalSeconds * 1000);
+    this.interval = setInterval(() => void this.poll().catch(() => undefined), intervalSeconds * 1000);
+    this.interval.unref();
+    return this.interval;
+  }
+
+  stop(): void {
+    this.stopped = true;
+    if (this.interval) clearInterval(this.interval);
+    this.interval = undefined;
   }
 
   private resolveTraffic(modelId: string): Array<{ target: ReturnType<ModelCatalog["listTargets"]>[number]; modelId: string }> {

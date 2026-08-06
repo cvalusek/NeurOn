@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { FakeCapacityProvider } from "../capacity/FakeCapacityProvider.js";
 import type { CapacityTarget } from "../domain/types.js";
 import { NoopBackendConfigSync } from "../litellm/LiteLlmBackendConfigSync.js";
@@ -10,6 +10,11 @@ import { CostEstimationService } from "../services/CostEstimationService.js";
 
 const target: CapacityTarget = { id: "t1", displayName: "T1", provider: "aws-ecs", modelIds: ["m1"], healthUrl: "http://example.test" };
 
+afterEach(() => {
+  vi.useRealTimers();
+  vi.restoreAllMocks();
+});
+
 describe("reconciler decisions", () => {
   it("turns targets off when no active reservation needs them", async () => {
     const repository = new InMemoryReservationRepository();
@@ -18,6 +23,26 @@ describe("reconciler decisions", () => {
     const reconciler = new Reconciler([target], repository, statuses, provider, new NoopBackendConfigSync());
     await reconciler.reconcile();
     expect(provider.desired.get("t1")).toBe("off");
+  });
+
+  it("stops scheduled reconciliation", async () => {
+    vi.useFakeTimers();
+    const reconciler = new Reconciler(
+      [target],
+      new InMemoryReservationRepository(),
+      new InMemoryTargetStatusRepository(),
+      new FakeCapacityProvider(),
+      new NoopBackendConfigSync()
+    );
+    const reconcile = vi.spyOn(reconciler, "reconcile").mockResolvedValue(undefined);
+
+    reconciler.start(10);
+    await vi.advanceTimersByTimeAsync(20_000);
+    expect(reconcile).toHaveBeenCalledTimes(3);
+
+    reconciler.stop();
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(reconcile).toHaveBeenCalledTimes(3);
   });
 
   it("runs a fresh pass when reconciliation is requested during an active pass", async () => {

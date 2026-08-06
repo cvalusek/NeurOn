@@ -63,12 +63,22 @@ available. `/healthz` reports the active storage driver and maintenance state.
 
 Production defaults are intentionally moderate:
 
-- Reconciler: 60 seconds
-- Reservation status page: 10 seconds
-- Main/admin status: 30 seconds
+- Reconciler: 10 seconds
+- Reservation status page: 5 seconds
+- Main/admin status: 5 seconds
 - LiteLLM request logs: 60 seconds when LiteLLM API config is present
 
 Set `LITELLM_TRAFFIC_POLL_SECONDS=0` to disable request-log polling.
+
+## Control-Plane Shutdown
+
+On `SIGINT` or `SIGTERM`, NeurOn stops and unreferences the reconciler and
+LiteLLM traffic-polling timers before closing Fastify, the shared repository
+pool, and the storage lock. A shutdown that begins during startup discovery
+also prevents the reconciler timer from being started afterward. This allows an
+ECS replacement task to exit normally instead of waiting for the container
+stop timeout. Load-balancer target deregistration remains an independent
+deployment-level delay.
 
 ## Shutdown Guard
 

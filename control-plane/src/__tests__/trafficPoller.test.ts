@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { TrafficSource } from "../domain/interfaces.js";
 import type { CapacityTarget, ModelDefinition } from "../domain/types.js";
 import { InMemoryReservationRepository } from "../repository/InMemoryReservationRepository.js";
@@ -25,7 +25,30 @@ const models: ModelDefinition[] = [
   }
 ];
 
+afterEach(() => {
+  vi.useRealTimers();
+  vi.restoreAllMocks();
+});
+
 describe("TrafficPoller", () => {
+  it("stops scheduled traffic polling", async () => {
+    vi.useFakeTimers();
+    const poller = new TrafficPoller(
+      { pollRecentTraffic: async () => [] },
+      new ModelCatalog(models, [target]),
+      new TrafficKeepaliveService(new InMemoryReservationRepository(), new InMemoryTargetStatusRepository())
+    );
+    const poll = vi.spyOn(poller, "poll").mockResolvedValue(undefined);
+
+    poller.start(10);
+    await vi.advanceTimersByTimeAsync(20_000);
+    expect(poll).toHaveBeenCalledTimes(3);
+
+    poller.stop();
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(poll).toHaveBeenCalledTimes(3);
+  });
+
   it("refreshes a synthetic reservation for recent LiteLLM traffic", async () => {
     const repository = new InMemoryReservationRepository();
     const statuses = new InMemoryTargetStatusRepository();

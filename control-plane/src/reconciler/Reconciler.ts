@@ -12,6 +12,8 @@ export class Reconciler {
   private running?: Promise<void>;
   private reconcileRequest?: Promise<void>;
   private reconcileRequestPending = false;
+  private interval?: NodeJS.Timeout;
+  private stopped = false;
 
   constructor(
     private readonly targets: CapacityTarget[],
@@ -28,6 +30,7 @@ export class Reconciler {
   ) {}
 
   async reconcile(now = new Date()): Promise<void> {
+    if (this.stopped) return;
     if (this.running) {
       await this.running;
       return;
@@ -42,6 +45,7 @@ export class Reconciler {
   }
 
   requestReconcile(): Promise<void> {
+    if (this.stopped) return Promise.resolve();
     this.reconcileRequestPending = true;
     this.reconcileRequest ??= this.drainReconcileRequests();
     return this.reconcileRequest;
@@ -65,6 +69,7 @@ export class Reconciler {
     let activeReservations = await this.reservations.listActive(now);
 
     for (const target of this.targets) {
+      if (this.stopped) return;
       let desired: DesiredState = desiredStateFor(target.id, activeReservations, this.targetOperations);
       const previous = this.statuses.get(target.id);
       try {
@@ -130,8 +135,19 @@ export class Reconciler {
   }
 
   start(intervalSeconds: number): NodeJS.Timeout {
+    this.stop();
+    this.stopped = false;
     void this.reconcile();
-    return setInterval(() => void this.reconcile(), intervalSeconds * 1000);
+    this.interval = setInterval(() => void this.reconcile(), intervalSeconds * 1000);
+    this.interval.unref();
+    return this.interval;
+  }
+
+  stop(): void {
+    this.stopped = true;
+    this.reconcileRequestPending = false;
+    if (this.interval) clearInterval(this.interval);
+    this.interval = undefined;
   }
 
   async reconcileTarget(targetId: string): Promise<void> {

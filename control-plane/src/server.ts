@@ -10,14 +10,21 @@ const storageLock = await StorageOperationLock.acquire(
 try {
   const { config, models } = await loadConfig();
   const { app, reconciler, trafficPoller, bootstrapRuntimeModels } = await buildApp(config, models);
-  app.addHook("onClose", async () => storageLock.release());
+  let shuttingDown = false;
+  app.addHook("onClose", async () => {
+    shuttingDown = true;
+    reconciler.stop();
+    trafficPoller?.stop();
+    await storageLock.release();
+  });
   await app.listen({ port: config.port, host: "0.0.0.0" });
 
-  let shuttingDown = false;
   const shutdown = async (signal: string) => {
     if (shuttingDown) return;
     shuttingDown = true;
     app.log.info({ signal }, "shutting down control plane");
+    reconciler.stop();
+    trafficPoller?.stop();
     try {
       await app.close();
     } catch (error) {
@@ -34,7 +41,7 @@ try {
   } else {
     trafficPoller?.start(config.litellmTrafficPollSeconds);
     void bootstrapRuntimeModels().finally(() => {
-      reconciler.start(config.reconcilerIntervalSeconds);
+      if (!shuttingDown) reconciler.start(config.reconcilerIntervalSeconds);
     });
   }
 } catch (error) {
