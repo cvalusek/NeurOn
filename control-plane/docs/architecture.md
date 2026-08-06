@@ -171,8 +171,9 @@ into AWS, Docker, LiteLLM, or a concrete repository from unrelated code.
    the profile first when one was provided.
 4. Request handler stores intent only. It does not directly start or stop
    infrastructure.
-5. The periodic reconciler observes aggregate desired state and applies provider
-   changes.
+5. A successful reservation mutation requests a non-blocking, coalesced
+   reconciler pass, which observes aggregate desired state and applies provider
+   changes. The periodic loop remains the steady-state recovery path.
 
 API clients can also extend a reservation relative to the current request time
 with `fromNow`. This is useful for plugins that send a small keep-warm signal

@@ -261,13 +261,14 @@ describe("API authentication context", () => {
       headers: auth,
       payload: { modelIds: ["m1"], durationMinutes: 60 }
     });
-    await reconciler.reconcile(new Date("2026-06-25T10:00:00.000Z"));
-    await reconciler.reconcile(new Date("2026-06-25T10:15:00.000Z"));
+    await reconciler.requestReconcile();
+    await reconciler.reconcile(new Date(Date.now() + 15 * 60_000));
 
     const response = await app.inject({ method: "GET", url: `/api/reservations/${created.json().reservationId}`, headers: auth });
     await app.close();
 
-    expect(response.json().costEstimate).toMatchObject({ estimatedCostUsd: 3, currency: "USD" });
+    expect(response.json().costEstimate.currency).toBe("USD");
+    expect(response.json().costEstimate.estimatedCostUsd).toBeCloseTo(3, 2);
     expect(response.json().costEstimate.projectedTotalCostUsd).toBeGreaterThanOrEqual(3);
   });
 

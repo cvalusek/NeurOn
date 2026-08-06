@@ -112,6 +112,19 @@ describe("reservation behavior", () => {
     expect(fromNow.expiresAt).toEqual(new Date("2026-06-28T12:07:00.000Z"));
   });
 
+  it("notifies the scheduler after successful reservation mutations", async () => {
+    const repository = new InMemoryReservationRepository();
+    const notify = vi.fn();
+    const reservations = new ReservationService(repository, new ModelCatalog(models, [target]), undefined, notify);
+    const user = { username: "clint", isAdmin: false };
+
+    const reservation = await reservations.createForUser(user, { modelIds: ["qwen"], durationMinutes: 30 });
+    await reservations.extend(reservation.id, user, 5);
+    await reservations.markDone(reservation.id, user);
+
+    expect(notify).toHaveBeenCalledTimes(3);
+  });
+
   it("computes aggregate desired capacity from active reservations", async () => {
     const { reservations, reconciler, provider } = harness();
     await reservations.createForUser({ username: "clint", isAdmin: false }, { modelIds: ["qwen"], durationMinutes: 30 });

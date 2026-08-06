@@ -10,7 +10,8 @@ export class ReservationService {
   constructor(
     private readonly repository: ReservationRepository,
     private readonly catalog: ModelCatalog,
-    private readonly profiles?: ReservationProfileRepository
+    private readonly profiles?: ReservationProfileRepository,
+    private readonly onReservationChanged?: () => void
   ) {}
 
   async createForUser(user: AuthenticatedUser, input: { modelIds?: string[]; targetIds?: string[]; profileId?: string; durationMinutes?: number; keepaliveMinutes?: number }): Promise<Reservation> {
@@ -22,7 +23,7 @@ export class ReservationService {
     const requestedTargetIds = unique(expandedInput.targetIds ?? []);
     const now = new Date();
     const targetIds = this.targetIdsForRequest(modelIds, requestedTargetIds);
-    return this.repository.create({
+    const reservation = await this.repository.create({
       username: user.username,
       apiKeyName: user.apiKeyName,
       profileId: profile?.id,
@@ -34,6 +35,8 @@ export class ReservationService {
       keepaliveMinutes: expandedInput.keepaliveMinutes ?? DEFAULT_KEEPALIVE_MINUTES,
       status: "active"
     });
+    this.notifyReservationChanged();
+    return reservation;
   }
 
   async getOwned(id: string, user: AuthenticatedUser): Promise<Reservation> {
@@ -45,7 +48,9 @@ export class ReservationService {
 
   async markDone(id: string, user: AuthenticatedUser): Promise<Reservation> {
     await this.getOwned(id, user);
-    return this.repository.update(id, { status: "done", endedAt: new Date() });
+    const reservation = await this.repository.update(id, { status: "done", endedAt: new Date() });
+    this.notifyReservationChanged();
+    return reservation;
   }
 
   async extend(id: string, user: AuthenticatedUser, durationMinutes: number, options: { fromNow?: boolean } = {}): Promise<Reservation> {
@@ -55,9 +60,11 @@ export class ReservationService {
     const reservation = await this.getOwned(id, user);
     if (reservation.status !== "active") throw new Error("Only active reservations can be extended");
     const baseTime = options.fromNow ? Date.now() : Math.max(Date.now(), reservation.expiresAt.getTime());
-    return this.repository.update(id, {
+    const updated = await this.repository.update(id, {
       expiresAt: new Date(baseTime + durationMinutes * 60_000)
     });
+    this.notifyReservationChanged();
+    return updated;
   }
 
   private validateInput(input: { modelIds?: string[]; targetIds?: string[]; durationMinutes: number; keepaliveMinutes?: number }): void {
@@ -95,6 +102,14 @@ export class ReservationService {
     const profile = await this.profiles.get(profileId);
     if (!profile || profile.username !== user.username) throw new Error("Reservation profile not found");
     return profile;
+  }
+
+  private notifyReservationChanged(): void {
+    try {
+      this.onReservationChanged?.();
+    } catch {
+      // The periodic reconciler remains the recovery path if a wake cannot be scheduled.
+    }
   }
 }
 

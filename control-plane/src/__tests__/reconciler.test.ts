@@ -20,6 +20,47 @@ describe("reconciler decisions", () => {
     expect(provider.desired.get("t1")).toBe("off");
   });
 
+  it("runs a fresh pass when reconciliation is requested during an active pass", async () => {
+    const repository = new InMemoryReservationRepository();
+    const statuses = new InMemoryTargetStatusRepository();
+    const provider = new FakeCapacityProvider();
+    let releaseFirstPass!: () => void;
+    let markFirstPassBlocked!: () => void;
+    const firstPassReleased = new Promise<void>((resolve) => {
+      releaseFirstPass = resolve;
+    });
+    const firstPassBlocked = new Promise<void>((resolve) => {
+      markFirstPassBlocked = resolve;
+    });
+    let blockNextStop = true;
+    provider.ensureTargetOff = async (capacityTarget) => {
+      provider.desired.set(capacityTarget.id, "off");
+      provider.statuses.set(capacityTarget.id, { observed: "stopped", message: "Stopped" });
+      if (blockNextStop) {
+        blockNextStop = false;
+        markFirstPassBlocked();
+        await firstPassReleased;
+      }
+    };
+    const reconciler = new Reconciler([target], repository, statuses, provider, new NoopBackendConfigSync());
+
+    const firstPass = reconciler.reconcile();
+    await firstPassBlocked;
+    await repository.create({
+      username: "clint",
+      modelIds: ["m1"],
+      targetIds: ["t1"],
+      createdAt: new Date(),
+      expiresAt: new Date(Date.now() + 60_000),
+      status: "active"
+    });
+    const requestedPass = reconciler.requestReconcile();
+    releaseFirstPass();
+
+    await Promise.all([firstPass, requestedPass]);
+    expect(provider.desired.get("t1")).toBe("on");
+  });
+
   it("does not crash when provider throws", async () => {
     const repository = new InMemoryReservationRepository();
     const statuses = new InMemoryTargetStatusRepository();

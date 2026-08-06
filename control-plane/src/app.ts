@@ -75,7 +75,6 @@ export async function buildApp(config: AppConfig, models: ModelDefinition[]) {
   });
   const backendConfigSync = config.litellmApiBaseUrl && config.litellmApiKey ? new LiteLlmBackendConfigSync(config.litellmApiBaseUrl, config.litellmApiKey) : new NoopBackendConfigSync();
   const reservationProfileService = new ReservationProfileService(reservationRepository.reservationProfiles, catalog);
-  const reservationService = new ReservationService(reservations, catalog, reservationRepository.reservationProfiles);
   const apiKeyService = new ApiKeyService(apiKeys);
   const trafficKeepalive = new TrafficKeepaliveService(reservations, statuses);
   const healthChecker = new HealthChecker(config.healthCheckTimeoutSeconds);
@@ -116,6 +115,21 @@ export async function buildApp(config: AppConfig, models: ModelDefinition[]) {
     trafficPoller,
     costEstimation,
     targetOperations
+  );
+  const reservationService = new ReservationService(
+    reservations,
+    catalog,
+    reservationRepository.reservationProfiles,
+    config.maintenanceMode
+      ? undefined
+      : () => {
+          void reconciler.requestReconcile().catch((error) =>
+            app.log.error(
+              { error: errorForLog(error) },
+              "Reservation-triggered reconciliation failed"
+            )
+          );
+        }
   );
   targetOperations.setDemandController({
     hasDemand: (targetId) => reconciler.hasDemand(targetId),

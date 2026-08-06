@@ -160,6 +160,12 @@ provider calls bounded:
 The main and Admin Targets pages use `ADMIN_STATUS_POLL_SECONDS`; the reservation
 detail page uses `RESERVATION_STATUS_POLL_SECONDS`.
 
+Successful reservation create, extend, and end mutations request a coalesced
+reconciliation pass immediately. `RECONCILER_INTERVAL_SECONDS` is the
+steady-state and recovery interval, rather than the normal wait before new
+reservation demand is acted on. The request still returns after intent is
+stored; it does not wait for provider startup.
+
 ## Storage
 
 All nine durable repository families use the same configured driver. Storage

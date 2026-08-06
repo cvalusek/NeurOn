@@ -10,6 +10,8 @@ import { withProviderRuntimeEndpoints } from "../capacity/providerRuntime.js";
 
 export class Reconciler {
   private running?: Promise<void>;
+  private reconcileRequest?: Promise<void>;
+  private reconcileRequestPending = false;
 
   constructor(
     private readonly targets: CapacityTarget[],
@@ -36,6 +38,25 @@ export class Reconciler {
       await running;
     } finally {
       if (this.running === running) this.running = undefined;
+    }
+  }
+
+  requestReconcile(): Promise<void> {
+    this.reconcileRequestPending = true;
+    this.reconcileRequest ??= this.drainReconcileRequests();
+    return this.reconcileRequest;
+  }
+
+  private async drainReconcileRequests(): Promise<void> {
+    try {
+      do {
+        this.reconcileRequestPending = false;
+        const current = this.running;
+        if (current) await current;
+        await this.reconcile();
+      } while (this.reconcileRequestPending);
+    } finally {
+      this.reconcileRequest = undefined;
     }
   }
 
