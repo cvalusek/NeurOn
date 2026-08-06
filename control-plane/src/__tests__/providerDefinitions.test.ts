@@ -402,14 +402,14 @@ describe("provider definitions", () => {
     process.env.CAPACITY_PROVIDER_AWS_MAIN_ID = "aws-main";
     process.env.CAPACITY_PROVIDER_AWS_MAIN_DISPLAY_NAME = "AWS Main";
     process.env.CAPACITY_PROVIDER_AWS_MAIN_TYPE = "aws-ec2";
-    process.env.CAPACITY_PROVIDER_AWS_MAIN_AWS_EC2_INSTANCE_NAME_PATTERN = "epd.sandbox.prefer.*";
+    process.env.CAPACITY_PROVIDER_AWS_MAIN_AWS_EC2_INSTANCE_NAME_PATTERN = "*.prefer.*";
 
     const { config } = await loadConfig();
 
     expect(config.capacityProviders).toMatchObject([{
       id: "aws-main",
       type: "aws-ec2",
-      config: { awsEc2: { instanceNamePattern: "epd.sandbox.prefer.*" } }
+      config: { awsEc2: { instanceNamePattern: "*.prefer.*" } }
     }]);
   });
 

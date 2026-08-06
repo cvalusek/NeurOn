@@ -1,4 +1,5 @@
 import type { ApiKey, AppConfig, AuthenticatedUser, CapacityTarget, ModelDefinition, Reservation, ReservationProfile, RuntimeProfile, TargetStatus } from "../domain/types.js";
+import { DEFAULT_AWS_EC2_INSTANCE_NAME_PATTERN } from "../capacity/AwsEc2CapacityProvider.js";
 import type { AuthMethodView } from "../services/AuthMethodService.js";
 import type { ProviderView } from "../services/ProviderService.js";
 import type { TargetView } from "../services/TargetService.js";
@@ -1518,8 +1519,8 @@ export function providerAdminPage(user: AuthenticatedUser, providers: ProviderVi
       </div>
       <p><label><input name="provisioningEnabled" type="checkbox"> Allow this provider to provision resources</label></p>
       <div id="aws-ec2-provider-fields">
-        <p><label>Instance Name-tag pattern<br><input name="awsEc2InstanceNamePattern" type="text" placeholder="epd.sandbox.prefer.*"></label></p>
-        <p class="muted">Find instances limits discovery to this wildcard pattern. Start/stop authorization remains enforced by IAM.</p>
+        <p><label>Instance Name-tag pattern<br><input name="awsEc2InstanceNamePattern" type="text" placeholder="${DEFAULT_AWS_EC2_INSTANCE_NAME_PATTERN}"></label></p>
+        <p class="muted">Defaults to <code>${DEFAULT_AWS_EC2_INSTANCE_NAME_PATTERN}</code>. Find instances limits discovery to this wildcard pattern. Start/stop authorization remains enforced by IAM.</p>
       </div>
       <p id="provider-type-note" class="muted"></p>
       <div class="actions"><button type="submit">Add provider</button></div>
@@ -1703,8 +1704,8 @@ function providerEditPanel(provider: ProviderView): string {
     </div>
     <p><label><input name="provisioningEnabled" type="checkbox" ${provider.provisioning?.enabled ? "checked" : ""}> Allow this provider to provision resources</label></p>
     <div data-provider-config-fields="aws-ec2" ${provider.type === "aws-ec2" ? "" : "hidden"}>
-      <p><label>Instance Name-tag pattern<br><input name="awsEc2InstanceNamePattern" type="text" value="${escapeHtml(instanceNamePattern)}" placeholder="epd.sandbox.prefer.*"></label></p>
-      <p class="muted">Used by Find EC2 instances; IAM separately controls which instances may be started or stopped.</p>
+      <p><label>Instance Name-tag pattern<br><input name="awsEc2InstanceNamePattern" type="text" value="${escapeHtml(instanceNamePattern)}" placeholder="${DEFAULT_AWS_EC2_INSTANCE_NAME_PATTERN}"></label></p>
+      <p class="muted">Defaults to <code>${DEFAULT_AWS_EC2_INSTANCE_NAME_PATTERN}</code>. Used by Find EC2 instances; IAM separately controls which instances may be started or stopped.</p>
     </div>
     <div class="actions"><button type="submit">Save provider</button></div>
   </form>`;

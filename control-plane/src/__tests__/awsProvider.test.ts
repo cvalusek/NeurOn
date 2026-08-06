@@ -97,7 +97,7 @@ describe("AWS EC2 provider", () => {
     });
   });
 
-  it("discovers active instances using the provider Name-tag pattern", async () => {
+  it("discovers active instances using the default provider Name-tag pattern", async () => {
     const commands: unknown[] = [];
     const provider = new AwsEc2CapacityProvider("us-east-2", {
       ec2: {
@@ -120,8 +120,7 @@ describe("AWS EC2 provider", () => {
     await expect(provider.discoverResources({
       id: "ec2",
       displayName: "EC2",
-      type: "aws-ec2",
-      config: { awsEc2: { instanceNamePattern: "epd.sandbox.prefer.*" } }
+      type: "aws-ec2"
     })).resolves.toEqual([{
       id: "i-1234567890abcdef0",
       displayName: "epd.sandbox.prefer.g6.xlarge.general",
@@ -134,9 +133,19 @@ describe("AWS EC2 provider", () => {
       }
     }]);
     expect(commandInput(commands[0])).toEqual({ Filters: [
-      { Name: "tag:Name", Values: ["epd.sandbox.prefer.*"] },
+      { Name: "tag:Name", Values: ["*.prefer.*"] },
       { Name: "instance-state-name", Values: ["pending", "running", "stopping", "stopped"] }
     ] });
+
+    await provider.discoverResources({
+      id: "ec2",
+      displayName: "EC2",
+      type: "aws-ec2",
+      config: { awsEc2: { instanceNamePattern: "team.prefer.*" } }
+    });
+    expect(commandInput(commands[1])).toMatchObject({
+      Filters: expect.arrayContaining([{ Name: "tag:Name", Values: ["team.prefer.*"] }])
+    });
   });
 
   it("discovers the current on-demand hourly price", async () => {

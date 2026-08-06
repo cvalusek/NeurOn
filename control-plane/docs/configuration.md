@@ -373,8 +373,12 @@ CAPACITY_PROVIDER_KEYS=AWS_MAIN
 CAPACITY_PROVIDER_AWS_MAIN_ID=aws-main
 CAPACITY_PROVIDER_AWS_MAIN_DISPLAY_NAME=AWS Main
 CAPACITY_PROVIDER_AWS_MAIN_TYPE=aws-ec2
-CAPACITY_PROVIDER_AWS_MAIN_AWS_EC2_INSTANCE_NAME_PATTERN=epd.sandbox.prefer.*
+CAPACITY_PROVIDER_AWS_MAIN_AWS_EC2_INSTANCE_NAME_PATTERN=*.prefer.*
 ```
+
+When omitted, EC2 discovery uses `*.prefer.*`. Set an explicit provider pattern
+to narrow the naming convention further, or `*` to intentionally list every
+named instance visible to the task role.
 
 Use `aws-ecs` or `aws-ecs-asg` when NeurOn should control an ECS service backed
 by an Auto Scaling Group:

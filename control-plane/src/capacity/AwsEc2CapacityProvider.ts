@@ -24,6 +24,7 @@ interface CachedCost {
 }
 
 const COST_CACHE_MS = 60 * 60 * 1000;
+export const DEFAULT_AWS_EC2_INSTANCE_NAME_PATTERN = "*.prefer.*";
 
 export class AwsEc2CapacityProvider implements CapacityProvider {
   private readonly ec2: AwsEc2Client;
@@ -93,10 +94,11 @@ export class AwsEc2CapacityProvider implements CapacityProvider {
   }
 
   async discoverResources(provider: CapacityProviderDefinition): Promise<CapacityProviderResource[]> {
-    const namePattern = provider.config?.awsEc2?.instanceNamePattern?.trim();
+    const namePattern = provider.config?.awsEc2?.instanceNamePattern?.trim()
+      || DEFAULT_AWS_EC2_INSTANCE_NAME_PATTERN;
     const result = await this.ec2.send(new DescribeInstancesCommand({
       Filters: [
-        ...(namePattern ? [{ Name: "tag:Name", Values: [namePattern] }] : []),
+        { Name: "tag:Name", Values: [namePattern] },
         { Name: "instance-state-name", Values: ["pending", "running", "stopping", "stopped"] }
       ]
     }));

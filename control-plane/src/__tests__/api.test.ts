@@ -442,7 +442,7 @@ describe("API authentication context", () => {
         id: "aws-ec2",
         displayName: "AWS EC2",
         type: "aws-ec2",
-        awsEc2InstanceNamePattern: "epd.sandbox.prefer.*"
+        awsEc2InstanceNamePattern: "*.prefer.*"
       }).toString()
     });
     expect(provider.statusCode).toBe(302);
@@ -474,7 +474,7 @@ describe("API authentication context", () => {
     expect(providersPage.body).toContain("Instance Name-tag pattern");
 
     const refreshedProviders = await app.inject({ method: "GET", url: "/admin/providers", headers: auth });
-    expect(refreshedProviders.body).toContain("epd.sandbox.prefer.*");
+    expect(refreshedProviders.body).toContain("*.prefer.*");
     expect(refreshedProviders.body).toContain("CAPACITY_PROVIDER_AWS_EC2_AWS_EC2_INSTANCE_NAME_PATTERN");
 
     const missingInstance = await app.inject({
