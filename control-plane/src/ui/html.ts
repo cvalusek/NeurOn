@@ -299,6 +299,7 @@ export function startPage(user: AuthenticatedUser, targets: Array<{ target: Capa
     const targetLookup = ${safeJson(targetLookupForTargets(targets))};
     const profiles = ${safeJson(profilesForClient(profiles, targets))};
     const costLookup = ${safeJson(costEstimates)};
+    const currentUser = ${JSON.stringify(user.username)};
     const form = document.querySelector('#start-form');
     const duration = document.querySelector('#duration-minutes');
     const keepalive = document.querySelector('#keepalive-minutes');
@@ -487,9 +488,16 @@ export function startPage(user: AuthenticatedUser, targets: Array<{ target: Capa
       return '<div class="reservation-card"><div><div class="reservation-meta">' + statusBadge(reservation.status) + '<strong>' + escapeText(reservation.displayUsername ?? reservation.username) + '</strong><span class="muted">' + reservationTimeHtml(reservation) + '</span>' + profileButton + '</div><div class="muted">' + escapeText(reservationTargets(reservation)) + '</div>' + reservationCostLine(reservation.costEstimate) + modelChipRow(reservation.modelIds) + '</div>' + actions + '</div>';
     };
     const compactReservationCard = (reservation) => '<div class="reservation-card compact"><div><div class="reservation-meta">' + statusBadge(reservation.status) + '<strong>' + escapeText(reservation.displayUsername ?? reservation.username) + '</strong><span class="muted">' + reservationTimeHtml(reservation) + '</span></div><div class="muted">' + escapeText(reservationTargets(reservation)) + ' | ' + (reservation.modelIds.length ? reservation.modelIds.length + ' models' : 'All models') + '</div></div></div>';
+    const orderTargetsForStatus = (capacityTargets, reservations) => {
+      const reservedTargetIds = new Set(reservations.flatMap(reservation => reservation.targets.map(target => target.id)));
+      const priority = (target) => reservedTargetIds.has(target.id) ? 0 : target.desired === 'on' ? 1 : 2;
+      return capacityTargets
+        .map((target, index) => ({ target, index, priority: priority(target) }))
+        .sort((left, right) => left.priority - right.priority || left.index - right.index)
+        .map(({ target }) => target);
+    };
     const targetStatusCard = (target, reservations) => {
       const relevant = reservations.filter(reservation => reservation.targets.some(candidate => candidate.id === target.id));
-      const currentUser = ${JSON.stringify(user.username)};
       const mine = relevant.filter(reservation => reservation.username === currentUser);
       const others = relevant.filter(reservation => reservation.username !== currentUser);
       const modelCount = new Set(relevant.flatMap(reservation => reservation.modelIds)).size;
@@ -588,8 +596,9 @@ export function startPage(user: AuthenticatedUser, targets: Array<{ target: Capa
       document.querySelector('#current-reservation').innerHTML = current
         ? reservationCard(current, true)
         : '<p class="muted">No active reservation</p>';
-      document.querySelector('#server-status').innerHTML = data.capacityTargets.length
-        ? '<div class="status-grid">' + data.capacityTargets.map(target => targetStatusCard(target, data.reservations)).join('') + '</div>'
+      const orderedTargets = orderTargetsForStatus(data.capacityTargets, data.reservations);
+      document.querySelector('#server-status').innerHTML = orderedTargets.length
+        ? '<div class="status-grid">' + orderedTargets.map(target => targetStatusCard(target, data.reservations)).join('') + '</div>'
         : '<p class="muted">No targets configured</p>';
       updateCountdowns();
     }

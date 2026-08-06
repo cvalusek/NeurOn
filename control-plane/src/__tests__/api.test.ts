@@ -67,6 +67,7 @@ describe("maintenance mode", () => {
     expect(health.json()).toEqual({ ok: true, storageDriver: "memory", maintenanceMode: true });
     expect(mutation.statusCode).toBe(503);
     expect(home.statusCode).toBe(200);
+    expect(home.body).toContain("orderTargetsForStatus(data.capacityTargets, data.reservations)");
     expect(home.body).toContain("setInterval(updateCountdowns, 1000)");
     expect(home.body).toContain("setInterval(refreshServerStatus, 10000)");
     expect(hassleOff.statusCode).toBe(200);

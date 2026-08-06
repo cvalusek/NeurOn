@@ -48,6 +48,10 @@ The main page contains:
 - the current user's reservations expanded under each target status card
 - other users' reservations collapsed under each target status card
 
+Server status cards place targets with active reservations first, then
+unreserved targets whose desired state is on, then the remaining targets.
+Configured target order remains stable within each group.
+
 The start form shows a projected cost before reservation creation when NeurOn
 knows the selected target's hourly cost. Reservation cards split cost into
 cost so far, which is allocated from activation records, and projected total,
