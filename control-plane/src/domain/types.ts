@@ -8,13 +8,29 @@ export interface AuthenticatedUser {
   apiKeyName?: string;
 }
 
-export type AuthMethodType = "github";
+export type AuthMethodType = "github" | "oidc";
 
 export interface GitHubAuthMethodConfig {
   clientId: string;
   clientSecret: string;
   allowedUsers?: string[];
   allowedOrganizations?: string[];
+}
+
+export type AuthSecretReference =
+  | { source: "environment"; environmentVariable: string }
+  | { source: "aws-secrets-manager"; secretId: string; jsonKey?: string }
+  | { source: "stored"; value: string };
+
+export interface OidcAuthMethodConfig {
+  issuer: string;
+  clientId: string;
+  clientSecret: AuthSecretReference;
+  scopes?: string[];
+  usernameClaim?: string;
+  groupsClaim?: string;
+  allowedUsers?: string[];
+  allowedGroups?: string[];
 }
 
 export interface AuthMethod {
@@ -24,6 +40,7 @@ export interface AuthMethod {
   enabled: boolean;
   config: {
     github?: GitHubAuthMethodConfig;
+    oidc?: OidcAuthMethodConfig;
     [key: string]: unknown;
   };
 }
@@ -383,6 +400,7 @@ export interface CapacityProviderResource {
 
 export interface AppConfig {
   port: number;
+  publicBaseUrl?: string;
   sharedPassword: string;
   cookieSecret?: string;
   storage: StorageConfig;

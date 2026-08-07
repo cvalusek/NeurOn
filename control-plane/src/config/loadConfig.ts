@@ -272,6 +272,7 @@ export async function loadConfig(): Promise<{ config: AppConfig; models: ModelDe
   return {
     config: {
       port: intEnv("PORT", 8090),
+      publicBaseUrl: env("PUBLIC_BASE_URL")?.replace(/\/$/, ""),
       sharedPassword: requiredEnv("SHARED_PASSWORD", "dev-password"),
       cookieSecret: process.env.COOKIE_SECRET,
       storage: loadStorageConfig(),
@@ -403,11 +404,11 @@ function builtInRuntimeProfiles(): RuntimeProfile[] {
 }
 
 function loadAuthMethods(): AuthMethod[] {
+  const methods = listEnv("AUTH_METHOD_KEYS").map(loadScopedAuthMethod);
   const githubClientId = env("GITHUB_AUTH_CLIENT_ID");
   const githubClientSecret = env("GITHUB_AUTH_CLIENT_SECRET");
-  if (!githubClientId || !githubClientSecret) return [];
-  return [
-    {
+  if (githubClientId && githubClientSecret) {
+    const legacy: AuthMethod = {
       id: env("GITHUB_AUTH_ID") ?? "github",
       displayName: env("GITHUB_AUTH_DISPLAY_NAME") ?? "GitHub",
       type: "github",
@@ -420,8 +421,70 @@ function loadAuthMethods(): AuthMethod[] {
           allowedOrganizations: listEnv("GITHUB_AUTH_ALLOWED_ORGS")
         }
       }
+    };
+    if (!methods.some((method) => method.id === legacy.id)) methods.push(legacy);
+  }
+  return methods;
+}
+
+function loadScopedAuthMethod(key: string): AuthMethod {
+  const prefix = `AUTH_METHOD_${envKey(key)}`;
+  const type = requiredScopedEnv(`${prefix}_TYPE`).toLowerCase();
+  const id = env(`${prefix}_ID`) ?? key.toLowerCase().replace(/_/g, "-");
+  const displayName = env(`${prefix}_DISPLAY_NAME`) ?? id;
+  const enabled = boolEnv(`${prefix}_ENABLED`) ?? true;
+  if (type === "github") {
+    return {
+      id,
+      displayName,
+      type,
+      enabled,
+      config: {
+        github: {
+          clientId: requiredScopedEnv(`${prefix}_CLIENT_ID`),
+          clientSecret: requiredScopedEnv(`${prefix}_CLIENT_SECRET`),
+          allowedUsers: listEnv(`${prefix}_ALLOWED_USERS`),
+          allowedOrganizations: listEnv(`${prefix}_ALLOWED_ORGS`)
+        }
+      }
+    };
+  }
+  if (type !== "oidc") throw new Error(`${prefix}_TYPE must be github or oidc`);
+  return {
+    id,
+    displayName,
+    type,
+    enabled,
+    config: {
+      oidc: {
+        issuer: requiredScopedEnv(`${prefix}_ISSUER`),
+        clientId: requiredScopedEnv(`${prefix}_CLIENT_ID`),
+        clientSecret: loadAuthSecretReference(prefix),
+        scopes: listEnv(`${prefix}_SCOPES`),
+        usernameClaim: env(`${prefix}_USERNAME_CLAIM`) ?? "preferred_username",
+        groupsClaim: env(`${prefix}_GROUPS_CLAIM`) ?? "groups",
+        allowedUsers: listEnv(`${prefix}_ALLOWED_USERS`),
+        allowedGroups: listEnv(`${prefix}_ALLOWED_GROUPS`)
+      }
     }
-  ];
+  };
+}
+
+function loadAuthSecretReference(prefix: string): NonNullable<AuthMethod["config"]["oidc"]>["clientSecret"] {
+  const source = env(`${prefix}_CLIENT_SECRET_SOURCE`) ?? "environment";
+  if (source === "environment") {
+    return { source, environmentVariable: env(`${prefix}_CLIENT_SECRET_ENV`) ?? `${prefix}_CLIENT_SECRET` };
+  }
+  if (source === "aws-secrets-manager") {
+    const jsonKey = env(`${prefix}_CLIENT_SECRET_JSON_KEY`);
+    return {
+      source,
+      secretId: requiredScopedEnv(`${prefix}_CLIENT_SECRET_ID`),
+      ...(jsonKey ? { jsonKey } : {})
+    };
+  }
+  if (source === "stored") return { source, value: requiredScopedEnv(`${prefix}_CLIENT_SECRET`) };
+  throw new Error(`${prefix}_CLIENT_SECRET_SOURCE must be environment, aws-secrets-manager, or stored`);
 }
 
 function loadProvidersFromEnv(): unknown[] {

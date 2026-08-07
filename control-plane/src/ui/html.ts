@@ -1,4 +1,4 @@
-import type { ApiKey, AppConfig, AuthenticatedUser, CapacityTarget, ModelDefinition, Reservation, ReservationProfile, RuntimeProfile, TargetStatus } from "../domain/types.js";
+import type { ApiKey, AppConfig, AuthMethod, AuthenticatedUser, CapacityTarget, ModelDefinition, Reservation, ReservationProfile, RuntimeProfile, TargetStatus } from "../domain/types.js";
 import { DEFAULT_AWS_EC2_INSTANCE_NAME_PATTERN } from "../capacity/AwsEc2CapacityProvider.js";
 import type { AuthMethodView } from "../services/AuthMethodService.js";
 import type { ProviderView } from "../services/ProviderService.js";
@@ -240,9 +240,9 @@ export function layout(title: string, user: AuthenticatedUser | undefined, body:
 </html>`;
 }
 
-export function loginPage(error = "", githubMethods: Array<{ id: string; displayName: string }> = []): string {
-  const githubButtons = githubMethods.length
-    ? `<div class="inline-actions" style="margin-top: 14px;">${githubMethods.map((method) => `<form method="get" action="/auth/github/start"><input type="hidden" name="method" value="${escapeHtml(method.id)}"><button class="secondary" type="submit">Sign in with ${escapeHtml(method.displayName)}</button></form>`).join("")}</div>`
+export function loginPage(error = "", methods: Array<Pick<AuthMethod, "id" | "displayName" | "type">> = []): string {
+  const authButtons = methods.length
+    ? `<div class="inline-actions" style="margin-top: 14px;">${methods.map((method) => `<form method="get" action="/auth/${escapeHtml(method.type)}/start"><input type="hidden" name="method" value="${escapeHtml(method.id)}"><button class="secondary" type="submit">Sign in with ${escapeHtml(method.displayName)}</button></form>`).join("")}</div>`
     : "";
   return layout("Login", undefined, `<section class="panel">
     <h1>Sign in</h1>
@@ -252,7 +252,7 @@ export function loginPage(error = "", githubMethods: Array<{ id: string; display
       <p><label>Password<br><input name="password" type="password" required></label></p>
       <button type="submit">Sign in</button>
     </form>
-    ${githubButtons}
+    ${authButtons}
   </section>`);
 }
 
@@ -853,7 +853,27 @@ export function adminAuthPage(user: AuthenticatedUser, methods: AuthMethodView[]
   return layout("NeurOn Auth", user, `<section class="panel">
     <h1>Authentication</h1>
     ${error ? `<p class="status">${escapeHtml(error)}</p>` : ""}
+    <h2>Add OIDC provider</h2>
+    <p class="muted">Works with Okta and other OpenID Connect providers. Register <code>/auth/oidc/callback</code> beneath this NeurOn deployment's public URL.</p>
+    ${oidcAuthForm("/admin/auth", {
+      id: "okta",
+      displayName: "Okta",
+      enabled: true,
+      issuer: "",
+      clientId: "",
+      secretSource: "environment",
+      secretEnvironmentVariable: "AUTH_METHOD_OKTA_CLIENT_SECRET",
+      scopes: "openid,profile,email",
+      usernameClaim: "preferred_username",
+      groupsClaim: "groups",
+      allowedUsers: "",
+      allowedGroups: ""
+    }, "Add OIDC provider")}
+  </section>
+  <section class="panel">
+    <h2>Add GitHub provider</h2>
     <form method="post" action="/admin/auth">
+      <input name="type" type="hidden" value="github">
       <div class="field-grid">
         <p><label>ID<br><input name="id" type="text" value="github" required></label></p>
         <p><label>Display name<br><input name="displayName" type="text" value="GitHub"></label></p>
@@ -875,6 +895,22 @@ export function adminAuthPage(user: AuthenticatedUser, methods: AuthMethodView[]
     <div class="summary-list">${rows}</div>
   </section>
   <script type="module">
+    const updateSecretFields = (form) => {
+      const source = form.querySelector('[name="clientSecretSource"]')?.value;
+      form.querySelectorAll('[data-secret-fields]').forEach(group => { group.hidden = group.dataset.secretFields !== source; });
+    };
+    document.querySelectorAll('[data-oidc-auth-form]').forEach(form => {
+      updateSecretFields(form);
+      form.querySelector('[name="clientSecretSource"]')?.addEventListener('change', () => updateSecretFields(form));
+      const id = form.querySelector('[name="id"]');
+      const env = form.querySelector('[name="clientSecretEnvironmentVariable"]');
+      let generated = env?.value ?? '';
+      id?.addEventListener('input', () => {
+        if (!env || (env.value && env.value !== generated)) return;
+        generated = 'AUTH_METHOD_' + id.value.trim().replace(/[^a-zA-Z0-9]+/g, '_').replace(/^_+|_+$/g, '').toUpperCase() + '_CLIENT_SECRET';
+        env.value = generated;
+      });
+    });
     document.addEventListener('click', (event) => {
       const button = event.target.closest('[data-tab]');
       if (!button) return;
@@ -886,20 +922,94 @@ export function adminAuthPage(user: AuthenticatedUser, methods: AuthMethodView[]
   </script>`);
 }
 
+interface OidcAuthFormValues {
+  id: string;
+  displayName: string;
+  enabled: boolean;
+  issuer: string;
+  clientId: string;
+  secretSource: "environment" | "aws-secrets-manager" | "stored";
+  secretEnvironmentVariable?: string;
+  secretId?: string;
+  secretJsonKey?: string;
+  scopes: string;
+  usernameClaim: string;
+  groupsClaim: string;
+  allowedUsers: string;
+  allowedGroups: string;
+}
+
+function oidcAuthForm(action: string, values: OidcAuthFormValues, buttonLabel: string): string {
+  return `<form method="post" action="${escapeHtml(action)}" data-oidc-auth-form>
+    <input name="type" type="hidden" value="oidc">
+    <div class="field-grid">
+      <p><label>ID<br><input name="id" type="text" value="${escapeHtml(values.id)}" required></label></p>
+      <p><label>Display name<br><input name="displayName" type="text" value="${escapeHtml(values.displayName)}"></label></p>
+    </div>
+    <p><label><input name="enabled" type="checkbox" ${values.enabled ? "checked" : ""}> Enabled</label></p>
+    <div class="field-grid">
+      <p><label>Issuer URL<br><input name="issuer" type="url" value="${escapeHtml(values.issuer)}" placeholder="https://example.okta.com" required></label></p>
+      <p><label>Client ID<br><input name="clientId" type="text" value="${escapeHtml(values.clientId)}" required></label></p>
+    </div>
+    <p><label>Client secret source<br><select name="clientSecretSource">
+      <option value="environment" ${values.secretSource === "environment" ? "selected" : ""}>Environment variable (default)</option>
+      <option value="aws-secrets-manager" ${values.secretSource === "aws-secrets-manager" ? "selected" : ""}>AWS Secrets Manager (recommended for production)</option>
+      <option value="stored" ${values.secretSource === "stored" ? "selected" : ""}>Stored in NeurOn database</option>
+    </select></label></p>
+    <div data-secret-fields="environment"><p><label>Environment variable<br><input name="clientSecretEnvironmentVariable" type="text" value="${escapeHtml(values.secretEnvironmentVariable ?? "")}" placeholder="AUTH_METHOD_OKTA_CLIENT_SECRET"></label></p></div>
+    <div data-secret-fields="aws-secrets-manager"><div class="field-grid">
+      <p><label>Secret name or ARN<br><input name="clientSecretId" type="text" value="${escapeHtml(values.secretId ?? "")}" placeholder="/neuron/auth/okta"></label></p>
+      <p><label>JSON key (optional)<br><input name="clientSecretJsonKey" type="text" value="${escapeHtml(values.secretJsonKey ?? "")}" placeholder="clientSecret"></label></p>
+    </div><p class="muted">NeurOn resolves this at sign-in using its ECS task role. Grant only <code>secretsmanager:GetSecretValue</code> for the selected secret.</p></div>
+    <div data-secret-fields="stored"><p><label>Client secret<br><input name="clientSecret" type="password" autocomplete="new-password" placeholder="${values.secretSource === "stored" ? "leave blank to keep current secret" : "client secret"}"></label></p><p class="status">This value is stored in NeurOn's database. Avoid this option in production.</p></div>
+    <div class="field-grid">
+      <p><label>Scopes<br><input name="scopes" type="text" value="${escapeHtml(values.scopes)}"></label></p>
+      <p><label>Username claim<br><input name="usernameClaim" type="text" value="${escapeHtml(values.usernameClaim)}"></label></p>
+      <p><label>Groups claim<br><input name="groupsClaim" type="text" value="${escapeHtml(values.groupsClaim)}"></label></p>
+      <p><label>Allowed groups<br><input name="allowedGroups" type="text" value="${escapeHtml(values.allowedGroups)}" placeholder="neuron-users"></label></p>
+      <p><label>Allowed users<br><input name="allowedUsers" type="text" value="${escapeHtml(values.allowedUsers)}" placeholder="alice@example.com"></label></p>
+    </div>
+    <div class="actions"><button type="submit">${escapeHtml(buttonLabel)}</button></div>
+  </form>`;
+}
+
 function authMethodRow(method: AuthMethodView): string {
   const github = method.config.github;
-  const allowUsers = github?.allowedUsers?.join(", ") ?? "";
-  const allowOrgs = github?.allowedOrganizations?.join(", ") ?? "";
+  const oidc = method.config.oidc;
   const editAction = method.editable
     ? authMethodEditPanel(method)
     : `<form method="post" action="/admin/auth/${escapeHtml(method.id)}/copy-to-db"><button class="secondary" type="submit">Copy config auth to DB</button></form>`;
   const deleteAction = method.editable ? authMethodDeletePanel(method) : `<p class="muted">This method is loaded from environment config. Remove it from configuration or copy it to the database before deleting it here.</p>`;
-  return `<details class="drilldown"><summary><div><strong>${escapeHtml(method.displayName)}</strong><div class="muted"><code>${escapeHtml(method.id)}</code> | ${escapeHtml(method.type)} | ${method.enabled ? "enabled" : "disabled"}</div></div><span class="badge ${method.source === "persisted" ? "active" : "done"}">${escapeHtml(method.source)}</span></summary><div class="drilldown-body" data-tabs><div class="tabbar"><button type="button" data-tab="view" aria-selected="true">View</button><button type="button" data-tab="edit" aria-selected="false">Edit</button><button type="button" data-tab="delete" aria-selected="false">Delete</button></div><section class="tab-panel" data-tab-panel="view"><p><strong>Client ID:</strong> <code>${escapeHtml(github?.clientId ?? "")}</code></p><p><strong>Allowed users:</strong> ${allowUsers ? escapeHtml(allowUsers) : "<span class=\"muted\">Any GitHub user</span>"}</p><p><strong>Allowed organizations:</strong> ${allowOrgs ? escapeHtml(allowOrgs) : "<span class=\"muted\">None required</span>"}</p></section><section class="tab-panel" data-tab-panel="edit" hidden>${editAction}</section><section class="tab-panel" data-tab-panel="delete" hidden>${deleteAction}</section></div></details>`;
+  const details = oidc
+    ? `<p><strong>Issuer:</strong> <code>${escapeHtml(oidc.issuer)}</code></p><p><strong>Client ID:</strong> <code>${escapeHtml(oidc.clientId)}</code></p><p><strong>Secret source:</strong> ${escapeHtml(oidcSecretSummary(oidc.clientSecret))}</p><p><strong>Username claim:</strong> <code>${escapeHtml(oidc.usernameClaim ?? "preferred_username")}</code></p><p><strong>Allowed groups:</strong> ${oidc.allowedGroups?.length ? escapeHtml(oidc.allowedGroups.join(", ")) : "<span class=\"muted\">None required</span>"}</p><p><strong>Allowed users:</strong> ${oidc.allowedUsers?.length ? escapeHtml(oidc.allowedUsers.join(", ")) : "<span class=\"muted\">Any assigned user</span>"}</p>`
+    : `<p><strong>Client ID:</strong> <code>${escapeHtml(github?.clientId ?? "")}</code></p><p><strong>Allowed users:</strong> ${github?.allowedUsers?.length ? escapeHtml(github.allowedUsers.join(", ")) : "<span class=\"muted\">Any GitHub user</span>"}</p><p><strong>Allowed organizations:</strong> ${github?.allowedOrganizations?.length ? escapeHtml(github.allowedOrganizations.join(", ")) : "<span class=\"muted\">None required</span>"}</p>`;
+  return `<details class="drilldown"><summary><div><strong>${escapeHtml(method.displayName)}</strong><div class="muted"><code>${escapeHtml(method.id)}</code> | ${escapeHtml(method.type)} | ${method.enabled ? "enabled" : "disabled"}</div></div><span class="badge ${method.source === "persisted" ? "active" : "done"}">${escapeHtml(method.source)}</span></summary><div class="drilldown-body" data-tabs><div class="tabbar"><button type="button" data-tab="view" aria-selected="true">View</button><button type="button" data-tab="edit" aria-selected="false">Edit</button><button type="button" data-tab="delete" aria-selected="false">Delete</button></div><section class="tab-panel" data-tab-panel="view">${details}</section><section class="tab-panel" data-tab-panel="edit" hidden>${editAction}</section><section class="tab-panel" data-tab-panel="delete" hidden>${deleteAction}</section></div></details>`;
 }
 
 function authMethodEditPanel(method: AuthMethodView): string {
+  const oidc = method.config.oidc;
+  if (oidc) {
+    const reference = oidc.clientSecret;
+    return oidcAuthForm(`/admin/auth/${method.id}/update`, {
+      id: method.id,
+      displayName: method.displayName,
+      enabled: method.enabled,
+      issuer: oidc.issuer,
+      clientId: oidc.clientId,
+      secretSource: reference.source,
+      secretEnvironmentVariable: reference.source === "environment" ? reference.environmentVariable : undefined,
+      secretId: reference.source === "aws-secrets-manager" ? reference.secretId : undefined,
+      secretJsonKey: reference.source === "aws-secrets-manager" ? reference.jsonKey : undefined,
+      scopes: (oidc.scopes?.length ? oidc.scopes : ["openid", "profile", "email"]).join(","),
+      usernameClaim: oidc.usernameClaim ?? "preferred_username",
+      groupsClaim: oidc.groupsClaim ?? "groups",
+      allowedUsers: oidc.allowedUsers?.join(",") ?? "",
+      allowedGroups: oidc.allowedGroups?.join(",") ?? ""
+    }, "Save auth method");
+  }
   const github = method.config.github;
   return `<form method="post" action="/admin/auth/${escapeHtml(method.id)}/update">
+    <input name="type" type="hidden" value="github">
     <div class="field-grid">
       <p><label>ID<br><input name="id" type="text" value="${escapeHtml(method.id)}" required></label></p>
       <p><label>Display name<br><input name="displayName" type="text" value="${escapeHtml(method.displayName)}"></label></p>
@@ -915,6 +1025,12 @@ function authMethodEditPanel(method: AuthMethodView): string {
     </div>
     <div class="actions"><button type="submit">Save auth method</button></div>
   </form>`;
+}
+
+function oidcSecretSummary(reference: NonNullable<AuthMethod["config"]["oidc"]>["clientSecret"]): string {
+  if (reference.source === "environment") return `Environment variable: ${reference.environmentVariable}`;
+  if (reference.source === "aws-secrets-manager") return `AWS Secrets Manager: ${reference.secretId}${reference.jsonKey ? ` (JSON key: ${reference.jsonKey})` : ""}`;
+  return "Stored in NeurOn database (value hidden)";
 }
 
 function authMethodDeletePanel(method: AuthMethodView): string {

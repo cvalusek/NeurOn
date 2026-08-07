@@ -124,6 +124,8 @@ Environment variables:
 | `SHARED_PASSWORD` | required in production | Basic/cookie auth password |
 | `COOKIE_SECRET` | unset | Enables login cookie auth |
 | `ADMIN_USERS` | any authenticated user | Comma-separated admin usernames |
+| `PUBLIC_BASE_URL` | forwarded request origin | External origin used for OAuth/OIDC callback URLs |
+| `AUTH_METHOD_KEYS` | unset | Comma-separated scoped GitHub/OIDC method keys; see `docs/configuration.md` |
 | `STORAGE_DRIVER` | `memory` | `memory`, `sqlite`, or `postgres` reservation and API-key storage |
 | `SQLITE_PATH` | `data/neuron.db` | SQLite database path when `STORAGE_DRIVER=sqlite` |
 | `DATABASE_URL` | unset | Postgres connection string when `STORAGE_DRIVER=postgres` |

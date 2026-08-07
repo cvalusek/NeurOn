@@ -122,6 +122,9 @@ RUNTIME_PROFILES_JSON=[{"id":"prefer-nightly","name":"PreFer Nightly","type":"do
 - `SHARED_PASSWORD`
 - `COOKIE_SECRET`
 - `ADMIN_USERS`
+- `PUBLIC_BASE_URL`
+- `AUTH_METHOD_KEYS`
+- `AUTH_METHOD_<KEY>_*`
 - `GITHUB_AUTH_ENABLED`
 - `GITHUB_AUTH_CLIENT_ID`
 - `GITHUB_AUTH_CLIENT_SECRET`
@@ -266,6 +269,74 @@ username, so `ADMIN_USERS` should list GitHub logins for admin access.
 
 Admins can add, edit, disable, or delete persisted GitHub methods from
 `/admin/auth`. Persisted methods are stored by the configured storage driver.
+
+### OIDC / Okta
+
+Admins can add OIDC providers from **Admin > Auth**. NeurOn uses Authorization
+Code with PKCE, validates the ID token through the provider's discovery
+metadata, and creates the same signed NeurOn session cookie used by the other
+interactive login methods. For Okta, create a Web Application integration and
+register this sign-in redirect URI:
+
+```text
+https://<neuron-host>/auth/oidc/callback
+```
+
+Set `PUBLIC_BASE_URL` to the externally visible origin (for example,
+`https://epd-neuron.sandbox.benefitsgo.tech`) so redirects remain exact behind
+an ALB or reverse proxy. Without it, NeurOn uses the forwarded host and protocol
+headers.
+
+The issuer can be the Okta organization issuer
+(`https://<tenant>.okta.com`) or a custom authorization server issuer
+(`https://<tenant>.okta.com/oauth2/<server-id>`). The defaults request
+`openid profile email`; NeurOn also requests `groups` when an allowed-groups
+list is configured. The default username claim is `preferred_username`.
+`ADMIN_USERS` must contain values from the configured username claim for those
+users to receive NeurOn admin access.
+
+OIDC client secrets have three sources:
+
+- **Environment variable** is the UI default. The default name follows
+  `AUTH_METHOD_<NORMALIZED_ID>_CLIENT_SECRET`.
+- **AWS Secrets Manager** stores only the secret name/ARN and optional JSON key
+  in NeurOn. The value is fetched at sign-in using the application task role.
+  Grant `secretsmanager:GetSecretValue` only for the selected secret ARNs, plus
+  `kms:Decrypt` only when those secrets use a customer-managed KMS key.
+- **Stored value** persists the client secret in NeurOn's configured database.
+  The UI never displays it again, but this mode is not recommended for
+  production because the value is not application-encrypted.
+
+Multiple auth methods can also be declared through scoped environment
+variables. `AUTH_METHOD_KEYS` is a comma-separated list:
+
+```env
+PUBLIC_BASE_URL=https://neuron.example.com
+AUTH_METHOD_KEYS=OKTA,PARTNER_OKTA
+
+AUTH_METHOD_OKTA_TYPE=oidc
+AUTH_METHOD_OKTA_ID=okta
+AUTH_METHOD_OKTA_DISPLAY_NAME=Company Okta
+AUTH_METHOD_OKTA_ISSUER=https://company.okta.com/oauth2/default
+AUTH_METHOD_OKTA_CLIENT_ID=...
+AUTH_METHOD_OKTA_CLIENT_SECRET_SOURCE=environment
+# Optional; defaults to AUTH_METHOD_OKTA_CLIENT_SECRET
+AUTH_METHOD_OKTA_CLIENT_SECRET_ENV=AUTH_METHOD_OKTA_CLIENT_SECRET
+AUTH_METHOD_OKTA_CLIENT_SECRET=...
+AUTH_METHOD_OKTA_USERNAME_CLAIM=preferred_username
+AUTH_METHOD_OKTA_GROUPS_CLAIM=groups
+AUTH_METHOD_OKTA_SCOPES=openid,profile,email,groups
+AUTH_METHOD_OKTA_ALLOWED_GROUPS=neuron-users
+
+AUTH_METHOD_PARTNER_OKTA_TYPE=oidc
+AUTH_METHOD_PARTNER_OKTA_ISSUER=https://partner.okta.com
+AUTH_METHOD_PARTNER_OKTA_CLIENT_ID=...
+AUTH_METHOD_PARTNER_OKTA_CLIENT_SECRET_SOURCE=aws-secrets-manager
+AUTH_METHOD_PARTNER_OKTA_CLIENT_SECRET_ID=/neuron/auth/partner-okta
+AUTH_METHOD_PARTNER_OKTA_CLIENT_SECRET_JSON_KEY=clientSecret
+```
+
+The legacy single-provider `GITHUB_AUTH_*` variables remain supported.
 
 ## Env-Expanded Target Config
 

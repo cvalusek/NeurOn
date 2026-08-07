@@ -4,6 +4,7 @@ import { z } from "zod";
 import type { AppConfig, AuthMethod, CapacityProviderDefinition, CapacityTarget, RuntimeProfile } from "../domain/types.js";
 import type { CapacityProvider } from "../domain/interfaces.js";
 import { SharedPasswordAuthProvider } from "../auth/SharedPasswordAuthProvider.js";
+import { OidcAuthService, type OidcLoginState } from "../auth/OidcAuthService.js";
 import { ApiKeyService } from "../services/ApiKeyService.js";
 import { AuthMethodService } from "../services/AuthMethodService.js";
 import { ModelCatalog } from "../services/ModelCatalog.js";
@@ -23,6 +24,7 @@ export function registerUiRoutes(
   config: AppConfig,
   authProvider: SharedPasswordAuthProvider,
   authMethodService: AuthMethodService,
+  oidcAuthService: OidcAuthService,
   catalog: ModelCatalog,
   apiKeyService: ApiKeyService,
   reservationService: ReservationService,
@@ -34,10 +36,11 @@ export function registerUiRoutes(
   capacityProvider: CapacityProvider,
   hassleOffClient?: HassleOffClient
 ) {
-  app.get("/login", async (_request, reply) => reply.type("text/html").send(loginPage("", await authMethodService.listEnabled("github"))));
+  const enabledAuthMethods = () => authMethodService.listEnabled();
+  app.get("/login", async (_request, reply) => reply.type("text/html").send(loginPage("", await enabledAuthMethods())));
   app.post("/login", async (request, reply) => {
     const body = z.object({ username: z.string().min(1), password: z.string() }).parse(request.body);
-    if (body.password !== config.sharedPassword || !config.cookieSecret) return reply.code(401).type("text/html").send(loginPage("Invalid credentials", await authMethodService.listEnabled("github")));
+    if (body.password !== config.sharedPassword || !config.cookieSecret) return reply.code(401).type("text/html").send(loginPage("Invalid credentials", await enabledAuthMethods()));
     reply.setCookie("llm_control_auth", authProvider.createCookie(body.username), { path: "/", httpOnly: true, sameSite: "lax" });
     return reply.redirect("/");
   });
@@ -52,13 +55,13 @@ export function registerUiRoutes(
       reply.setCookie("llm_control_oauth_state", state, { path: "/auth/github", httpOnly: true, sameSite: "lax", maxAge: 600 });
       const authorizeUrl = new URL("https://github.com/login/oauth/authorize");
       authorizeUrl.searchParams.set("client_id", method.config.github.clientId);
-      authorizeUrl.searchParams.set("redirect_uri", absoluteUrl(request, "/auth/github/callback"));
+      authorizeUrl.searchParams.set("redirect_uri", absoluteUrl(request, "/auth/github/callback", config.publicBaseUrl));
       authorizeUrl.searchParams.set("scope", "read:user user:email read:org");
       authorizeUrl.searchParams.set("state", state);
       return reply.redirect(authorizeUrl.toString());
     } catch (error) {
       const message = error instanceof Error ? error.message : "Could not start GitHub sign in";
-      return reply.code(400).type("text/html").send(loginPage(message, await authMethodService.listEnabled("github")));
+      return reply.code(400).type("text/html").send(loginPage(message, await enabledAuthMethods()));
     }
   });
   app.get("/auth/github/callback", async (request, reply) => {
@@ -70,13 +73,49 @@ export function registerUiRoutes(
       if (!state?.methodId) throw new Error("GitHub sign in state was invalid");
       const method = await authMethodService.get(state.methodId);
       if (!method?.enabled || !method.config.github) throw new Error("GitHub authentication is not enabled");
-      const username = await authenticateGitHub(method, query.code, absoluteUrl(request, "/auth/github/callback"));
+      const username = await authenticateGitHub(method, query.code, absoluteUrl(request, "/auth/github/callback", config.publicBaseUrl));
       reply.clearCookie("llm_control_oauth_state", { path: "/auth/github" });
       reply.setCookie("llm_control_auth", authProvider.createCookie(username), { path: "/", httpOnly: true, sameSite: "lax" });
       return reply.redirect("/");
     } catch (error) {
       const message = error instanceof Error ? error.message : "GitHub sign in failed";
-      return reply.code(401).type("text/html").send(loginPage(message, await authMethodService.listEnabled("github")));
+      return reply.code(401).type("text/html").send(loginPage(message, await enabledAuthMethods()));
+    }
+  });
+  app.get("/auth/oidc/start", async (request, reply) => {
+    try {
+      const query = z.object({ method: z.string().optional() }).parse(request.query);
+      const methods = await authMethodService.listEnabled("oidc");
+      const method = query.method ? methods.find((candidate) => candidate.id === query.method) : methods[0];
+      if (!method?.config.oidc) throw new Error("OIDC authentication is not configured");
+      const redirectUri = absoluteUrl(request, "/auth/oidc/callback", config.publicBaseUrl);
+      const { url, loginState } = await oidcAuthService.createAuthorizationRequest(method.id, method.config.oidc, redirectUri);
+      const cookieState = authProvider.createState(loginState);
+      reply.setCookie("llm_control_oidc_state", cookieState, oauthCookieOptions("/auth/oidc", redirectUri));
+      return reply.redirect(url.toString());
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Could not start OIDC sign in";
+      return reply.code(400).type("text/html").send(loginPage(message, await enabledAuthMethods()));
+    }
+  });
+  app.get("/auth/oidc/callback", async (request, reply) => {
+    const redirectUri = absoluteUrl(request, "/auth/oidc/callback", config.publicBaseUrl);
+    try {
+      const query = z.object({ state: z.string() }).passthrough().parse(request.query);
+      const cookieState = request.cookies.llm_control_oidc_state;
+      const state = cookieState ? authProvider.verifyState<OidcLoginState>(cookieState) : undefined;
+      if (!state?.methodId || state.state !== query.state) throw new Error("OIDC sign in state did not match");
+      const method = await authMethodService.get(state.methodId);
+      if (!method?.enabled || !method.config.oidc) throw new Error("OIDC authentication is not enabled");
+      const callbackUrl = absoluteUrl(request, request.url, config.publicBaseUrl);
+      const username = await oidcAuthService.authenticate(method.config.oidc, callbackUrl, state);
+      reply.clearCookie("llm_control_oidc_state", { path: "/auth/oidc" });
+      reply.setCookie("llm_control_auth", authProvider.createCookie(username), { path: "/", httpOnly: true, sameSite: "lax", secure: redirectUri.startsWith("https:") });
+      return reply.redirect("/");
+    } catch (error) {
+      reply.clearCookie("llm_control_oidc_state", { path: "/auth/oidc" });
+      const message = error instanceof Error ? error.message : "OIDC sign in failed";
+      return reply.code(401).type("text/html").send(loginPage(message, await enabledAuthMethods()));
     }
   });
 
@@ -279,7 +318,6 @@ export function registerUiRoutes(
   app.post("/admin/auth", async (request, reply) => {
     try {
       const body = authMethodFormSchema.parse(request.body ?? {});
-      if (!body.clientSecret) throw new Error("GitHub client secret is required");
       await authMethodService.create(authMethodFromForm(body));
       return reply.redirect("/admin/auth");
     } catch (error) {
@@ -476,11 +514,21 @@ function providerConfigFromForm(body: z.infer<typeof providerFormSchema>): Capac
 const authMethodFormSchema = z.object({
   id: z.string().min(1),
   displayName: z.string().optional(),
+  type: z.enum(["github", "oidc"]).default("github"),
   enabled: z.string().optional(),
-  clientId: z.string().min(1),
+  clientId: z.string().optional(),
   clientSecret: z.string().optional(),
+  clientSecretSource: z.enum(["environment", "aws-secrets-manager", "stored"]).optional(),
+  clientSecretEnvironmentVariable: z.string().optional(),
+  clientSecretId: z.string().optional(),
+  clientSecretJsonKey: z.string().optional(),
+  issuer: z.string().optional(),
+  scopes: z.string().optional(),
+  usernameClaim: z.string().optional(),
+  groupsClaim: z.string().optional(),
   allowedUsers: z.string().optional(),
-  allowedOrganizations: z.string().optional()
+  allowedOrganizations: z.string().optional(),
+  allowedGroups: z.string().optional()
 });
 
 const optionalNumber = z.preprocess((value) => value === "" ? undefined : value, z.coerce.number().optional());
@@ -686,6 +734,41 @@ async function startCostEstimates(targets: CapacityTarget[], costEstimation: Cos
 }
 
 function authMethodFromForm(body: z.infer<typeof authMethodFormSchema>, existing?: AuthMethod): AuthMethod {
+  if (body.type === "oidc") {
+    const clientId = body.clientId?.trim();
+    const issuer = body.issuer?.trim().replace(/\/$/, "");
+    if (!clientId) throw new Error("OIDC client ID is required");
+    if (!issuer) throw new Error("OIDC issuer is required");
+    try {
+      const issuerUrl = new URL(issuer);
+      if (!["http:", "https:"].includes(issuerUrl.protocol)) throw new Error("unsupported protocol");
+    } catch {
+      throw new Error("OIDC issuer must be a valid HTTP or HTTPS URL");
+    }
+    const previousSecret = existing?.config.oidc?.clientSecret;
+    const source = body.clientSecretSource ?? previousSecret?.source ?? "environment";
+    const clientSecret = oidcSecretFromForm(body, source, previousSecret);
+    return {
+      id: body.id,
+      displayName: body.displayName || "OIDC",
+      type: "oidc",
+      enabled: body.enabled === "on",
+      config: {
+        oidc: {
+          issuer,
+          clientId,
+          clientSecret,
+          scopes: listField(body.scopes || "openid,profile,email"),
+          usernameClaim: body.usernameClaim?.trim() || "preferred_username",
+          groupsClaim: body.groupsClaim?.trim() || "groups",
+          allowedUsers: listField(body.allowedUsers),
+          allowedGroups: listField(body.allowedGroups)
+        }
+      }
+    };
+  }
+  const clientId = body.clientId?.trim();
+  if (!clientId) throw new Error("GitHub client ID is required");
   const clientSecret = body.clientSecret || existing?.config.github?.clientSecret;
   if (!clientSecret) throw new Error("GitHub client secret is required");
   return {
@@ -695,7 +778,7 @@ function authMethodFromForm(body: z.infer<typeof authMethodFormSchema>, existing
     enabled: body.enabled === "on",
     config: {
       github: {
-        clientId: body.clientId,
+        clientId,
         clientSecret,
         allowedUsers: listField(body.allowedUsers),
         allowedOrganizations: listField(body.allowedOrganizations)
@@ -704,12 +787,43 @@ function authMethodFromForm(body: z.infer<typeof authMethodFormSchema>, existing
   };
 }
 
-function absoluteUrl(request: { headers: Record<string, string | string[] | undefined> }, path: string): string {
+function oidcSecretFromForm(
+  body: z.infer<typeof authMethodFormSchema>,
+  source: "environment" | "aws-secrets-manager" | "stored",
+  previous?: NonNullable<AuthMethod["config"]["oidc"]>["clientSecret"]
+): NonNullable<AuthMethod["config"]["oidc"]>["clientSecret"] {
+  if (source === "environment") {
+    const environmentVariable = body.clientSecretEnvironmentVariable?.trim()
+      || (previous?.source === source ? previous.environmentVariable : "")
+      || `AUTH_METHOD_${environmentKey(body.id)}_CLIENT_SECRET`;
+    return { source, environmentVariable };
+  }
+  if (source === "aws-secrets-manager") {
+    const secretId = body.clientSecretId?.trim() || (previous?.source === source ? previous.secretId : "");
+    if (!secretId) throw new Error("AWS Secrets Manager secret name or ARN is required");
+    const jsonKey = body.clientSecretJsonKey?.trim() || (previous?.source === source ? previous.jsonKey : undefined);
+    return { source, secretId, ...(jsonKey ? { jsonKey } : {}) };
+  }
+  const value = body.clientSecret || (previous?.source === source ? previous.value : "");
+  if (!value) throw new Error("Stored OIDC client secret is required");
+  return { source, value };
+}
+
+function environmentKey(value: string): string {
+  return value.trim().replace(/[^a-zA-Z0-9]+/g, "_").replace(/^_+|_+$/g, "").toUpperCase();
+}
+
+function absoluteUrl(request: { headers: Record<string, string | string[] | undefined> }, path: string, publicBaseUrl?: string): string {
+  if (publicBaseUrl) return `${publicBaseUrl}${path.startsWith("/") ? path : `/${path}`}`;
   const hostHeader = request.headers["x-forwarded-host"] ?? request.headers.host;
   const protoHeader = request.headers["x-forwarded-proto"];
   const host = Array.isArray(hostHeader) ? hostHeader[0] : hostHeader;
   const proto = Array.isArray(protoHeader) ? protoHeader[0] : protoHeader;
   return `${proto ?? "http"}://${host ?? "localhost"}${path}`;
+}
+
+function oauthCookieOptions(path: string, redirectUri: string) {
+  return { path, httpOnly: true, sameSite: "lax" as const, maxAge: 600, secure: redirectUri.startsWith("https:") };
 }
 
 async function authenticateGitHub(method: AuthMethod, code: string, redirectUri: string): Promise<string> {

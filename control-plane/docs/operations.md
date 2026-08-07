@@ -20,8 +20,9 @@ must survive NeurOn restarts. See [HassleOff](hassleoff.md).
 
 ## Networking
 
-NeurOn is designed for internal/Tailscale-style access. v1 authentication is
-shared password via Basic Auth and optional signed HTTP-only login cookie.
+NeurOn is designed for internal/Tailscale-style access. Interactive
+authentication supports the shared password and configured GitHub or OIDC
+providers, including Okta, using a signed HTTP-only NeurOn session cookie.
 Users can also create personal `sk-neuron-...` API keys for Bearer-auth REST,
 OpenAPI, and MCP integrations. API keys should be treated as secrets and
 rotated by revoking old keys from `/api-keys`.

@@ -564,6 +564,44 @@ describe("API authentication context", () => {
     expect(response.headers.location).toContain("redirect_uri=http%3A%2F%2Fneuron.test%2Fauth%2Fgithub%2Fcallback");
   });
 
+  it("creates OIDC methods with secret references and never renders stored secret values", async () => {
+    process.env.USE_FAKE_PROVIDER = "true";
+    const { app } = await buildApp(config, models);
+    const auth = { authorization: `Basic ${Buffer.from("actual:secret").toString("base64")}` };
+
+    const created = await app.inject({
+      method: "POST",
+      url: "/admin/auth",
+      headers: { ...auth, "content-type": "application/x-www-form-urlencoded" },
+      payload: new URLSearchParams({
+        type: "oidc",
+        id: "okta",
+        displayName: "Company Okta",
+        enabled: "on",
+        issuer: "https://company.okta.com/oauth2/default",
+        clientId: "oidc-client-id",
+        clientSecretSource: "stored",
+        clientSecret: "do-not-render-this",
+        scopes: "openid,profile,email,groups",
+        usernameClaim: "email",
+        groupsClaim: "groups",
+        allowedGroups: "neuron-users"
+      }).toString()
+    });
+    expect(created.statusCode).toBe(302);
+
+    const page = await app.inject({ method: "GET", url: "/admin/auth", headers: auth });
+    const login = await app.inject({ method: "GET", url: "/login" });
+    await app.close();
+
+    expect(page.body).toContain("Company Okta");
+    expect(page.body).toContain("Stored in NeurOn database (value hidden)");
+    expect(page.body).toContain("Avoid this option in production");
+    expect(page.body).not.toContain("do-not-render-this");
+    expect(login.body).toContain('action="/auth/oidc/start"');
+    expect(login.body).toContain("Sign in with Company Okta");
+  });
+
   it("copies declarative providers into persisted storage from the admin UI", async () => {
     process.env.USE_FAKE_PROVIDER = "true";
     const { app } = await buildApp(config, models);
