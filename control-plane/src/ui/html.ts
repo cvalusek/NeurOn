@@ -195,7 +195,7 @@ export function layout(title: string, user: AuthenticatedUser | undefined, body:
           <a href="/api-keys">API keys</a>
         </div>
       </details>
-      <details class="drawer-tree" open>
+      ${user?.isAdmin ? `<details class="drawer-tree" open>
         <summary>Admin</summary>
         <div class="drawer-branch">
           <a href="/admin/auth">Authentication</a>
@@ -217,7 +217,7 @@ export function layout(title: string, user: AuthenticatedUser | undefined, body:
           <a href="/admin/reservations">Reservations</a>
           <a href="/admin/activations">Activations</a>
         </div>
-      </details>
+      </details>` : ""}
     </nav>
   </aside>
   <main>${body}</main>

@@ -76,6 +76,22 @@ describe("maintenance mode", () => {
 });
 
 describe("API authentication context", () => {
+  it("does not render admin navigation for non-admin users", async () => {
+    process.env.USE_FAKE_PROVIDER = "true";
+    const { app } = await buildApp({ ...config, adminUsers: ["actual"] }, models);
+    const auth = { authorization: `Basic ${Buffer.from("other:secret").toString("base64")}` };
+
+    const response = await app.inject({ method: "GET", url: "/", headers: auth });
+    await app.close();
+
+    expect(response.statusCode).toBe(200);
+    expect(response.body).toContain("<summary>Workspace</summary>");
+    expect(response.body).not.toContain("<summary>Admin</summary>");
+    expect(response.body).not.toContain("<summary>Configuration</summary>");
+    expect(response.body).not.toContain("<summary>History</summary>");
+    expect(response.body).not.toContain('href="/admin/');
+  });
+
   it("uses the authenticated username instead of POST body username", async () => {
     process.env.USE_FAKE_PROVIDER = "true";
     const { app } = await buildApp(config, models);
