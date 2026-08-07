@@ -419,9 +419,18 @@ export interface AppConfig {
   healthCheckIntervalSeconds: number;
   adminUsers: string[];
   authMethods: AuthMethod[];
+  updates?: UpdateCheckConfig;
   hassleOff?: HassleOffClientConfig;
   maintenanceMode?: boolean;
   storageOperationLockPath?: string;
+}
+
+export interface UpdateCheckConfig {
+  enabled: boolean;
+  repository: string;
+  currentRevision?: string;
+  checkIntervalSeconds: number;
+  githubToken?: string;
 }
 
 export type StorageConfig =

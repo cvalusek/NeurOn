@@ -126,6 +126,9 @@ Environment variables:
 | `ADMIN_USERS` | any authenticated user | Comma-separated admin usernames |
 | `PUBLIC_BASE_URL` | forwarded request origin | External origin used for OAuth/OIDC callback URLs |
 | `AUTH_METHOD_KEYS` | unset | Comma-separated scoped GitHub/OIDC method keys; see `docs/configuration.md` |
+| `NEURON_UPDATE_CHECK_ENABLED` | enabled for published images | Check the latest successful main image build |
+| `NEURON_UPDATE_REPOSITORY` | `cvalusek/NeurOn` | GitHub repository used for update checks |
+| `NEURON_UPDATE_CHECK_SECONDS` | `900` | Minimum interval between GitHub update checks |
 | `STORAGE_DRIVER` | `memory` | `memory`, `sqlite`, or `postgres` reservation and API-key storage |
 | `SQLITE_PATH` | `data/neuron.db` | SQLite database path when `STORAGE_DRIVER=sqlite` |
 | `DATABASE_URL` | unset | Postgres connection string when `STORAGE_DRIVER=postgres` |

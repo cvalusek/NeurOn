@@ -125,6 +125,10 @@ RUNTIME_PROFILES_JSON=[{"id":"prefer-nightly","name":"PreFer Nightly","type":"do
 - `PUBLIC_BASE_URL`
 - `AUTH_METHOD_KEYS`
 - `AUTH_METHOD_<KEY>_*`
+- `NEURON_UPDATE_CHECK_ENABLED`
+- `NEURON_UPDATE_REPOSITORY`
+- `NEURON_UPDATE_CHECK_SECONDS`
+- `NEURON_UPDATE_GITHUB_TOKEN`
 - `GITHUB_AUTH_ENABLED`
 - `GITHUB_AUTH_CLIENT_ID`
 - `GITHUB_AUTH_CLIENT_SECRET`
@@ -337,6 +341,31 @@ AUTH_METHOD_PARTNER_OKTA_CLIENT_SECRET_JSON_KEY=clientSecret
 ```
 
 The legacy single-provider `GITHUB_AUTH_*` variables remain supported.
+
+## Image Update Checks
+
+Published images contain `NEURON_BUILD_SHA`, which identifies the source commit
+that produced the running container. NeurOn compares it with the most recent
+successful `Build NeurOn image` workflow run on `main` and displays an admin
+banner when a newer image is available.
+
+```env
+NEURON_UPDATE_CHECK_ENABLED=true
+NEURON_UPDATE_REPOSITORY=cvalusek/NeurOn
+NEURON_UPDATE_CHECK_SECONDS=900
+```
+
+Update checks are automatically enabled when `NEURON_BUILD_SHA` is present and
+are disabled for ordinary source checkouts. `NEURON_UPDATE_GITHUB_TOKEN` is
+optional for private repositories or higher GitHub API limits; inject it as a
+secret and do not store it in target configuration. The token needs read-only
+access to repository Actions metadata. The task also needs outbound HTTPS access
+to `api.github.com`; check failures are reported in the admin page and never
+affect reconciliation.
+
+Update controls are available from **Admin > Updates**. See
+[Operations](operations.md#safe-update-restarts) for shutdown semantics and
+orchestrator requirements.
 
 ## Env-Expanded Target Config
 

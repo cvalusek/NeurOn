@@ -32,6 +32,10 @@ const managedEnv = [
   "RECONCILER_INTERVAL_SECONDS",
   "RESERVATION_STATUS_POLL_SECONDS",
   "ADMIN_STATUS_POLL_SECONDS",
+  "NEURON_BUILD_SHA",
+  "NEURON_UPDATE_CHECK_ENABLED",
+  "NEURON_UPDATE_REPOSITORY",
+  "NEURON_UPDATE_CHECK_SECONDS",
   "SHARED_PASSWORD"
 ];
 
@@ -51,6 +55,22 @@ describe("provider definitions", () => {
     expect(config.reconcilerIntervalSeconds).toBe(10);
     expect(config.reservationStatusPollSeconds).toBe(5);
     expect(config.adminStatusPollSeconds).toBe(5);
+  });
+
+  it("enables update checks for revision-stamped published images", async () => {
+    process.env.NEURON_BUILD_SHA = "abcdef1234567890";
+    process.env.NEURON_UPDATE_REPOSITORY = "example/neuron";
+    process.env.NEURON_UPDATE_CHECK_SECONDS = "300";
+
+    const { config } = await loadConfig();
+
+    expect(config.updates).toEqual({
+      enabled: true,
+      repository: "example/neuron",
+      currentRevision: "abcdef1234567890",
+      checkIntervalSeconds: 300,
+      githubToken: undefined
+    });
   });
 
   it("loads reusable providers and lets targets reference provider IDs", async () => {

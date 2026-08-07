@@ -564,6 +564,35 @@ describe("API authentication context", () => {
     expect(response.headers.location).toContain("redirect_uri=http%3A%2F%2Fneuron.test%2Fauth%2Fgithub%2Fcallback");
   });
 
+  it("serves update safety controls and enters drain mode before restart", async () => {
+    process.env.USE_FAKE_PROVIDER = "true";
+    const { app } = await buildApp(config, models);
+    const auth = { authorization: `Basic ${Buffer.from("actual:secret").toString("base64")}` };
+
+    const page = await app.inject({ method: "GET", url: "/admin/updates", headers: auth });
+    expect(page.statusCode).toBe(200);
+    expect(page.body).toContain("Restart when safe");
+    expect(page.body).toContain("Restart immediately without stopping targets");
+    expect(page.body).toContain("leave machines running");
+
+    const unacknowledged = await app.inject({
+      method: "POST",
+      url: "/admin/updates/force",
+      headers: { ...auth, "content-type": "application/x-www-form-urlencoded" },
+      payload: new URLSearchParams({ stopTargets: "no", confirm: "RESTART" }).toString()
+    });
+    expect(unacknowledged.headers.location).toContain("Acknowledge%20the%20unmanaged-capacity%20risk");
+
+    const scheduled = await app.inject({ method: "POST", url: "/admin/updates/schedule", headers: auth });
+    expect(scheduled.statusCode).toBe(302);
+    const status = await app.inject({ method: "GET", url: "/api/admin/update-status", headers: auth });
+    expect(status.json().shutdown.acceptingReservations).toBe(false);
+    const blockedReservation = await app.inject({ method: "POST", url: "/api/reservations", headers: auth, payload: { modelIds: ["m1"], durationMinutes: 5 } });
+    expect(blockedReservation.statusCode).toBe(503);
+    expect(blockedReservation.json().error).toContain("draining for restart");
+    await app.close();
+  });
+
   it("creates OIDC methods with secret references and never renders stored secret values", async () => {
     process.env.USE_FAKE_PROVIDER = "true";
     const { app } = await buildApp(config, models);

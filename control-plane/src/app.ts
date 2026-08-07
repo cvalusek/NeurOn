@@ -40,10 +40,16 @@ import { TargetProvisioningService } from "./services/TargetProvisioningService.
 import { TargetService } from "./services/TargetService.js";
 import { TrafficKeepaliveService } from "./services/TrafficKeepaliveService.js";
 import { TrafficPoller } from "./services/TrafficPoller.js";
+import { ShutdownCoordinator } from "./services/ShutdownCoordinator.js";
+import { UpdateChecker } from "./services/UpdateChecker.js";
 import { HassleOffCapacityProvider } from "./safety/HassleOffCapacityProvider.js";
 import { HassleOffClient } from "./safety/HassleOffClient.js";
 
-export async function buildApp(config: AppConfig, models: ModelDefinition[]) {
+export interface BuildAppOptions {
+  requestShutdown?: (reason: string) => void | Promise<void>;
+}
+
+export async function buildApp(config: AppConfig, models: ModelDefinition[], options: BuildAppOptions = {}) {
   const app = Fastify({ logger: true });
   const reservationRepository = await createReservationRepository(config.storage);
   const apiKeys = reservationRepository.apiKeys;
@@ -119,6 +125,7 @@ export async function buildApp(config: AppConfig, models: ModelDefinition[]) {
     costEstimation,
     targetOperations
   );
+  const shutdownControl: { current?: ShutdownCoordinator } = {};
   const reservationService = new ReservationService(
     reservations,
     catalog,
@@ -132,12 +139,35 @@ export async function buildApp(config: AppConfig, models: ModelDefinition[]) {
               "Reservation-triggered reconciliation failed"
             )
           );
-        }
+        },
+    () => shutdownControl.current?.acceptingReservations() ?? true
   );
   targetOperations.setDemandController({
     hasDemand: (targetId) => reconciler.hasDemand(targetId),
     reconcileTarget: (targetId) => reconciler.reconcileTarget(targetId)
   });
+  const updateChecker = new UpdateChecker(config.updates ?? {
+    enabled: false,
+    repository: "cvalusek/NeurOn",
+    checkIntervalSeconds: 900
+  });
+  const shutdownCoordinator = new ShutdownCoordinator({
+    reservations,
+    targets: () => catalog.listTargets(),
+    statuses,
+    capacityProvider,
+    reconciler,
+    targetOperations,
+    activeDemandMutations: () => reservationService.activeDemandMutationCount(),
+    stopTrafficPolling: () => trafficPoller?.stop(),
+    resumeLifecycle: () => {
+      if (config.maintenanceMode) return;
+      trafficPoller?.start(config.litellmTrafficPollSeconds);
+      reconciler.start(config.reconcilerIntervalSeconds);
+    },
+    requestShutdown: options.requestShutdown ?? (() => undefined)
+  });
+  shutdownControl.current = shutdownCoordinator;
 
   await app.register(cookie);
   await app.register(formbody);
@@ -159,7 +189,10 @@ export async function buildApp(config: AppConfig, models: ModelDefinition[]) {
   });
   await app.register(swaggerUi, { routePrefix: "/docs" });
   app.get("/openapi.json", { schema: { hide: true } }, async () => app.swagger());
-  app.addHook("onClose", async () => reservationRepository.close());
+  app.addHook("onClose", async () => {
+    shutdownCoordinator?.stop();
+    await reservationRepository.close();
+  });
 
   app.addHook("preHandler", async (request, reply) => {
     const mutationAllowedInMaintenance = request.url === "/login" || request.url.startsWith("/auth/");
@@ -184,6 +217,11 @@ export async function buildApp(config: AppConfig, models: ModelDefinition[]) {
       return reply.code(403).type("text/html").send("Admin access required");
     }
     request.user = user;
+    if (shutdownCoordinator?.isDraining() && shutdownUnsafeMutation(request.method, request.url)) {
+      const message = "NeurOn is draining for restart; operations that can create demand are temporarily disabled";
+      if (request.url.startsWith("/api/") || request.url === "/mcp") return reply.code(503).send({ error: message });
+      return reply.code(503).type("text/html").send(message);
+    }
   });
 
   registerApiRoutes(
@@ -213,6 +251,8 @@ export async function buildApp(config: AppConfig, models: ModelDefinition[]) {
     authProvider,
     authMethodService,
     oidcAuthService,
+    updateChecker,
+    shutdownCoordinator,
     catalog,
     apiKeyService,
     reservationService,
@@ -256,10 +296,20 @@ export async function buildApp(config: AppConfig, models: ModelDefinition[]) {
     return outcomes;
   };
 
-  return { app, reconciler, trafficPoller, bootstrapRuntimeModels, runtimeModelDiscovery, targetOperations };
+  return { app, reconciler, trafficPoller, bootstrapRuntimeModels, runtimeModelDiscovery, targetOperations, updateChecker, shutdownCoordinator };
 }
 
 function errorForLog(error: unknown): { message: string; name?: string; stack?: string } {
   if (error instanceof Error) return { name: error.name, message: error.message, stack: error.stack };
   return { message: String(error) };
+}
+
+function shutdownUnsafeMutation(method: string, url: string): boolean {
+  if (["GET", "HEAD", "OPTIONS"].includes(method)) return false;
+  if (url === "/api/internal/traffic") return true;
+  if (url === "/reservations" || url === "/api/reservations") return true;
+  if (/^\/(api\/)?reservations\/[^/]+\/extend$/.test(url)) return true;
+  if (url.startsWith("/admin/providers")) return true;
+  if (url.startsWith("/admin/targets") && !url.endsWith("/abort-provisioning")) return true;
+  return /^\/api\/admin\/targets\/[^/]+\/(provision|discover)$/.test(url);
 }

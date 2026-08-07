@@ -9,7 +9,10 @@ const storageLock = await StorageOperationLock.acquire(
 
 try {
   const { config, models } = await loadConfig();
-  const { app, reconciler, trafficPoller, bootstrapRuntimeModels } = await buildApp(config, models);
+  const shutdownRequest: { current?: (reason: string) => void } = {};
+  const { app, reconciler, trafficPoller, bootstrapRuntimeModels } = await buildApp(config, models, {
+    requestShutdown: (reason) => shutdownRequest.current?.(reason)
+  });
   let shuttingDown = false;
   app.addHook("onClose", async () => {
     shuttingDown = true;
@@ -35,6 +38,7 @@ try {
   };
   process.once("SIGINT", () => void shutdown("SIGINT"));
   process.once("SIGTERM", () => void shutdown("SIGTERM"));
+  shutdownRequest.current = (reason) => void shutdown(reason);
 
   if (config.maintenanceMode) {
     app.log.warn({ storageDriver: config.storage.driver }, "control plane is running in maintenance mode; provider and reconciliation loops are disabled");

@@ -50,6 +50,48 @@ observational state and are rebuilt by reconciliation; they are not used for
 scheduling decisions. HassleOff's SQLite database is independent and is never
 part of a NeurOn control-plane database migration.
 
+## Safe Update Restarts
+
+Published NeurOn images expose their source revision, and the admin UI reports
+when a newer successfully built `main` image is available. NeurOn does not
+replace its own container. **Admin > Updates** safely exits the current process;
+an external supervisor must then start a replacement task that pulls the newer
+image.
+
+For ECS, run NeurOn as an ECS service with desired count at least one. A stopped
+essential container causes the service scheduler to launch a replacement task.
+When using the mutable `latest` tag on ECS EC2 capacity, set the ECS agent image
+pull behavior to `always` if a cached image is unacceptable. Immutable
+`sha-<commit>` task definitions remain the more deterministic deployment model,
+but require an external task-definition update rather than self-restart alone.
+
+**Restart when safe** enters drain mode before checking capacity:
+
+1. New reservations and extensions are rejected.
+2. LiteLLM keepalive polling and direct traffic keepalives stop.
+3. New provisioning and model-discovery starts are rejected.
+4. Existing reservations and already-running discovery operations may finish.
+5. The reconciler continues issuing normal stop operations after demand ends.
+6. NeurOn exits only after every configured target freshly reports
+   `desired=off` and `observed=stopped`.
+
+Admins may cancel a pending drain before shutdown begins.
+
+**Force restart** requires typing `RESTART` and an explicit target choice:
+
+- **Stop targets first** fails active reservations, stops every target that is
+  not already known stopped, verifies every provider reports stopped, and only
+  then exits. If any stop or status check fails, NeurOn remains running in a
+  failed/draining state so the operator can retry or cancel.
+- **Restart without stopping targets** exits immediately and requires a
+  separate acknowledgement. If the replacement task fails and HassleOff is not
+  armed for every affected target, running capacity may remain unmanaged and
+  continue accruing cost.
+
+The drain request is intentionally process-local. If NeurOn crashes before the
+safe conditions are met, the replacement process resumes normal persisted
+reservation reconciliation rather than inheriting an ambiguous shutdown order.
+
 Use the [SQLite to PostgreSQL migration](postgres-migration.md) procedure for a
 backup, disposable dry-run, one-writer cutover, verification, and rollback. Do
 not change `STORAGE_DRIVER` on a live application or run SQLite and PostgreSQL

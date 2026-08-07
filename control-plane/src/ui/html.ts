@@ -4,6 +4,8 @@ import type { AuthMethodView } from "../services/AuthMethodService.js";
 import type { ProviderView } from "../services/ProviderService.js";
 import type { TargetView } from "../services/TargetService.js";
 import { litellmRoutePrefixes } from "../litellm/modelRouting.js";
+import type { ShutdownStatus } from "../services/ShutdownCoordinator.js";
+import type { UpdateStatus } from "../services/UpdateChecker.js";
 
 export interface HassleOffSafetyView {
   configured: boolean;
@@ -156,6 +158,8 @@ export function layout(title: string, user: AuthenticatedUser | undefined, body:
     .modal-dialog { width: min(720px, 100%); max-height: calc(100vh - 40px); overflow: auto; background: white; border-radius: 8px; border: 1px solid #d8ddd7; padding: 18px; box-shadow: 0 16px 48px rgba(23, 32, 42, 0.22); }
     .field-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
     .hidden { display: none; }
+    .system-banner { margin: 14px 24px 0; border: 1px solid #d6a756; border-radius: 8px; background: #fff4d6; color: #65400b; padding: 10px 14px; font-weight: 700; }
+    .system-banner a { margin-left: 8px; }
     @media (min-width: 1024px) {
       .topbar { max-width: none; }
       .nav-drawer { top: 62px; left: 0; right: auto; width: 260px; border-left: 0; border-right: 1px solid #d8ddd7; box-shadow: none; padding: 14px; }
@@ -177,7 +181,8 @@ export function layout(title: string, user: AuthenticatedUser | undefined, body:
       <a class="brand" href="/">NeurOn</a>
       <span class="user">${user ? escapeHtml(user.username) : ""}</span>
     </div>
-  </header>
+</header>
+  <div id="system-banner" class="system-banner" hidden></div>
   <button class="drawer-scrim" type="button" data-nav-close hidden></button>
   <aside id="nav-drawer" class="nav-drawer" hidden>
     <div class="drawer-head"><strong>NeurOn</strong></div>
@@ -195,6 +200,7 @@ export function layout(title: string, user: AuthenticatedUser | undefined, body:
         <div class="drawer-branch">
           <a href="/admin/auth">Authentication</a>
           <a href="/admin/hassleoff">HassleOff safety</a>
+          <a href="/admin/updates">Updates</a>
         </div>
       </details>
       <details class="drawer-tree" open>
@@ -235,6 +241,27 @@ export function layout(title: string, user: AuthenticatedUser | undefined, body:
         if (event.key === 'Escape') setOpen(false);
       });
     })();
+    ${user?.isAdmin ? `(() => {
+      const banner = document.querySelector('#system-banner');
+      const refresh = async () => {
+        try {
+          const response = await fetch('/api/admin/update-status');
+          if (!response.ok) return;
+          const data = await response.json();
+          const draining = data.shutdown.mode !== 'idle';
+          if (!data.update.updateAvailable && !draining) { banner.hidden = true; return; }
+          banner.textContent = draining ? data.shutdown.message : 'A newer NeurOn image is available.';
+          const link = document.createElement('a');
+          link.href = '/admin/updates';
+          link.textContent = draining ? 'View restart status' : 'Review update';
+          banner.appendChild(link);
+          banner.hidden = false;
+          if (draining) setTimeout(refresh, 2000);
+        } catch {}
+      };
+      refresh();
+      setInterval(refresh, 300000);
+    })();` : ""}
   </script>
 </body>
 </html>`;
@@ -846,6 +873,84 @@ export function activationPage(user: AuthenticatedUser): string {
     }
     refresh();
   </script>`);
+}
+
+export interface UpdateSafetySummary {
+  hassleOffConfigured: boolean;
+  protectedTargets: number;
+  totalTargets: number;
+}
+
+export function updatesPage(
+  user: AuthenticatedUser,
+  update: UpdateStatus,
+  shutdown: ShutdownStatus,
+  safety: UpdateSafetySummary,
+  error = "",
+  success = ""
+): string {
+  const updateMessage = !update.enabled
+    ? "Update checks are disabled or this image does not contain build revision metadata."
+    : update.error
+      ? `The last update check failed: ${update.error}`
+      : update.updateAvailable
+        ? "A newer successfully built NeurOn image is available."
+        : update.updateAvailable === false
+          ? "This NeurOn instance matches the latest successful image build."
+          : "The current image revision is unknown, so availability cannot be compared yet.";
+  const hassleOffCoverage = safety.hassleOffConfigured && safety.totalTargets > 0 && safety.protectedTargets === safety.totalTargets;
+  const targetRows = shutdown.targetStates.length
+    ? shutdown.targetStates.map((target) => `<tr><td>${escapeHtml(target.displayName)}</td><td><code>${escapeHtml(target.id)}</code></td><td>${escapeHtml(target.desired)}</td><td><span class="pill ${escapeHtml(target.observed)}">${escapeHtml(target.observed)}</span></td></tr>`).join("")
+    : `<tr><td colspan="4" class="muted">No targets configured.</td></tr>`;
+  const activeRestart = shutdown.mode !== "idle";
+  return layout("NeurOn Updates", user, `<section class="panel">
+    <h1>Updates and restart</h1>
+    ${error ? `<p class="status">${escapeHtml(error)}</p>` : ""}
+    ${success ? `<p class="status">${escapeHtml(success)}</p>` : ""}
+    <p class="status">${escapeHtml(updateMessage)}</p>
+    <div class="field-grid">
+      <p><strong>Current revision</strong><br><code>${escapeHtml(shortRevision(update.currentRevision))}</code></p>
+      <p><strong>Latest successful revision</strong><br><code>${escapeHtml(shortRevision(update.latestRevision))}</code></p>
+      <p><strong>Last checked</strong><br>${update.checkedAt ? escapeHtml(new Date(update.checkedAt).toLocaleString()) : "<span class=\"muted\">Not checked</span>"}</p>
+    </div>
+    <form method="post" action="/admin/updates/check"><button class="secondary" type="submit">Check now</button></form>
+  </section>
+  <section class="panel">
+    <h2>Restart safety</h2>
+    <p class="status">${escapeHtml(shutdown.message)}</p>
+    <div class="field-grid">
+      <p><strong>Mode</strong><br><span class="badge ${shutdown.mode === "idle" ? "done" : "active"}">${escapeHtml(shutdown.mode)}</span></p>
+      <p><strong>New reservations</strong><br>${shutdown.acceptingReservations ? "Accepted" : "Blocked while draining"}</p>
+      <p><strong>Active reservations</strong><br>${shutdown.activeReservationCount}</p>
+      <p><strong>Active discoveries</strong><br>${shutdown.activeDiscoveryCount}</p>
+      <p><strong>In-flight reservation operations</strong><br>${shutdown.activeDemandMutationCount}</p>
+    </div>
+    <table><thead><tr><th>Target</th><th>ID</th><th>Desired</th><th>Observed</th></tr></thead><tbody>${targetRows}</tbody></table>
+    ${activeRestart
+      ? shutdown.mode === "stopping-targets" || shutdown.mode === "shutting-down"
+        ? `<p class="muted">Shutdown is committed and can no longer be cancelled safely.</p>`
+        : `<div class="actions"><form method="post" action="/admin/updates/cancel"><button class="secondary" type="submit">Cancel restart</button></form></div>`
+      : `<p class="muted">Safe restart first enters drain mode. Existing reservations may finish, but new reservations, extensions, traffic keepalives, provisioning, and model discovery are blocked. NeurOn exits only after every target freshly reports stopped.</p><div class="actions"><form method="post" action="/admin/updates/schedule"><button type="submit">Restart when safe</button></form></div>`}
+  </section>
+  <section class="panel">
+    <h2>Force restart</h2>
+    <p class="status">Force restart can interrupt active reservations.</p>
+    <p>${hassleOffCoverage
+      ? `All ${safety.totalTargets} configured targets opt into HassleOff protection. Verify HassleOff is currently armed before relying on it.`
+      : `HassleOff does not cover every configured target (${safety.protectedTargets}/${safety.totalTargets} protected). If NeurOn fails to restart, capacity left running may remain unmanaged and continue accruing cost.`}</p>
+    <form method="post" action="/admin/updates/force">
+      <p><label><input type="radio" name="stopTargets" value="yes" checked> End active reservations, stop every running target, verify all are stopped, then restart <strong>(recommended)</strong></label></p>
+      <p><label><input type="radio" name="stopTargets" value="no"> Restart immediately without stopping targets</label></p>
+      <p><label><input type="checkbox" name="acknowledgeRisk"> I understand that restarting without stopping targets can leave machines running if NeurOn does not return and HassleOff is unavailable.</label></p>
+      <p><label>Type <code>RESTART</code> to confirm<br><input name="confirm" type="text" autocomplete="off" required></label></p>
+      <button class="danger" type="submit">Force restart</button>
+    </form>
+  </section>
+  ${activeRestart ? `<script>setTimeout(() => location.reload(), 3000);</script>` : ""}`);
+}
+
+function shortRevision(revision: string | undefined): string {
+  return revision ? revision.slice(0, 12) : "unknown";
 }
 
 export function adminAuthPage(user: AuthenticatedUser, methods: AuthMethodView[], error = ""): string {

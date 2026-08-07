@@ -294,6 +294,13 @@ export async function loadConfig(): Promise<{ config: AppConfig; models: ModelDe
         .map((user) => user.trim())
         .filter(Boolean),
       authMethods: loadAuthMethods(),
+      updates: {
+        enabled: boolEnv("NEURON_UPDATE_CHECK_ENABLED") ?? Boolean(env("NEURON_BUILD_SHA")),
+        repository: env("NEURON_UPDATE_REPOSITORY") ?? "cvalusek/NeurOn",
+        currentRevision: env("NEURON_BUILD_SHA"),
+        checkIntervalSeconds: intEnv("NEURON_UPDATE_CHECK_SECONDS", 900),
+        githubToken: env("NEURON_UPDATE_GITHUB_TOKEN")
+      },
       hassleOff: loadHassleOffClientConfig(),
       maintenanceMode,
       storageOperationLockPath: env("STORAGE_OPERATION_LOCK_PATH") ?? path.resolve(process.cwd(), "data", "neuron-storage.lock")

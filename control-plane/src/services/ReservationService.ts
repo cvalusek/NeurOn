@@ -7,36 +7,44 @@ const DEFAULT_KEEPALIVE_MINUTES = 2;
 const MAX_KEEPALIVE_MINUTES = 60;
 
 export class ReservationService {
+  private activeDemandMutations = 0;
+
   constructor(
     private readonly repository: ReservationRepository,
     private readonly catalog: ModelCatalog,
     private readonly profiles?: ReservationProfileRepository,
-    private readonly onReservationChanged?: () => void
+    private readonly onReservationChanged?: () => void,
+    private readonly acceptingReservations: () => boolean = () => true
   ) {}
 
   async createForUser(user: AuthenticatedUser, input: { modelIds?: string[]; targetIds?: string[]; profileId?: string; durationMinutes?: number; keepaliveMinutes?: number }): Promise<Reservation> {
-    const profile = input.profileId ? await this.getOwnedProfile(input.profileId, user) : undefined;
-    const expandedInput = inputWithResolvedDefaults(profile, input);
-    this.validateInput(expandedInput);
-    const requestedModelIds = unique(expandedInput.modelIds ?? []);
-    const modelIds = requestedModelIds.length > 0 ? this.catalog.canonicalModelIds(requestedModelIds) : [];
-    const requestedTargetIds = unique(expandedInput.targetIds ?? []);
-    const now = new Date();
-    const targetIds = this.targetIdsForRequest(modelIds, requestedTargetIds);
-    const reservation = await this.repository.create({
-      username: user.username,
-      apiKeyName: user.apiKeyName,
-      profileId: profile?.id,
-      profileName: profile?.name,
-      modelIds,
-      targetIds,
-      createdAt: now,
-      expiresAt: new Date(now.getTime() + expandedInput.durationMinutes * 60_000),
-      keepaliveMinutes: expandedInput.keepaliveMinutes ?? DEFAULT_KEEPALIVE_MINUTES,
-      status: "active"
-    });
-    this.notifyReservationChanged();
-    return reservation;
+    const finishMutation = this.beginDemandMutation();
+    try {
+      const profile = input.profileId ? await this.getOwnedProfile(input.profileId, user) : undefined;
+      const expandedInput = inputWithResolvedDefaults(profile, input);
+      this.validateInput(expandedInput);
+      const requestedModelIds = unique(expandedInput.modelIds ?? []);
+      const modelIds = requestedModelIds.length > 0 ? this.catalog.canonicalModelIds(requestedModelIds) : [];
+      const requestedTargetIds = unique(expandedInput.targetIds ?? []);
+      const now = new Date();
+      const targetIds = this.targetIdsForRequest(modelIds, requestedTargetIds);
+      const reservation = await this.repository.create({
+        username: user.username,
+        apiKeyName: user.apiKeyName,
+        profileId: profile?.id,
+        profileName: profile?.name,
+        modelIds,
+        targetIds,
+        createdAt: now,
+        expiresAt: new Date(now.getTime() + expandedInput.durationMinutes * 60_000),
+        keepaliveMinutes: expandedInput.keepaliveMinutes ?? DEFAULT_KEEPALIVE_MINUTES,
+        status: "active"
+      });
+      this.notifyReservationChanged();
+      return reservation;
+    } finally {
+      finishMutation();
+    }
   }
 
   async getOwned(id: string, user: AuthenticatedUser): Promise<Reservation> {
@@ -54,17 +62,22 @@ export class ReservationService {
   }
 
   async extend(id: string, user: AuthenticatedUser, durationMinutes: number, options: { fromNow?: boolean } = {}): Promise<Reservation> {
-    if (!Number.isFinite(durationMinutes) || durationMinutes <= 0 || durationMinutes > MAX_DURATION_MINUTES) {
-      throw new Error(`Duration must be between 1 and ${MAX_DURATION_MINUTES} minutes`);
+    const finishMutation = this.beginDemandMutation();
+    try {
+      if (!Number.isFinite(durationMinutes) || durationMinutes <= 0 || durationMinutes > MAX_DURATION_MINUTES) {
+        throw new Error(`Duration must be between 1 and ${MAX_DURATION_MINUTES} minutes`);
+      }
+      const reservation = await this.getOwned(id, user);
+      if (reservation.status !== "active") throw new Error("Only active reservations can be extended");
+      const baseTime = options.fromNow ? Date.now() : Math.max(Date.now(), reservation.expiresAt.getTime());
+      const updated = await this.repository.update(id, {
+        expiresAt: new Date(baseTime + durationMinutes * 60_000)
+      });
+      this.notifyReservationChanged();
+      return updated;
+    } finally {
+      finishMutation();
     }
-    const reservation = await this.getOwned(id, user);
-    if (reservation.status !== "active") throw new Error("Only active reservations can be extended");
-    const baseTime = options.fromNow ? Date.now() : Math.max(Date.now(), reservation.expiresAt.getTime());
-    const updated = await this.repository.update(id, {
-      expiresAt: new Date(baseTime + durationMinutes * 60_000)
-    });
-    this.notifyReservationChanged();
-    return updated;
   }
 
   private validateInput(input: { modelIds?: string[]; targetIds?: string[]; durationMinutes: number; keepaliveMinutes?: number }): void {
@@ -110,6 +123,18 @@ export class ReservationService {
     } catch {
       // The periodic reconciler remains the recovery path if a wake cannot be scheduled.
     }
+  }
+
+  activeDemandMutationCount(): number {
+    return this.activeDemandMutations;
+  }
+
+  private beginDemandMutation(): () => void {
+    if (!this.acceptingReservations()) throw new Error("NeurOn is draining for restart; new reservations and extensions are temporarily disabled");
+    this.activeDemandMutations += 1;
+    return () => {
+      this.activeDemandMutations -= 1;
+    };
   }
 }
 

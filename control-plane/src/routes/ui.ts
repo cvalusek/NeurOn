@@ -5,6 +5,8 @@ import type { AppConfig, AuthMethod, CapacityProviderDefinition, CapacityTarget,
 import type { CapacityProvider } from "../domain/interfaces.js";
 import { SharedPasswordAuthProvider } from "../auth/SharedPasswordAuthProvider.js";
 import { OidcAuthService, type OidcLoginState } from "../auth/OidcAuthService.js";
+import { ShutdownCoordinator } from "../services/ShutdownCoordinator.js";
+import { UpdateChecker } from "../services/UpdateChecker.js";
 import { ApiKeyService } from "../services/ApiKeyService.js";
 import { AuthMethodService } from "../services/AuthMethodService.js";
 import { ModelCatalog } from "../services/ModelCatalog.js";
@@ -15,7 +17,7 @@ import { CostEstimationService } from "../services/CostEstimationService.js";
 import { TargetService } from "../services/TargetService.js";
 import { TargetProvisioningService } from "../services/TargetProvisioningService.js";
 import type { HassleOffSafetyView } from "../ui/html.js";
-import { activationPage, adminAuthPage, apiKeysPage, hassleOffSafetyPage, loginPage, profilesPage, providerAdminPage, reservationHistoryPage, reservationPage, startPage, targetAdminPage } from "../ui/html.js";
+import { activationPage, adminAuthPage, apiKeysPage, hassleOffSafetyPage, loginPage, profilesPage, providerAdminPage, reservationHistoryPage, reservationPage, startPage, targetAdminPage, updatesPage } from "../ui/html.js";
 import { requireUser } from "../utils/http.js";
 import type { HassleOffClient } from "../safety/HassleOffClient.js";
 
@@ -25,6 +27,8 @@ export function registerUiRoutes(
   authProvider: SharedPasswordAuthProvider,
   authMethodService: AuthMethodService,
   oidcAuthService: OidcAuthService,
+  updateChecker: UpdateChecker,
+  shutdownCoordinator: ShutdownCoordinator,
   catalog: ModelCatalog,
   apiKeyService: ApiKeyService,
   reservationService: ReservationService,
@@ -362,6 +366,53 @@ export function registerUiRoutes(
   app.get("/admin/providers", async (request, reply) => {
     const query = z.object({ error: z.string().optional() }).parse(request.query);
     return reply.type("text/html").send(providerAdminPage(requireUser(request), await providerService.list(), await targetService.list(), config.runtimeProfiles, query.error));
+  });
+  app.get("/api/admin/update-status", async () => ({
+    update: await updateChecker.check(),
+    shutdown: await shutdownCoordinator.status(),
+    safety: updateSafetySummary(config, catalog)
+  }));
+  app.get("/admin/updates", async (request, reply) => {
+    const query = z.object({ error: z.string().optional(), success: z.string().optional() }).parse(request.query);
+    return reply.type("text/html").send(updatesPage(
+      requireUser(request),
+      await updateChecker.check(),
+      await shutdownCoordinator.status(),
+      updateSafetySummary(config, catalog),
+      query.error,
+      query.success
+    ));
+  });
+  app.post("/admin/updates/check", async (_request, reply) => {
+    await updateChecker.check(true);
+    return reply.redirect("/admin/updates");
+  });
+  app.post("/admin/updates/schedule", async (request, reply) => {
+    try {
+      shutdownCoordinator.scheduleWhenSafe(requireUser(request).username);
+      return reply.redirect("/admin/updates?success=Safe%20restart%20scheduled");
+    } catch (error) {
+      return reply.redirect(`/admin/updates?error=${encodeURIComponent(error instanceof Error ? error.message : String(error))}`);
+    }
+  });
+  app.post("/admin/updates/cancel", async (_request, reply) => {
+    try {
+      shutdownCoordinator.cancel();
+      return reply.redirect("/admin/updates?success=Scheduled%20restart%20cancelled");
+    } catch (error) {
+      return reply.redirect(`/admin/updates?error=${encodeURIComponent(error instanceof Error ? error.message : String(error))}`);
+    }
+  });
+  app.post("/admin/updates/force", async (request, reply) => {
+    try {
+      const body = z.object({ stopTargets: z.enum(["yes", "no"]), confirm: z.string(), acknowledgeRisk: z.string().optional() }).parse(request.body ?? {});
+      if (body.confirm !== "RESTART") throw new Error("Type RESTART to confirm the forced restart");
+      if (body.stopTargets === "no" && body.acknowledgeRisk !== "on") throw new Error("Acknowledge the unmanaged-capacity risk before restarting without stopping targets");
+      shutdownCoordinator.force(requireUser(request).username, body.stopTargets === "yes");
+      return reply.redirect("/admin/updates?success=Forced%20restart%20started");
+    } catch (error) {
+      return reply.redirect(`/admin/updates?error=${encodeURIComponent(error instanceof Error ? error.message : String(error))}`);
+    }
   });
   app.get("/api/admin/providers/:id/resources", async (request, reply) => {
     try {
@@ -705,6 +756,7 @@ function listField(value: string | undefined): string[] {
 }
 
 function reservationFormErrorMessage(error: unknown): string {
+  if (error instanceof Error && error.message.includes("draining for restart")) return error.message;
   if (error instanceof z.ZodError && error.issues.some((issue) => issue.path.includes("modelIds"))) {
     return "Select at least one model";
   }
@@ -866,4 +918,14 @@ async function githubRequest<T>(url: string, token: string): Promise<T> {
     throw new Error(`GitHub API returned ${response.status}${body ? `: ${body}` : ""}`);
   }
   return response.json() as Promise<T>;
+}
+
+function updateSafetySummary(config: AppConfig, catalog: ModelCatalog) {
+  const targets = catalog.listTargets();
+  const protectedTargets = targets.filter((target) => target.hassleOff?.protected === true).length;
+  return {
+    hassleOffConfigured: Boolean(config.hassleOff),
+    protectedTargets,
+    totalTargets: targets.length
+  };
 }
