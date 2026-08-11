@@ -106,6 +106,32 @@ describe("API authentication context", () => {
     expect(String(response.headers["set-cookie"])).toContain("Expires=Thu, 01 Jan 1970 00:00:00 GMT");
   });
 
+  it("disables shared-password UI and Basic auth while preserving signed sessions", async () => {
+    process.env.USE_FAKE_PROVIDER = "true";
+    const disabledConfig = { ...config, sharedPasswordEnabled: false, sharedPassword: undefined, cookieSecret: "test-cookie-secret", adminUsers: ["actual"] };
+    const { app } = await buildApp(disabledConfig, models);
+
+    const login = await app.inject({ method: "GET", url: "/login" });
+    const passwordAttempt = await app.inject({ method: "POST", url: "/login", payload: { username: "actual", password: "secret" } });
+    const basicAttempt = await app.inject({
+      method: "GET",
+      url: "/",
+      headers: { authorization: `Basic ${Buffer.from("actual:secret").toString("base64")}` }
+    });
+    const sessionCookie = new SharedPasswordAuthProvider(undefined, ["actual"], "test-cookie-secret").createCookie("actual");
+    const sessionRequest = await app.inject({ method: "GET", url: "/", headers: { cookie: `llm_control_auth=${sessionCookie}` } });
+    await app.close();
+
+    expect(login.statusCode).toBe(200);
+    expect(login.body).not.toContain('<form method="post" action="/login">');
+    expect(login.body).toContain("No interactive sign-in methods are enabled");
+    expect(passwordAttempt.statusCode).toBe(403);
+    expect(passwordAttempt.body).toContain("Shared password authentication is disabled");
+    expect(basicAttempt.statusCode).toBe(302);
+    expect(basicAttempt.headers.location).toBe("/login");
+    expect(sessionRequest.statusCode).toBe(200);
+  });
+
   it("uses the authenticated username instead of POST body username", async () => {
     process.env.USE_FAKE_PROVIDER = "true";
     const { app } = await buildApp(config, models);

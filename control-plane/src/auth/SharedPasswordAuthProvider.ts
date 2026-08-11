@@ -5,7 +5,7 @@ import { authenticateApiKey } from "../services/ApiKeyService.js";
 
 export class SharedPasswordAuthProvider implements AuthProvider {
   constructor(
-    private readonly sharedPassword: string,
+    private readonly sharedPassword: string | undefined,
     private readonly adminUsers: string[],
     private readonly cookieSecret?: string,
     private readonly apiKeys?: ApiKeyRepository
@@ -56,7 +56,7 @@ export class SharedPasswordAuthProvider implements AuthProvider {
     if (separator === -1) return undefined;
     const username = decoded.slice(0, separator);
     const password = decoded.slice(separator + 1);
-    if (!username || password !== this.sharedPassword) return undefined;
+    if (!this.sharedPassword || !username || password !== this.sharedPassword) return undefined;
     return { username, isAdmin: this.isAdmin(username) };
   }
 

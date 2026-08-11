@@ -268,19 +268,22 @@ export function layout(title: string, user: AuthenticatedUser | undefined, body:
 </html>`;
 }
 
-export function loginPage(error = "", methods: Array<Pick<AuthMethod, "id" | "displayName" | "type">> = []): string {
+export function loginPage(error = "", methods: Array<Pick<AuthMethod, "id" | "displayName" | "type">> = [], sharedPasswordEnabled = true): string {
   const authButtons = methods.length
     ? `<div class="inline-actions" style="margin-top: 14px;">${methods.map((method) => `<form method="get" action="/auth/${escapeHtml(method.type)}/start"><input type="hidden" name="method" value="${escapeHtml(method.id)}"><button class="secondary" type="submit">Sign in with ${escapeHtml(method.displayName)}</button></form>`).join("")}</div>`
     : "";
-  return layout("Login", undefined, `<section class="panel">
-    <h1>Sign in</h1>
-    ${error ? `<p class="status">${escapeHtml(error)}</p>` : ""}
-    <form method="post" action="/login">
+  const passwordForm = sharedPasswordEnabled ? `<form method="post" action="/login">
       <p><label>Username<br><input name="username" required></label></p>
       <p><label>Password<br><input name="password" type="password" required></label></p>
       <button type="submit">Sign in</button>
-    </form>
+    </form>` : "";
+  const noMethods = !sharedPasswordEnabled && methods.length === 0 ? `<p class="status">No interactive sign-in methods are enabled.</p>` : "";
+  return layout("Login", undefined, `<section class="panel">
+    <h1>Sign in</h1>
+    ${error ? `<p class="status">${escapeHtml(error)}</p>` : ""}
+    ${passwordForm}
     ${authButtons}
+    ${noMethods}
   </section>`);
 }
 

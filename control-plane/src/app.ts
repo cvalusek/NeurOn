@@ -57,7 +57,7 @@ export async function buildApp(config: AppConfig, models: ModelDefinition[], opt
   const providerCatalog = new ProviderCatalog(config.capacityProviders);
   const providerService = new ProviderService(config.capacityProviders, reservationRepository.capacityProviders, providerCatalog);
   await providerService.initialize();
-  const authProvider = new SharedPasswordAuthProvider(config.sharedPassword, config.adminUsers, config.cookieSecret, apiKeys);
+  const authProvider = new SharedPasswordAuthProvider(config.sharedPasswordEnabled === false ? undefined : config.sharedPassword, config.adminUsers, config.cookieSecret, apiKeys);
   const oidcAuthService = new OidcAuthService(new AuthSecretResolver(config.awsRegion));
   const catalog = new ModelCatalog(models, config.capacityTargets);
   const targetService = new TargetService([...config.capacityTargets], reservationRepository.capacityTargets, catalog, config.capacityTargets, reservationRepository.targetModelDiscoveries);

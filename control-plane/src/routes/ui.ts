@@ -40,11 +40,14 @@ export function registerUiRoutes(
   capacityProvider: CapacityProvider,
   hassleOffClient?: HassleOffClient
 ) {
+  const sharedPasswordEnabled = config.sharedPasswordEnabled !== false;
   const enabledAuthMethods = () => authMethodService.listEnabled();
-  app.get("/login", async (_request, reply) => reply.type("text/html").send(loginPage("", await enabledAuthMethods())));
+  const renderLoginPage = async (error = "") => loginPage(error, await enabledAuthMethods(), sharedPasswordEnabled);
+  app.get("/login", async (_request, reply) => reply.type("text/html").send(await renderLoginPage()));
   app.post("/login", async (request, reply) => {
+    if (!sharedPasswordEnabled) return reply.code(403).type("text/html").send(await renderLoginPage("Shared password authentication is disabled"));
     const body = z.object({ username: z.string().min(1), password: z.string() }).parse(request.body);
-    if (body.password !== config.sharedPassword || !config.cookieSecret) return reply.code(401).type("text/html").send(loginPage("Invalid credentials", await enabledAuthMethods()));
+    if (body.password !== config.sharedPassword || !config.cookieSecret) return reply.code(401).type("text/html").send(await renderLoginPage("Invalid credentials"));
     reply.setCookie("llm_control_auth", authProvider.createCookie(body.username), { path: "/", httpOnly: true, sameSite: "lax" });
     return reply.redirect("/");
   });
@@ -69,7 +72,7 @@ export function registerUiRoutes(
       return reply.redirect(authorizeUrl.toString());
     } catch (error) {
       const message = error instanceof Error ? error.message : "Could not start GitHub sign in";
-      return reply.code(400).type("text/html").send(loginPage(message, await enabledAuthMethods()));
+      return reply.code(400).type("text/html").send(await renderLoginPage(message));
     }
   });
   app.get("/auth/github/callback", async (request, reply) => {
@@ -87,7 +90,7 @@ export function registerUiRoutes(
       return reply.redirect("/");
     } catch (error) {
       const message = error instanceof Error ? error.message : "GitHub sign in failed";
-      return reply.code(401).type("text/html").send(loginPage(message, await enabledAuthMethods()));
+      return reply.code(401).type("text/html").send(await renderLoginPage(message));
     }
   });
   app.get("/auth/oidc/start", async (request, reply) => {
@@ -103,7 +106,7 @@ export function registerUiRoutes(
       return reply.redirect(url.toString());
     } catch (error) {
       const message = error instanceof Error ? error.message : "Could not start OIDC sign in";
-      return reply.code(400).type("text/html").send(loginPage(message, await enabledAuthMethods()));
+      return reply.code(400).type("text/html").send(await renderLoginPage(message));
     }
   });
   app.get("/auth/oidc/callback", async (request, reply) => {
@@ -123,7 +126,7 @@ export function registerUiRoutes(
     } catch (error) {
       reply.clearCookie("llm_control_oidc_state", { path: "/auth/oidc" });
       const message = error instanceof Error ? error.message : "OIDC sign in failed";
-      return reply.code(401).type("text/html").send(loginPage(message, await enabledAuthMethods()));
+      return reply.code(401).type("text/html").send(await renderLoginPage(message));
     }
   });
 

@@ -401,7 +401,8 @@ export interface CapacityProviderResource {
 export interface AppConfig {
   port: number;
   publicBaseUrl?: string;
-  sharedPassword: string;
+  sharedPassword?: string;
+  sharedPasswordEnabled?: boolean;
   cookieSecret?: string;
   storage: StorageConfig;
   awsRegion: string;

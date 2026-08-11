@@ -229,6 +229,7 @@ const runtimeProfileSchema = z
   }));
 
 export async function loadConfig(): Promise<{ config: AppConfig; models: ModelDefinition[] }> {
+  const sharedPasswordEnabled = boolEnv("SHARED_PASSWORD_ENABLED") ?? true;
   const maintenanceMode = boolEnv("CONTROL_PLANE_MAINTENANCE_MODE") ?? false;
   const configuredProviders = await loadCapacityProviders();
   const runtimeProfiles = loadRuntimeProfiles();
@@ -273,7 +274,8 @@ export async function loadConfig(): Promise<{ config: AppConfig; models: ModelDe
     config: {
       port: intEnv("PORT", 8090),
       publicBaseUrl: env("PUBLIC_BASE_URL")?.replace(/\/$/, ""),
-      sharedPassword: requiredEnv("SHARED_PASSWORD", "dev-password"),
+      sharedPasswordEnabled,
+      sharedPassword: sharedPasswordEnabled ? requiredEnv("SHARED_PASSWORD", "dev-password") : undefined,
       cookieSecret: process.env.COOKIE_SECRET,
       storage: loadStorageConfig(),
       awsRegion: process.env.AWS_REGION ?? "us-east-1",

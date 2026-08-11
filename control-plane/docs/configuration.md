@@ -119,6 +119,7 @@ RUNTIME_PROFILES_JSON=[{"id":"prefer-nightly","name":"PreFer Nightly","type":"do
 ## Core Environment
 
 - `PORT`
+- `SHARED_PASSWORD_ENABLED`
 - `SHARED_PASSWORD`
 - `COOKIE_SECRET`
 - `ADMIN_USERS`
@@ -223,12 +224,17 @@ NeurOn control-plane storage driver.
 
 ## Auth And API Keys
 
-Interactive users sign in with a username plus the shared password. API clients
-can use Basic Auth with the same shared password:
+Interactive users can sign in with a username plus the shared password. API
+clients can use Basic Auth with the same shared password:
 
 ```bash
 curl -u clint:dev-password http://localhost:8090/api/models
 ```
+
+Set `SHARED_PASSWORD_ENABLED=false` to disable both the shared-password form and
+HTTP Basic authentication. `SHARED_PASSWORD` is then optional. Keep
+`COOKIE_SECRET` configured because GitHub and OIDC sign-in still use it to sign
+authorization state and the resulting NeurOn session cookie.
 
 Users can create personal API keys from `/api-keys`. The generated key is shown
 once, starts with `sk-neuron-...`, and is stored as a hash. API keys authenticate

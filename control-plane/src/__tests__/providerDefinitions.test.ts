@@ -36,6 +36,7 @@ const managedEnv = [
   "NEURON_UPDATE_CHECK_ENABLED",
   "NEURON_UPDATE_REPOSITORY",
   "NEURON_UPDATE_CHECK_SECONDS",
+  "SHARED_PASSWORD_ENABLED",
   "SHARED_PASSWORD"
 ];
 
@@ -55,6 +56,16 @@ describe("provider definitions", () => {
     expect(config.reconcilerIntervalSeconds).toBe(10);
     expect(config.reservationStatusPollSeconds).toBe(5);
     expect(config.adminStatusPollSeconds).toBe(5);
+  });
+
+  it("allows shared password authentication to be disabled without a password", async () => {
+    process.env.SHARED_PASSWORD_ENABLED = "false";
+    delete process.env.SHARED_PASSWORD;
+
+    const { config } = await loadConfig();
+
+    expect(config.sharedPasswordEnabled).toBe(false);
+    expect(config.sharedPassword).toBeUndefined();
   });
 
   it("enables update checks for revision-stamped published images", async () => {

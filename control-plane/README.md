@@ -121,7 +121,8 @@ Environment variables:
 | Name | Default | Notes |
 | --- | --- | --- |
 | `PORT` | `8090` | HTTP port inside the container |
-| `SHARED_PASSWORD` | required in production | Basic/cookie auth password |
+| `SHARED_PASSWORD_ENABLED` | `true` | Set `false` to hide and reject shared-password and Basic authentication |
+| `SHARED_PASSWORD` | required when enabled in production | Shared-password form and Basic authentication password |
 | `COOKIE_SECRET` | unset | Enables login cookie auth |
 | `ADMIN_USERS` | any authenticated user | Comma-separated admin usernames |
 | `PUBLIC_BASE_URL` | forwarded request origin | External origin used for OAuth/OIDC callback URLs |
