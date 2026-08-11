@@ -61,9 +61,12 @@ export function layout(title: string, user: AuthenticatedUser | undefined, body:
     .hamburger::before, .hamburger::after { content: ""; position: absolute; left: 0; width: 18px; height: 2px; border-radius: 999px; background: currentColor; }
     .hamburger::before { top: -6px; }
     .hamburger::after { top: 6px; }
-    .nav-drawer[hidden], .drawer-scrim[hidden] { display: none; }
-    .drawer-scrim { position: fixed; inset: 0; background: rgba(23, 32, 42, 0.45); border: 0; border-radius: 0; padding: 0; z-index: 20; }
-    .nav-drawer { position: fixed; top: 0; right: 0; bottom: 0; z-index: 21; width: min(320px, calc(100vw - 48px)); background: white; color: #1f2933; border-left: 1px solid #d8ddd7; box-shadow: -16px 0 48px rgba(23, 32, 42, 0.22); padding: 18px; overflow: auto; }
+    .drawer-scrim { position: fixed; inset: 0; background: rgba(23, 32, 42, 0.45); border: 0; border-radius: 0; padding: 0; z-index: 20; opacity: 0; visibility: hidden; pointer-events: none; }
+    .nav-drawer { position: fixed; top: 0; right: 0; bottom: 0; z-index: 21; width: min(320px, calc(100vw - 48px)); background: white; color: #1f2933; border-left: 1px solid #d8ddd7; box-shadow: -16px 0 48px rgba(23, 32, 42, 0.22); padding: 18px; overflow: auto; transform: translateX(calc(100% + 24px)); visibility: hidden; pointer-events: none; will-change: transform; }
+    body.nav-ready .drawer-scrim { transition: opacity 180ms cubic-bezier(0.22, 1, 0.36, 1), visibility 0s linear 220ms; }
+    body.nav-ready .nav-drawer { transition: transform 260ms cubic-bezier(0.22, 1, 0.36, 1), visibility 0s linear 260ms; }
+    body.drawer-open .drawer-scrim { opacity: 1; visibility: visible; pointer-events: auto; transition-delay: 0s; }
+    body.drawer-open .nav-drawer { transform: translateX(0); visibility: visible; pointer-events: auto; transition-delay: 0s; }
     .drawer-head { display: flex; gap: 12px; align-items: center; margin-bottom: 12px; }
     .drawer-nav { display: grid; gap: 8px; }
     .drawer-tree { border: 1px solid #e2e7e1; border-radius: 8px; background: #fbfcfb; overflow: hidden; }
@@ -162,15 +165,21 @@ export function layout(title: string, user: AuthenticatedUser | undefined, body:
     .system-banner a { margin-left: 8px; }
     @media (min-width: 1024px) {
       .topbar { max-width: none; }
-      .nav-drawer { top: 62px; left: 0; right: auto; width: 260px; border-left: 0; border-right: 1px solid #d8ddd7; box-shadow: none; padding: 14px; }
-      body.drawer-open .drawer-scrim { display: none; }
-      body.drawer-open main { max-width: none; margin: 0 0 0 288px; }
+      .nav-drawer { top: 62px; left: 0; right: auto; width: 260px; border-left: 0; border-right: 1px solid #d8ddd7; box-shadow: none; padding: 14px; transform: translateX(calc(-100% - 1px)); }
+      .drawer-scrim, body.drawer-open .drawer-scrim { opacity: 0; visibility: hidden; pointer-events: none; }
+      main { max-width: none; margin: 0; }
+      body.nav-ready main, body.nav-ready .system-banner { transition: margin-left 260ms cubic-bezier(0.22, 1, 0.36, 1); }
+      body.drawer-open main { margin-left: 288px; }
+      body.drawer-open .system-banner { margin-left: 312px; }
     }
     @media (max-width: 820px) {
       .home-grid { grid-template-columns: 1fr; }
       .profile-strip { grid-template-columns: 1fr; }
       .topbar { grid-template-columns: auto 1fr; gap: 12px; }
       .topbar .user { display: none; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      body.nav-ready .drawer-scrim, body.nav-ready .nav-drawer, body.nav-ready main, body.nav-ready .system-banner { transition: none; }
     }
   </style>
 </head>
@@ -183,8 +192,8 @@ export function layout(title: string, user: AuthenticatedUser | undefined, body:
     </div>
 </header>
   <div id="system-banner" class="system-banner" hidden></div>
-  <button class="drawer-scrim" type="button" data-nav-close hidden></button>
-  <aside id="nav-drawer" class="nav-drawer" hidden>
+  <button class="drawer-scrim" type="button" data-nav-close aria-label="Close menu" tabindex="-1"></button>
+  <aside id="nav-drawer" class="nav-drawer" aria-hidden="true">
     <div class="drawer-head"><strong>NeurOn</strong></div>
     <nav class="drawer-nav" aria-label="Side navigation">
       <details class="drawer-tree" open>
@@ -229,13 +238,15 @@ export function layout(title: string, user: AuthenticatedUser | undefined, body:
       const toggle = document.querySelector('[data-nav-toggle]');
       const desktopQuery = window.matchMedia('(min-width: 1024px)');
       const setOpen = (open) => {
-        drawer.hidden = !open;
-        scrim.hidden = !open || desktopQuery.matches;
         document.body.classList.toggle('drawer-open', open);
+        drawer?.setAttribute('aria-hidden', String(!open));
+        if (scrim) scrim.tabIndex = open && !desktopQuery.matches ? 0 : -1;
         toggle?.setAttribute('aria-expanded', String(open));
+        toggle?.setAttribute('aria-label', open ? 'Close menu' : 'Open menu');
       };
       setOpen(desktopQuery.matches);
-      toggle?.addEventListener('click', () => setOpen(drawer.hidden));
+      requestAnimationFrame(() => document.body.classList.add('nav-ready'));
+      toggle?.addEventListener('click', () => setOpen(!document.body.classList.contains('drawer-open')));
       document.querySelectorAll('[data-nav-close]').forEach((button) => button.addEventListener('click', () => setOpen(false)));
       desktopQuery.addEventListener('change', (event) => setOpen(event.matches));
       document.addEventListener('keydown', (event) => {

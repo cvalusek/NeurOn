@@ -91,6 +91,10 @@ describe("API authentication context", () => {
     expect(response.body).not.toContain("<summary>History</summary>");
     expect(response.body).not.toContain('href="/admin/');
     expect(response.body).toContain('<form method="post" action="/logout">');
+    expect(response.body).toContain('class="nav-drawer" aria-hidden="true"');
+    expect(response.body).toContain("body.drawer-open .system-banner");
+    expect(response.body).toContain("cubic-bezier(0.22, 1, 0.36, 1)");
+    expect(response.body).not.toContain('class="nav-drawer" hidden');
   });
 
   it("clears the local session cookie on logout", async () => {
