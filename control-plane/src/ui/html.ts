@@ -73,8 +73,8 @@ export function layout(title: string, user: AuthenticatedUser | undefined, body:
     .drawer-tree[open] summary::before { transform: rotate(90deg); }
     .drawer-tree summary:hover, .drawer-tree summary:focus-visible { background: #eef2f0; outline: none; }
     .drawer-branch { display: grid; gap: 2px; padding: 0 8px 8px 28px; }
-    .drawer-branch a { display: block; color: #1f2933; text-decoration: none; border-radius: 6px; padding: 8px 10px; font-weight: 700; }
-    .drawer-branch a:hover, .drawer-branch a:focus-visible { background: #eef2f0; outline: none; }
+    .drawer-branch a, .drawer-action { display: block; width: 100%; color: #1f2933; text-align: left; text-decoration: none; border: 0; border-radius: 6px; padding: 8px 10px; background: transparent; font-weight: 700; }
+    .drawer-branch a:hover, .drawer-branch a:focus-visible, .drawer-action:hover, .drawer-action:focus-visible { background: #eef2f0; outline: none; }
     main { max-width: 1180px; margin: 0 auto; padding: 24px; }
     a { color: #0f766e; } form { margin: 0; }
     .panel { background: white; border: 1px solid #d8ddd7; border-radius: 8px; padding: 18px; margin-bottom: 16px; }
@@ -193,6 +193,7 @@ export function layout(title: string, user: AuthenticatedUser | undefined, body:
           <a href="/">Home</a>
           <a href="/profiles">Profiles</a>
           <a href="/api-keys">API keys</a>
+          ${user ? `<form method="post" action="/logout"><button class="drawer-action" type="submit">Sign out</button></form>` : ""}
         </div>
       </details>
       ${user?.isAdmin ? `<details class="drawer-tree" open>

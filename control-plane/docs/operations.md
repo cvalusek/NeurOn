@@ -23,6 +23,9 @@ must survive NeurOn restarts. See [HassleOff](hassleoff.md).
 NeurOn is designed for internal/Tailscale-style access. Interactive
 authentication supports the shared password and configured GitHub or OIDC
 providers, including Okta, using a signed HTTP-only NeurOn session cookie.
+The navigation's **Sign out** action posts to `/logout`, clears only the local
+NeurOn session, and does not sign the user out of GitHub or the upstream OIDC
+provider.
 Users can also create personal `sk-neuron-...` API keys for Bearer-auth REST,
 OpenAPI, and MCP integrations. API keys should be treated as secrets and
 rotated by revoking old keys from `/api-keys`.

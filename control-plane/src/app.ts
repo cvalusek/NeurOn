@@ -195,7 +195,7 @@ export async function buildApp(config: AppConfig, models: ModelDefinition[], opt
   });
 
   app.addHook("preHandler", async (request, reply) => {
-    const mutationAllowedInMaintenance = request.url === "/login" || request.url.startsWith("/auth/");
+    const mutationAllowedInMaintenance = request.url === "/login" || request.url === "/logout" || request.url.startsWith("/auth/");
     if (
       config.maintenanceMode &&
       !["GET", "HEAD", "OPTIONS"].includes(request.method) &&
@@ -206,7 +206,7 @@ export async function buildApp(config: AppConfig, models: ModelDefinition[], opt
       }
       return reply.code(503).type("text/html").send("NeurOn is in maintenance mode; state changes are disabled");
     }
-    if (request.url === "/healthz" || request.url === "/login" || request.url.startsWith("/auth/") || request.url === "/openapi.json" || request.url.startsWith("/docs")) return;
+    if (request.url === "/healthz" || request.url === "/login" || request.url === "/logout" || request.url.startsWith("/auth/") || request.url === "/openapi.json" || request.url.startsWith("/docs")) return;
     const user = await authProvider.authenticate({ headers: request.headers, cookies: request.cookies });
     if (!user) {
       if (request.url.startsWith("/api/")) return reply.code(401).send({ error: "Authentication required" });

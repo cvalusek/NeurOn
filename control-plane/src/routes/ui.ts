@@ -48,6 +48,10 @@ export function registerUiRoutes(
     reply.setCookie("llm_control_auth", authProvider.createCookie(body.username), { path: "/", httpOnly: true, sameSite: "lax" });
     return reply.redirect("/");
   });
+  app.post("/logout", async (_request, reply) => {
+    reply.clearCookie("llm_control_auth", { path: "/" });
+    return reply.redirect("/login");
+  });
   app.get("/auth/github/start", async (request, reply) => {
     try {
       const query = z.object({ method: z.string().optional() }).parse(request.query);

@@ -90,6 +90,20 @@ describe("API authentication context", () => {
     expect(response.body).not.toContain("<summary>Configuration</summary>");
     expect(response.body).not.toContain("<summary>History</summary>");
     expect(response.body).not.toContain('href="/admin/');
+    expect(response.body).toContain('<form method="post" action="/logout">');
+  });
+
+  it("clears the local session cookie on logout", async () => {
+    process.env.USE_FAKE_PROVIDER = "true";
+    const { app } = await buildApp(config, models);
+
+    const response = await app.inject({ method: "POST", url: "/logout" });
+    await app.close();
+
+    expect(response.statusCode).toBe(302);
+    expect(response.headers.location).toBe("/login");
+    expect(String(response.headers["set-cookie"])).toContain("llm_control_auth=;");
+    expect(String(response.headers["set-cookie"])).toContain("Expires=Thu, 01 Jan 1970 00:00:00 GMT");
   });
 
   it("uses the authenticated username instead of POST body username", async () => {
