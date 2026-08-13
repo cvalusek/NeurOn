@@ -1,10 +1,16 @@
 import type { TrafficSource } from "../domain/interfaces.js";
 
 interface LiteLlmSpendLog {
+  request_id?: string | null;
   model?: string | null;
   model_group?: string | null;
   endTime?: string | null;
   startTime?: string | null;
+  completionStartTime?: string | null;
+  prompt_tokens?: number | null;
+  completion_tokens?: number | null;
+  cache_hit?: string | boolean | null;
+  status?: string | null;
 }
 
 interface SpendLogsResponse {
@@ -18,20 +24,33 @@ export class LiteLlmSpendLogsTrafficSource implements TrafficSource {
     private readonly lookbackSeconds: number
   ) {}
 
-  async pollRecentTraffic(now = new Date()): Promise<Array<{ modelId: string; seenAt: Date }>> {
+  async pollRecentTraffic(now = new Date()): ReturnType<TrafficSource["pollRecentTraffic"]> {
     const end = now;
     const start = new Date(now.getTime() - this.lookbackSeconds * 1000);
     const logs = await this.fetchRecentLogs(start, end);
-    const recentByModel = new Map<string, Date>();
+    const events: Array<{
+      modelId: string;
+      seenAt: Date;
+      requestId?: string;
+      performance?: {
+        decodeTokensPerSecond?: number;
+        prefillTokensPerSecond?: number;
+        timeToFirstTokenSeconds?: number;
+      };
+    }> = [];
     for (const log of logs) {
       const seenAt = parseDate(log.endTime ?? log.startTime);
       if (!seenAt || seenAt < start || seenAt > end) continue;
-      for (const modelId of modelIdsForLog(log)) {
-        const existing = recentByModel.get(modelId);
-        if (!existing || seenAt > existing) recentByModel.set(modelId, seenAt);
+      const performance = performanceForLog(log);
+      for (const [index, modelId] of modelIdsForLog(log).entries()) {
+        events.push({
+          modelId,
+          seenAt,
+          ...(index === 0 && performance && log.request_id ? { requestId: log.request_id, performance } : {})
+        });
       }
     }
-    return Array.from(recentByModel.entries()).map(([modelId, seenAt]) => ({ modelId, seenAt }));
+    return dedupeTrafficEvents(events);
   }
 
   private async fetchRecentLogs(start: Date, end: Date): Promise<LiteLlmSpendLog[]> {
@@ -89,6 +108,49 @@ function parseDate(value: string | null | undefined): Date | undefined {
 
 function utcDateOnly(date: Date): string {
   return date.toISOString().slice(0, 10);
+}
+
+function performanceForLog(log: LiteLlmSpendLog): {
+  decodeTokensPerSecond?: number;
+  prefillTokensPerSecond?: number;
+  timeToFirstTokenSeconds?: number;
+} | undefined {
+  if (isCacheHit(log.cache_hit) || /(?:error|fail)/iu.test(log.status ?? "")) return undefined;
+  const start = parseDate(log.startTime);
+  const completionStart = parseDate(log.completionStartTime);
+  const end = parseDate(log.endTime);
+  if (!start || !completionStart || !end || completionStart < start || end < completionStart) return undefined;
+  const timeToFirstTokenSeconds = (completionStart.getTime() - start.getTime()) / 1000;
+  const decodeSeconds = (end.getTime() - completionStart.getTime()) / 1000;
+  const decodeTokensPerSecond = positiveRate(log.completion_tokens, decodeSeconds);
+  const prefillTokensPerSecond = positiveRate(log.prompt_tokens, timeToFirstTokenSeconds);
+  if (!decodeTokensPerSecond && !prefillTokensPerSecond && timeToFirstTokenSeconds <= 0) return undefined;
+  return {
+    decodeTokensPerSecond,
+    prefillTokensPerSecond,
+    timeToFirstTokenSeconds: timeToFirstTokenSeconds > 0 ? timeToFirstTokenSeconds : undefined
+  };
+}
+
+function positiveRate(tokens: number | null | undefined, seconds: number): number | undefined {
+  if (typeof tokens !== "number" || !Number.isFinite(tokens) || tokens <= 0 || !Number.isFinite(seconds) || seconds <= 0) return undefined;
+  return tokens / seconds;
+}
+
+function isCacheHit(value: LiteLlmSpendLog["cache_hit"]): boolean {
+  if (value === true) return true;
+  if (typeof value !== "string") return false;
+  return ["true", "1", "yes", "hit"].includes(value.trim().toLowerCase());
+}
+
+function dedupeTrafficEvents<T extends { modelId: string; seenAt: Date; requestId?: string; performance?: unknown }>(events: T[]): T[] {
+  const byKey = new Map<string, T>();
+  for (const event of events) {
+    const key = `${event.requestId ?? "traffic"}\0${event.modelId}\0${event.seenAt.toISOString()}`;
+    const existing = byKey.get(key);
+    if (!existing || (!existing.performance && event.performance)) byKey.set(key, event);
+  }
+  return Array.from(byKey.values());
 }
 
 function nextUtcDateOnly(date: Date): string {

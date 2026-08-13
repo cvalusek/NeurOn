@@ -38,6 +38,69 @@ const config: AppConfig = {
 
 const models: ModelDefinition[] = [{ id: "m1", displayName: "M1", aliases: ["m1"], targetIds: ["t1"] }];
 
+describe("model selection guidance", () => {
+  it("returns authenticated deployment facts with target cost and explicit unknowns", async () => {
+    process.env.USE_FAKE_PROVIDER = "true";
+    const { app } = await buildApp({
+      ...config,
+      capacityTargets: [{ ...config.capacityTargets[0], costEstimate: { hourlyUsd: 2.5 } }],
+      modelSelectionCatalog: {
+        schemaVersion: 1,
+        models: [{ modelId: "m1", intelligence: 80, domains: { coding: 91 }, provenance: { source: "private fixture" } }],
+        deployments: [{ targetId: "t1", modelId: "m1", contextWindowTokens: 64_000 }]
+      }
+    }, models);
+    const auth = { authorization: `Basic ${Buffer.from("actual:secret").toString("base64")}` };
+    try {
+      const unauthenticated = await app.inject({ method: "GET", url: "/api/model-selection" });
+      const response = await app.inject({ method: "GET", url: "/api/model-selection", headers: auth });
+      expect(unauthenticated.statusCode).toBe(401);
+      expect(response.json()).toMatchObject({
+        domains: ["coding"],
+        advisorEnabled: false,
+        deployments: [{ key: "t1::m1", hourlyUsd: 2.5, contextWindowTokens: 64_000, intelligence: 80, domains: { coding: 91 } }]
+      });
+      expect(response.json().deployments[0].performance).toBeUndefined();
+    } finally {
+      await app.close();
+    }
+  });
+
+  it("uses an optional advisor only to return validated profile requirements, including during maintenance", async () => {
+    process.env.USE_FAKE_PROVIDER = "true";
+    const fetchMock = vi.fn(async () => jsonResponse({ choices: [{ message: { content: JSON.stringify({
+      useCase: "long coding sessions",
+      domain: "coding",
+      minimumContextTokens: 128_000,
+      maximumHourlyUsd: null,
+      minimumQualityRetentionPercent: null,
+      responseLength: "long",
+      weights: { intelligence: 50, speed: 40, cost: 10 }
+    }) } }] }));
+    vi.stubGlobal("fetch", fetchMock);
+    const { app } = await buildApp({
+      ...config,
+      maintenanceMode: true,
+      modelSelectionCatalog: { schemaVersion: 1, models: [{ modelId: "m1", domains: { coding: 90 } }], deployments: [] },
+      profileAdvisor: { apiBaseUrl: "https://advisor.example.test", apiKey: "private", model: "guide", timeoutSeconds: 5 }
+    }, models);
+    const auth = { authorization: `Basic ${Buffer.from("actual:secret").toString("base64")}` };
+    try {
+      const response = await app.inject({ method: "POST", url: "/api/profile-advisor", headers: auth, payload: { request: "Long coding sessions with 128K context" } });
+      expect(response.statusCode).toBe(200);
+      expect(response.json().guidance).toMatchObject({
+        useCase: "long coding sessions",
+        responseLength: "long",
+        requirements: { domain: "coding", minimumContextTokens: 128_000, weights: { intelligence: 0.5, speed: 0.4, cost: 0.1 } }
+      });
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    } finally {
+      await app.close();
+      vi.unstubAllGlobals();
+    }
+  });
+});
+
 describe("maintenance mode", () => {
   it("reports the active storage driver, blocks mutations, and avoids HassleOff status calls", async () => {
     process.env.USE_FAKE_PROVIDER = "true";

@@ -24,6 +24,7 @@ const demoModels: ModelDefinition[] = [{
   displayName: "Qwen Smol",
   aliases: ["qwen-smol"],
   contextLabel: "256k",
+  contextWindowTokens: 256_000,
   targetIds: [demoTarget.id]
 }];
 const demoConfig: AppConfig = {
@@ -34,6 +35,23 @@ const demoConfig: AppConfig = {
   awsRegion: "us-east-1",
   litellmTrafficPollSeconds: 0,
   litellmTrafficLookbackSeconds: 300,
+  modelSelectionCatalog: {
+    schemaVersion: 1,
+    models: [{
+      modelId: "qwen-smol",
+      intelligence: 84,
+      domains: { coding: 91, reasoning: 86 },
+      provenance: { source: "Synthetic documentation fixture", version: "1" }
+    }],
+    deployments: [{
+      targetId: "prefer-smol",
+      modelId: "qwen-smol",
+      contextWindowTokens: 256_000,
+      quantization: { format: "FP8", qualityRetentionPercent: 98.7, reference: "Synthetic reference" },
+      performance: { decodeTokensPerSecond: 78, prefillTokensPerSecond: 1_240, timeToFirstTokenSeconds: 0.42 },
+      provenance: { source: "Synthetic documentation fixture", version: "1" }
+    }]
+  },
   capacityProviders: [{ id: "docker-docs", displayName: "Docker", type: "docker", config: {} }],
   capacityTargets: [demoTarget],
   reconcilerIntervalSeconds: 15,
@@ -54,7 +72,7 @@ try {
   const address = built.app.server.address();
   if (!address || typeof address === "string") throw new Error("Could not determine documentation preview address");
   const baseUrl = `http://127.0.0.1:${address.port}`;
-  const page = await browser.newPage({ viewport: { width: 1440, height: 1200 }, deviceScaleFactor: 1 });
+  const page = await browser.newPage({ viewport: { width: 1600, height: 1400 }, deviceScaleFactor: 1 });
 
   await page.goto(baseUrl);
   await page.getByLabel("Username").fill("docs-user");

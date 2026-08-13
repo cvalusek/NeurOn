@@ -58,4 +58,43 @@ describe("LiteLlmSpendLogsTrafficSource", () => {
       { modelId: "unsloth/gemma-4-E2B-it-qat-GGUF:UD-Q4_K_XL", seenAt: new Date("2026-06-26T17:48:00.000Z") }
     ]);
   });
+
+  it("derives privacy-safe prefill, first-token, and decode observations from successful uncached logs", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ data: [{
+      request_id: "request-1",
+      model_group: "prefer/qwen",
+      startTime: "2026-06-26T17:47:58.000Z",
+      completionStartTime: "2026-06-26T17:47:59.000Z",
+      endTime: "2026-06-26T17:48:01.000Z",
+      prompt_tokens: 1000,
+      completion_tokens: 100,
+      cache_hit: "false",
+      status: "success"
+    }] }), { status: 200 })));
+
+    const source = new LiteLlmSpendLogsTrafficSource("http://litellm.test:4000", "secret", 300);
+    const events = await source.pollRecentTraffic(new Date("2026-06-26T17:48:51.000Z"));
+
+    expect(events).toEqual([{
+      modelId: "prefer/qwen",
+      seenAt: new Date("2026-06-26T17:48:01.000Z"),
+      requestId: "request-1",
+      performance: { decodeTokensPerSecond: 50, prefillTokensPerSecond: 1000, timeToFirstTokenSeconds: 1 }
+    }]);
+  });
+
+  it("does not derive performance from cache hits or failed requests", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ data: [{
+      request_id: "request-1",
+      model: "qwen",
+      startTime: "2026-06-26T17:47:58.000Z",
+      completionStartTime: "2026-06-26T17:47:59.000Z",
+      endTime: "2026-06-26T17:48:01.000Z",
+      prompt_tokens: 1000,
+      completion_tokens: 100,
+      cache_hit: "true"
+    }] }), { status: 200 })));
+    const source = new LiteLlmSpendLogsTrafficSource("http://litellm.test:4000", "secret", 300);
+    expect(await source.pollRecentTraffic(new Date("2026-06-26T17:48:51.000Z"))).toEqual([{ modelId: "qwen", seenAt: new Date("2026-06-26T17:48:01.000Z") }]);
+  });
 });

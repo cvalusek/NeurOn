@@ -38,3 +38,7 @@ backups/
 
 # Optional local HassleOff registration file containing real provider bindings
 hassleoff/targets.local.private.json
+
+# Private model-selection benchmark imports and advisor data
+model-selection.local.private.json
+**/model-selection.local.private.json

@@ -1,0 +1,43 @@
+{
+  "schemaVersion": 1,
+  "models": [
+    {
+      "modelId": "example-model",
+      "intelligence": 72.5,
+      "domains": {
+        "coding": 81.2,
+        "reasoning": 76.4
+      },
+      "provenance": {
+        "source": "Synthetic documentation example",
+        "sourceModelId": "example-model-stable-id",
+        "retrievedAt": "2026-08-13T00:00:00.000Z",
+        "version": "example-v1",
+        "notes": "Replace with privately licensed or operator-owned measurements."
+      }
+    }
+  ],
+  "deployments": [
+    {
+      "targetId": "example-medium",
+      "modelId": "example-model",
+      "contextWindowTokens": 128000,
+      "quantization": {
+        "format": "Q4_K_M",
+        "qualityRetentionPercent": 97.4,
+        "reference": "BF16 on the same evaluation harness"
+      },
+      "performance": {
+        "decodeTokensPerSecond": 54.2,
+        "prefillTokensPerSecond": 1320.5,
+        "timeToFirstTokenSeconds": 0.83,
+        "measuredAt": "2026-08-13T00:00:00.000Z",
+        "sampleCount": 30
+      },
+      "provenance": {
+        "source": "Synthetic operator benchmark",
+        "version": "harness-example-v1"
+      }
+    }
+  ]
+}

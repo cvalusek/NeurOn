@@ -97,7 +97,16 @@ export interface AuthProvider {
 }
 
 export interface TrafficSource {
-  pollRecentTraffic(now?: Date): Promise<Array<{ modelId: string; seenAt: Date }>>;
+  pollRecentTraffic(now?: Date): Promise<Array<{
+    modelId: string;
+    seenAt: Date;
+    requestId?: string;
+    performance?: {
+      decodeTokensPerSecond?: number;
+      prefillTokensPerSecond?: number;
+      timeToFirstTokenSeconds?: number;
+    };
+  }>>;
 }
 
 export interface TargetStatusRepository {

@@ -26,6 +26,25 @@ navigation afterward.
 A profile is a reusable reservation shape. Give it a recognizable name, choose
 one or more targets, and select the models you expect to use on each target.
 
+Use the profile guide when the model list is unfamiliar:
+
+- Set minimum context first when it is a real workload requirement. An unknown
+  context does not pass the filter.
+- Add a domain, budget ceiling, or measured quantization-retention minimum only
+  when required.
+- Move the **quality**, **speed**, and **cost** controls—or the synchronized
+  triangle—to express preferences among the remaining choices.
+- The quick wizard sets those same controls. If the optional workload advisor
+  is available, it also fills only the controls; it does not choose or save for
+  you.
+- Review the best-fit, smartest, fastest, and cheapest cards, then apply one to
+  fill an exact target-model choice.
+
+Speed is target-specific and favors decode throughput while still considering
+prefill throughput and first-token latency. Missing measurements reduce displayed data coverage rather
+than counting as a poor score. Quantization retention appears only when an
+operator supplied a measured result for the exact artifact.
+
 - If a target exposes one model, NeurOn selects it automatically.
 - If a target exposes several models, choose at least one. This prevents a
   reservation from waking an expensive target without recording the intended

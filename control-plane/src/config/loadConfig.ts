@@ -2,6 +2,7 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { z } from "zod";
 import type { AppConfig, AuthMethod, CapacityProviderDefinition, CapacityTarget, ModelDefinition, NeuronProviderConfig, RuntimeProfile, StorageConfig } from "../domain/types.js";
+import { loadModelSelectionCatalogFromEnvironment, loadProfileAdvisorFromEnvironment } from "./modelSelectionConfig.js";
 
 const targetSchema = z.object({
   id: z.string().min(1),
@@ -234,6 +235,7 @@ export async function loadConfig(): Promise<{ config: AppConfig; models: ModelDe
   const configuredProviders = await loadCapacityProviders();
   const runtimeProfiles = loadRuntimeProfiles();
   const capacityTargets = await loadCapacityTargets(configuredProviders, { syncNeuronTargets: !maintenanceMode });
+  const modelSelectionCatalog = await loadModelSelectionCatalogFromEnvironment();
   const modelsById = new Map<string, ModelDefinition>();
 
   for (const target of capacityTargets) {
@@ -283,6 +285,8 @@ export async function loadConfig(): Promise<{ config: AppConfig; models: ModelDe
       litellmApiKey: process.env.LITELLM_API_KEY,
       litellmTrafficPollSeconds: intEnv("LITELLM_TRAFFIC_POLL_SECONDS", 60),
       litellmTrafficLookbackSeconds: intEnv("LITELLM_TRAFFIC_LOOKBACK_SECONDS", 300),
+      modelSelectionCatalog,
+      profileAdvisor: loadProfileAdvisorFromEnvironment(),
       runtimeProfiles,
       capacityProviders: configuredProviders,
       capacityTargets,

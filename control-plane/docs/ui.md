@@ -66,7 +66,13 @@ so the live countdown does not increase API traffic.
 Reservation profiles are user-owned saved launch shapes. The home page treats
 profiles as the main reservation path: users pick from a compact profile
 selector, adjust duration/keepalive if needed, and reserve. Target and model
-choices live in the new-profile modal so the main page can remain compact.
+choices live in the new-profile modal so the main page can remain compact. The
+builder shows target hourly cost, context, private capability metadata when
+configured, target-specific performance, and measured quantization retention.
+Hard filters remove deployments with missing or insufficient facts. The
+quality/speed/cost triangle, accessible sliders, category recommendations, and
+short wizard all update the same deterministic ranking. Applying a suggestion
+only fills the exact target-model choice; saving remains explicit.
 Selecting a profile immediately updates the visible duration and keepalive
 buttons to its stored defaults. Single-model targets select their only model
 automatically; multi-model targets require an explicit model choice.
@@ -74,6 +80,11 @@ Starting capacity from a profile still creates an ordinary reservation, and
 reservation cards show the profile name with a review modal when a reservation
 came from one. A profile can span multiple targets, and its reservation stores a
 target-specific selection snapshot so each target warms only its own models.
+
+An optional AI advisor translates a workload description into the visible
+filters and weights. It does not see private target measurements and cannot
+save, reserve, or operate capacity. The builder remains complete without it or
+without a PreFer release manifest.
 
 The reserve action is held in a bottom action bar alongside the current cost
 estimate so it remains visually connected to the form after profile review.

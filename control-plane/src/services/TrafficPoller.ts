@@ -2,6 +2,7 @@ import type { TrafficSource } from "../domain/interfaces.js";
 import { ModelCatalog } from "./ModelCatalog.js";
 import { TrafficKeepaliveService } from "./TrafficKeepaliveService.js";
 import { litellmRoutePrefixes } from "../litellm/modelRouting.js";
+import type { ModelSelectionService } from "./ModelSelectionService.js";
 
 export class TrafficPoller {
   private running = false;
@@ -11,7 +12,8 @@ export class TrafficPoller {
   constructor(
     private readonly source: TrafficSource,
     private readonly catalog: ModelCatalog,
-    private readonly keepalive: TrafficKeepaliveService
+    private readonly keepalive: TrafficKeepaliveService,
+    private readonly modelSelection?: ModelSelectionService
   ) {}
 
   async poll(now = new Date()): Promise<void> {
@@ -19,12 +21,31 @@ export class TrafficPoller {
     this.running = true;
     try {
       const events = await this.source.pollRecentTraffic(now);
+      const latestTraffic = new Map<
+        string,
+        { match: ReturnType<TrafficPoller["resolveTraffic"]>[number]; seenAt: Date }
+      >();
       for (const event of events) {
         if (this.stopped) return;
         const matches = this.resolveTraffic(event.modelId);
-        for (const match of matches) {
-          await this.keepalive.recordTraffic(match.target, [match.modelId], event.seenAt, now);
+        if (event.performance && matches.length === 1) {
+          this.modelSelection?.recordObservation(matches[0].target.id, matches[0].modelId, {
+            requestId: event.requestId,
+            seenAt: event.seenAt,
+            ...event.performance
+          });
         }
+        for (const match of matches) {
+          const key = `${match.target.id}\u0000${match.modelId}`;
+          const current = latestTraffic.get(key);
+          if (!current || current.seenAt.getTime() < event.seenAt.getTime()) {
+            latestTraffic.set(key, { match, seenAt: event.seenAt });
+          }
+        }
+      }
+      for (const { match, seenAt } of latestTraffic.values()) {
+        if (this.stopped) return;
+        await this.keepalive.recordTraffic(match.target, [match.modelId], seenAt, now);
       }
     } finally {
       this.running = false;

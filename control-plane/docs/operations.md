@@ -124,6 +124,14 @@ Production defaults are intentionally moderate:
 
 Set `LITELLM_TRAFFIC_POLL_SECONDS=0` to disable request-log polling.
 
+LiteLLM performance observations used by guided model selection are passive,
+in-memory rolling medians from ordinary successful, uncached, unambiguous
+traffic. NeurOn neither starts targets to benchmark them nor stores prompt or
+response content. A restart clears the observational overlay and leaves any
+operator-supplied baseline intact. Keep the private model-selection catalog and
+optional advisor credential in the same secret-management boundary as other
+deployment configuration; do not commit either.
+
 ## Control-Plane Shutdown
 
 On `SIGINT` or `SIGTERM`, NeurOn stops and unreferences the reconciler and

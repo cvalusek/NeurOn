@@ -29,6 +29,8 @@ import { ApiKeyService } from "./services/ApiKeyService.js";
 import { AuthMethodService } from "./services/AuthMethodService.js";
 import { ModelCatalog } from "./services/ModelCatalog.js";
 import { ModelWarmupService } from "./services/ModelWarmupService.js";
+import { ModelSelectionService } from "./services/ModelSelectionService.js";
+import { ProfileAdvisorService } from "./services/ProfileAdvisorService.js";
 import { ProviderCatalog } from "./services/ProviderCatalog.js";
 import { ProviderService } from "./services/ProviderService.js";
 import { CostEstimationService } from "./services/CostEstimationService.js";
@@ -103,6 +105,10 @@ export async function buildApp(config: AppConfig, models: ModelDefinition[], opt
     catalog.listTargets().filter(shouldBootstrapRuntimeModels).map((target) => target.id)
   );
   await runtimeModelDiscovery.hydrateCachedTargets();
+  const modelSelection = new ModelSelectionService(catalog, config.modelSelectionCatalog);
+  const profileAdvisor = config.profileAdvisor
+    ? new ProfileAdvisorService(config.profileAdvisor, () => modelSelection.availableDomains())
+    : undefined;
   const modelWarmup = new ModelWarmupService(catalog);
   const costEstimation = new CostEstimationService(
     reservationRepository.targetActivations,
@@ -111,7 +117,7 @@ export async function buildApp(config: AppConfig, models: ModelDefinition[], opt
   );
   const trafficPoller =
     config.litellmApiBaseUrl && config.litellmApiKey && config.litellmTrafficPollSeconds > 0
-      ? new TrafficPoller(new LiteLlmSpendLogsTrafficSource(config.litellmApiBaseUrl, config.litellmApiKey, config.litellmTrafficLookbackSeconds), catalog, trafficKeepalive)
+      ? new TrafficPoller(new LiteLlmSpendLogsTrafficSource(config.litellmApiBaseUrl, config.litellmApiKey, config.litellmTrafficLookbackSeconds), catalog, trafficKeepalive, modelSelection)
       : undefined;
   const reconciler = new Reconciler(
     config.capacityTargets,
@@ -196,7 +202,7 @@ export async function buildApp(config: AppConfig, models: ModelDefinition[], opt
   });
 
   app.addHook("preHandler", async (request, reply) => {
-    const mutationAllowedInMaintenance = request.url === "/login" || request.url === "/logout" || request.url.startsWith("/auth/");
+    const mutationAllowedInMaintenance = request.url === "/login" || request.url === "/logout" || request.url === "/api/profile-advisor" || request.url.startsWith("/auth/");
     if (
       config.maintenanceMode &&
       !["GET", "HEAD", "OPTIONS"].includes(request.method) &&
@@ -243,7 +249,9 @@ export async function buildApp(config: AppConfig, models: ModelDefinition[], opt
     costEstimation,
     reservationRepository.targetActivations,
     targetOperations,
-    { storageDriver: config.storage.driver, maintenanceMode: Boolean(config.maintenanceMode) }
+    { storageDriver: config.storage.driver, maintenanceMode: Boolean(config.maintenanceMode) },
+    modelSelection,
+    profileAdvisor
   );
   registerMcpRoutes(app, catalog, reservations, statuses, reservationService);
   registerUiRoutes(
@@ -263,7 +271,9 @@ export async function buildApp(config: AppConfig, models: ModelDefinition[], opt
     targetProvisioningService,
     costEstimation,
     capacityProvider,
-    config.maintenanceMode ? undefined : hassleOffClient
+    config.maintenanceMode ? undefined : hassleOffClient,
+    modelSelection,
+    Boolean(profileAdvisor)
   );
 
   const bootstrapRuntimeModels = async (): Promise<StartupRuntimeModelDiscoveryOutcome[]> => {

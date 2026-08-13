@@ -23,6 +23,18 @@ test.beforeEach(async () => {
 
   const loaded = await loadConfig();
   loaded.config.capacityTargets[0].costEstimate = { hourlyUsd: 12 };
+  loaded.config.modelSelectionCatalog = {
+    schemaVersion: 1,
+    models: [{ modelId: "qwen-smol", intelligence: 72, domains: { coding: 84 }, provenance: { source: "synthetic browser fixture" } }],
+    deployments: [{
+      targetId: "prefer-smol",
+      modelId: "qwen-smol",
+      contextWindowTokens: 32_000,
+      quantization: { format: "Q4_K_M", qualityRetentionPercent: 97, reference: "BF16" },
+      performance: { decodeTokensPerSecond: 55, timeToFirstTokenSeconds: 0.8, sampleCount: 20 },
+      provenance: { source: "synthetic browser fixture" }
+    }]
+  };
   const built = await buildApp(loaded.config, loaded.models);
   app = built.app;
   reconcile = (now?: Date) => built.reconciler.reconcile(now);
@@ -109,6 +121,30 @@ test("guides users without profiles into profile creation", async ({ page }) => 
   await page.getByRole("button", { name: "Create your first profile" }).click();
   await expect(page).toHaveURL(/\/profiles\?create=1&onboarding=1$/);
   await expect(page.locator("#profile-modal")).toBeVisible();
+});
+
+test("filters and recommends target-model deployments in the profile builder", async ({ page }) => {
+  await signIn(page, "selection-user");
+  await page.getByRole("button", { name: "Create your first profile" }).click();
+  const modal = page.locator("#profile-modal");
+
+  await expect(modal.locator(".target-price")).toContainText("$12.00/hr");
+  await expect(modal.locator("[data-deployment-key='prefer-smol::qwen-smol']")).toContainText("Intelligence 72");
+  await expect(modal.locator("[data-deployment-key='prefer-smol::qwen-smol']")).toContainText("Decode 55 t/s");
+  await expect(modal.getByRole("button", { name: /Best fit/ })).toBeVisible();
+
+  await modal.locator("#profile-min-context").selectOption("64000");
+  await expect(modal.locator("#profile-filter-status")).toContainText("0 of 1");
+  await expect(modal.locator("#profile-recommendations")).toContainText("No deployment satisfies");
+
+  await modal.locator("#profile-min-context").selectOption("8000");
+  await modal.locator("#profile-domain").selectOption("coding");
+  await expect(modal.locator("#profile-filter-status")).toContainText("1 of 1");
+  await modal.locator("#profile-weight-cost").fill("60");
+  await expect(modal.locator("#profile-weight-cost-output")).toHaveText("60%");
+  await modal.getByRole("button", { name: /Best fit/ }).click();
+  await expect(modal.locator("[data-profile-model]")).toBeChecked();
+  await expect(modal.locator("[data-profile-target]")).toBeChecked();
 });
 
 test("updates visible timing choices when selecting a profile", async ({ page }) => {
@@ -330,7 +366,7 @@ test("copies config-backed providers and targets into persisted storage", async 
   await createDockerProvider(page);
 
   await page.getByRole("link", { name: "Providers" }).click();
-  let provider = page.locator("details.drilldown", { hasText: "Docker Local" });
+  const provider = page.locator("details.drilldown", { hasText: "Docker Local" });
   await expect(provider).toContainText("persisted");
 
   await page.getByRole("link", { name: "Targets" }).click();

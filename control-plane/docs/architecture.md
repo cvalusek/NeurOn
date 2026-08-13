@@ -147,6 +147,13 @@ into AWS, Docker, LiteLLM, or a concrete repository from unrelated code.
   material, lists key metadata, and revokes keys.
 - `ModelCatalog`: maps selectable model IDs, aliases, backend IDs, and runtime
   IDs to model definitions and targets.
+- `ModelSelectionService`: combines private capability metadata, exact
+  target-model deployment facts, target cost, and passive LiteLLM performance
+  observations. It applies hard requirements before deterministic weighted
+  ranking and treats missing measurements as unknown.
+- `ProfileAdvisorService`: optionally converts a workload description into a
+  validated set of selector controls. It cannot select, save, reserve, or
+  start capacity.
 - `Reconciler`: computes desired target state from aggregate reservations and
   applies that state through a capacity provider.
 - `HassleOffCapacityProvider`: decorates provider lifecycle calls with the
@@ -156,7 +163,9 @@ into AWS, Docker, LiteLLM, or a concrete repository from unrelated code.
   replacement binding before retrying activation.
 - `TrafficKeepaliveService`: records recent traffic as a short-lived synthetic
   reservation when the target is already healthy or has real user demand.
-- `TrafficPoller`: polls a `TrafficSource` and records keepalive traffic.
+- `TrafficPoller`: polls a `TrafficSource`, records one latest keepalive signal
+  per target-model route, and forwards unambiguous performance observations to
+  model selection.
 - `BackendConfigSync`: pushes backend configuration/availability into LiteLLM
   or another proxy when runtime state changes.
 - `RuntimeModelDiscovery`: reads OpenAI-compatible `/v1/models` from healthy

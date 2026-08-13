@@ -76,6 +76,25 @@ curl -H "Authorization: Bearer sk-neuron-..." http://localhost:8090/api/models
 curl -H "Authorization: Bearer sk-neuron-..." http://localhost:8090/api/status
 ```
 
+## Guided Model Selection API
+
+Authenticated clients can read exact target-model selection facts from:
+
+```text
+GET /api/model-selection
+```
+
+The response includes explicit unknowns, target hourly estimates, measurement
+provenance, available domain keys, and whether the optional workload advisor is
+enabled. It is read-only and does not start a target to collect facts.
+
+When configured, the advisor accepts `{ "request": "..." }` at
+`POST /api/profile-advisor` and returns validated selector requirements and
+weights. It receives no private deployment measurements and cannot create a
+profile or reservation. Clients should still present the resulting controls
+and final target-model selection for user confirmation. See
+[Guided Model Selection](model-selection.md).
+
 ## OpenCode Plugin
 
 This repository includes a project-local OpenCode plugin at

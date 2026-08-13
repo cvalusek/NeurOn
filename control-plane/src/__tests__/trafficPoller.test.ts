@@ -4,6 +4,7 @@ import type { CapacityTarget, ModelDefinition } from "../domain/types.js";
 import { InMemoryReservationRepository } from "../repository/InMemoryReservationRepository.js";
 import { InMemoryTargetStatusRepository } from "../repository/InMemoryTargetStatusRepository.js";
 import { ModelCatalog } from "../services/ModelCatalog.js";
+import { ModelSelectionService } from "../services/ModelSelectionService.js";
 import { TrafficKeepaliveService } from "../services/TrafficKeepaliveService.js";
 import { TrafficPoller } from "../services/TrafficPoller.js";
 
@@ -194,5 +195,45 @@ describe("TrafficPoller", () => {
     const traffic = (await repository.list()).find((reservation) => reservation.synthetic);
     expect(traffic?.keepaliveMinutes).toBe(7);
     expect(traffic?.expiresAt).toEqual(new Date("2026-06-24T20:08:00.000Z"));
+  });
+
+  it("records performance only when a LiteLLM route resolves to one target", async () => {
+    const repository = new InMemoryReservationRepository();
+    const statuses = new InMemoryTargetStatusRepository();
+    statuses.set({ targetId: target.id, desired: "on", observed: "healthy", message: "Ready" });
+    const catalog = new ModelCatalog(models, [target]);
+    const selection = new ModelSelectionService(catalog);
+    const source: TrafficSource = {
+      async pollRecentTraffic(now = new Date()) {
+        return [{ modelId: "prefer/qwen-3.6-35b-a3b", seenAt: now, requestId: "r1", performance: { decodeTokensPerSecond: 50 } }];
+      }
+    };
+    const record = vi.spyOn(selection, "recordObservation");
+    const poller = new TrafficPoller(source, catalog, new TrafficKeepaliveService(repository, statuses), selection);
+
+    await poller.poll(new Date("2026-06-24T20:00:00.000Z"));
+
+    expect(record).toHaveBeenCalledWith(target.id, "qwen-3.6-35b-a3b", expect.objectContaining({ requestId: "r1", decodeTokensPerSecond: 50 }));
+  });
+
+  it("uses only the latest keepalive event when polling windows repeat a target-model route", async () => {
+    const repository = new InMemoryReservationRepository();
+    const statuses = new InMemoryTargetStatusRepository();
+    statuses.set({ targetId: target.id, desired: "on", observed: "healthy", message: "Ready" });
+    const keepalive = new TrafficKeepaliveService(repository, statuses);
+    const record = vi.spyOn(keepalive, "recordTraffic");
+    const poller = new TrafficPoller({
+      async pollRecentTraffic() {
+        return [
+          { modelId: "qwen-3.6-35b-a3b", seenAt: new Date("2026-06-24T20:00:00.000Z") },
+          { modelId: "qwen-3.6-35b-a3b", seenAt: new Date("2026-06-24T20:01:00.000Z") }
+        ];
+      }
+    }, new ModelCatalog(models, [target]), keepalive);
+
+    await poller.poll(new Date("2026-06-24T20:02:00.000Z"));
+
+    expect(record).toHaveBeenCalledTimes(1);
+    expect(record).toHaveBeenCalledWith(target, ["qwen-3.6-35b-a3b"], new Date("2026-06-24T20:01:00.000Z"), new Date("2026-06-24T20:02:00.000Z"));
   });
 });

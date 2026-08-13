@@ -45,6 +45,10 @@ referenced through NeurOn target configuration.
 - Reservation profiles may contain multiple target/model selections. Preserve
   the per-target mapping when storing a reservation; aggregate target/model
   arrays remain a compatibility surface for legacy records and clients.
+- Model-selection scores must retain source/version provenance. Licensed or
+  deployment-private benchmark values belong in ignored local configuration,
+  never tracked examples or release notes. Missing performance or quality data
+  must remain unknown rather than inferred from model names or quant formats.
 
 ## Configuration Rules
 
@@ -82,6 +86,8 @@ referenced through NeurOn target configuration.
 - Keep copy interactions usable without making the whole card ambiguous.
 - Keep the API keys page on the same server-rendered UI pattern. Generated
   keys should be copyable once, and later lists must show metadata/prefix only.
+- Profile guidance may populate form controls but must not save a profile,
+  create a reservation, or start capacity without a separate user action.
 
 ## Reconciler Rules
 

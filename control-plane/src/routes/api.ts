@@ -7,6 +7,8 @@ import { Reconciler } from "../reconciler/Reconciler.js";
 import { ApiKeyService } from "../services/ApiKeyService.js";
 import { CostEstimationService } from "../services/CostEstimationService.js";
 import { ModelCatalog } from "../services/ModelCatalog.js";
+import { ModelSelectionService } from "../services/ModelSelectionService.js";
+import type { ProfileAdvisorService } from "../services/ProfileAdvisorService.js";
 import { ReservationService } from "../services/ReservationService.js";
 import { ReservationProfileService } from "../services/ReservationProfileService.js";
 import { RuntimeModelDiscovery } from "../services/RuntimeModelDiscovery.js";
@@ -35,7 +37,9 @@ export function registerApiRoutes(
   costEstimation: CostEstimationService,
   targetActivations: TargetActivationRepository,
   targetOperations: TargetOperationCoordinator,
-  healthInfo: { storageDriver: string; maintenanceMode: boolean }
+  healthInfo: { storageDriver: string; maintenanceMode: boolean },
+  modelSelection: ModelSelectionService,
+  profileAdvisor?: ProfileAdvisorService
 ) {
   app.get("/healthz", async () => ({ ok: true, ...healthInfo }));
   app.get(
@@ -49,6 +53,52 @@ export function registerApiRoutes(
       }
     },
     async () => ({ models: catalog.listModels() })
+  );
+
+  app.get(
+    "/api/model-selection",
+    {
+      schema: {
+        tags: ["models"],
+        summary: "List target-specific model selection facts",
+        security: authSecurity()
+      }
+    },
+    async () => ({
+      domains: modelSelection.availableDomains(),
+      deployments: modelSelection.listDeployments(await selectionCostEstimates(catalog.listTargets(), costEstimation)),
+      advisorEnabled: Boolean(profileAdvisor)
+    })
+  );
+
+  app.post(
+    "/api/profile-advisor",
+    {
+      schema: {
+        tags: ["models"],
+        summary: "Translate a workload description into model selection controls",
+        security: authSecurity(),
+        body: {
+          type: "object",
+          properties: { request: { type: "string", minLength: 3, maxLength: 2_000 } },
+          required: ["request"]
+        },
+        response: { 400: errorSchema, 502: errorSchema, 503: errorSchema }
+      }
+    },
+    async (request, reply) => {
+      if (!profileAdvisor) return reply.code(503).send({ error: "AI profile guidance is not configured" });
+      try {
+        const body = z.object({ request: z.string().trim().min(3).max(2_000) }).parse(request.body);
+        return { guidance: await profileAdvisor.interpret(body.request) };
+      } catch (error) {
+        const invalidRequest = error instanceof z.ZodError;
+        const message = invalidRequest
+          ? "Describe the workload in 3 to 2,000 characters"
+          : error instanceof Error ? error.message : "Profile advisor failed";
+        return reply.code(invalidRequest ? 400 : 502).send({ error: message });
+      }
+    }
   );
 
   app.get(
@@ -458,6 +508,17 @@ function reservationProfileJson(profile: ReservationProfile) {
     createdAt: profile.createdAt.toISOString(),
     updatedAt: profile.updatedAt.toISOString()
   };
+}
+
+async function selectionCostEstimates(
+  targets: CapacityTarget[],
+  costEstimation: CostEstimationService
+): Promise<Record<string, { hourlyUsd: number }>> {
+  const entries = await Promise.all(targets.map(async (target) => {
+    const estimate = await costEstimation.resolveTargetCostEstimate(target);
+    return estimate?.hourlyUsd === undefined ? undefined : [target.id, { hourlyUsd: estimate.hourlyUsd }] as const;
+  }));
+  return Object.fromEntries(entries.filter((entry): entry is readonly [string, { hourlyUsd: number }] => Boolean(entry)));
 }
 
 function authSecurity(): Array<Record<string, string[]>> {

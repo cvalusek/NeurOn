@@ -454,6 +454,41 @@ For AWS EC2 targets, NeurOn similarly discovers current on-demand or Spot
 hourly prices when the appropriate task-role read permissions are present.
 The override still takes precedence and requires no pricing permissions.
 
+## Guided Model Selection
+
+The profile builder always works from the configured NeurOn model catalog. An
+optional private catalog can add overall/domain capability scores and exact
+target-model context, quantization, measured quality retention, and baseline
+performance:
+
+```env
+MODEL_SELECTION_CATALOG_FILE=/run/secrets/model-selection.local.private.json
+```
+
+Use `MODEL_SELECTION_CATALOG_JSON` instead when an external secret manager
+injects JSON directly; setting both fails startup. The checked-in
+`examples/model-selection-catalog.example.json` is synthetic and documents
+schema version 1. Keep licensed or deployment-private values in an untracked
+file. Unknown values stay unknown and cannot satisfy a corresponding hard
+filter. Passive LiteLLM observations can refine target-specific speed without
+starting capacity or recording prompts. See
+[Guided Model Selection](model-selection.md) for ranking, provenance, and
+quantization rules.
+
+An optional OpenAI-compatible advisor turns a user's workload description into
+validated selector controls:
+
+```env
+PROFILE_ADVISOR_API_BASE_URL=https://advisor.example.internal/v1
+PROFILE_ADVISOR_API_KEY=replace-with-a-private-secret
+PROFILE_ADVISOR_MODEL=profile-guide
+PROFILE_ADVISOR_TIMEOUT_SECONDS=15
+```
+
+The advisor is not a placement engine and never saves a profile or creates a
+reservation. If it is absent or unavailable, the local wizard, filters, and
+ranking remain fully usable.
+
 Model keys are nested under a target:
 
 ```env

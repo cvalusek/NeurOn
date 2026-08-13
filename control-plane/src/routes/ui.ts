@@ -10,6 +10,7 @@ import { UpdateChecker } from "../services/UpdateChecker.js";
 import { ApiKeyService } from "../services/ApiKeyService.js";
 import { AuthMethodService } from "../services/AuthMethodService.js";
 import { ModelCatalog } from "../services/ModelCatalog.js";
+import type { ModelSelectionService } from "../services/ModelSelectionService.js";
 import { ProviderService } from "../services/ProviderService.js";
 import { ReservationService } from "../services/ReservationService.js";
 import { ReservationProfileService } from "../services/ReservationProfileService.js";
@@ -38,7 +39,9 @@ export function registerUiRoutes(
   targetProvisioningService: TargetProvisioningService,
   costEstimation: CostEstimationService,
   capacityProvider: CapacityProvider,
-  hassleOffClient?: HassleOffClient
+  hassleOffClient: HassleOffClient | undefined,
+  modelSelection: ModelSelectionService,
+  profileAdvisorEnabled: boolean
 ) {
   const sharedPasswordEnabled = config.sharedPasswordEnabled !== false;
   const enabledAuthMethods = () => authMethodService.listEnabled();
@@ -137,7 +140,7 @@ export function registerUiRoutes(
     if (profiles.length === 0 && (await reservationService.listActiveOwned(user)).length === 0) return reply.redirect("/welcome");
     const targets = catalog.listTargets().map((target) => ({ target, models: catalog.listModelsForTarget(target.id) }));
     const costEstimates = await startCostEstimates(targets.map(({ target }) => target), costEstimation);
-    return reply.type("text/html").send(startPage(user, targets, profiles, query.error, costEstimates, config.adminStatusPollSeconds));
+    return reply.type("text/html").send(startPage(user, targets, profiles, query.error, costEstimates, config.adminStatusPollSeconds, modelSelection.listDeployments(costEstimates), profileAdvisorEnabled));
   });
   app.get("/welcome", async (request, reply) => {
     const user = requireUser(request);
@@ -157,7 +160,8 @@ export function registerUiRoutes(
     const query = z.object({ create: z.string().optional(), onboarding: z.string().optional(), error: z.string().optional() }).parse(request.query);
     const user = requireUser(request);
     const targets = catalog.listTargets().map((target) => ({ target, models: catalog.listModelsForTarget(target.id) }));
-    return reply.type("text/html").send(profilesPage(user, await reservationProfileService.listForUser(user), targets, { openCreate: query.create === "1", onboarding: query.onboarding === "1", error: query.error }));
+    const costEstimates = await startCostEstimates(targets.map(({ target }) => target), costEstimation);
+    return reply.type("text/html").send(profilesPage(user, await reservationProfileService.listForUser(user), targets, { openCreate: query.create === "1", onboarding: query.onboarding === "1", error: query.error }, modelSelection.listDeployments(costEstimates), profileAdvisorEnabled, costEstimates));
   });
   app.post("/api-keys", async (request, reply) => {
     const user = requireUser(request);

@@ -338,6 +338,56 @@ export interface ModelDefinition {
   contextLabel?: string;
 }
 
+export interface ModelMetricProvenance {
+  source: string;
+  sourceUrl?: string;
+  sourceModelId?: string;
+  retrievedAt?: string;
+  version?: string;
+  notes?: string;
+}
+
+export interface ModelCapabilityMetadata {
+  modelId: string;
+  intelligence?: number;
+  domains?: Record<string, number>;
+  provenance?: ModelMetricProvenance;
+}
+
+export interface ModelDeploymentPerformance {
+  decodeTokensPerSecond?: number;
+  prefillTokensPerSecond?: number;
+  timeToFirstTokenSeconds?: number;
+  measuredAt?: string;
+  sampleCount?: number;
+}
+
+export interface ModelDeploymentMetadata {
+  targetId: string;
+  modelId: string;
+  contextWindowTokens?: number;
+  quantization?: {
+    format: string;
+    qualityRetentionPercent?: number;
+    reference?: string;
+  };
+  performance?: ModelDeploymentPerformance;
+  provenance?: ModelMetricProvenance;
+}
+
+export interface ModelSelectionCatalogConfig {
+  schemaVersion: 1;
+  models: ModelCapabilityMetadata[];
+  deployments: ModelDeploymentMetadata[];
+}
+
+export interface ProfileAdvisorConfig {
+  apiBaseUrl: string;
+  apiKey?: string;
+  model: string;
+  timeoutSeconds: number;
+}
+
 export interface ModelTag {
   label: string;
   title?: string;
@@ -412,6 +462,8 @@ export interface AppConfig {
   litellmApiKey?: string;
   litellmTrafficPollSeconds: number;
   litellmTrafficLookbackSeconds: number;
+  modelSelectionCatalog?: ModelSelectionCatalogConfig;
+  profileAdvisor?: ProfileAdvisorConfig;
   runtimeProfiles: RuntimeProfile[];
   capacityProviders: CapacityProviderDefinition[];
   capacityTargets: CapacityTarget[];
