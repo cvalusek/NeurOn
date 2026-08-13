@@ -1,6 +1,7 @@
 import type { ReservationProfileRepository, ReservationRepository } from "../domain/interfaces.js";
-import type { AuthenticatedUser, Reservation, ReservationProfile } from "../domain/types.js";
+import type { AuthenticatedUser, Reservation, ReservationProfile, ReservationProfileSelection } from "../domain/types.js";
 import { ModelCatalog } from "./ModelCatalog.js";
+import { normalizeReservationProfileSelections } from "./reservationProfileSelections.js";
 
 const MAX_DURATION_MINUTES = 12 * 60;
 const DEFAULT_KEEPALIVE_MINUTES = 2;
@@ -20,7 +21,11 @@ export class ReservationService {
   async createForUser(user: AuthenticatedUser, input: { modelIds?: string[]; targetIds?: string[]; profileId?: string; durationMinutes?: number; keepaliveMinutes?: number }): Promise<Reservation> {
     const finishMutation = this.beginDemandMutation();
     try {
-      const profile = input.profileId ? await this.getOwnedProfile(input.profileId, user) : undefined;
+      const storedProfile = input.profileId ? await this.getOwnedProfile(input.profileId, user) : undefined;
+      const profile = storedProfile ? {
+        ...storedProfile,
+        selections: normalizeReservationProfileSelections(this.catalog, storedProfile.selections)
+      } : undefined;
       const expandedInput = inputWithResolvedDefaults(profile, input);
       this.validateInput(expandedInput);
       const requestedModelIds = unique(expandedInput.modelIds ?? []);
@@ -28,6 +33,7 @@ export class ReservationService {
       const requestedTargetIds = unique(expandedInput.targetIds ?? []);
       const now = new Date();
       const targetIds = this.targetIdsForRequest(modelIds, requestedTargetIds);
+      const targetSelections = this.targetSelectionsForRequest(profile, modelIds, targetIds);
       const reservation = await this.repository.create({
         username: user.username,
         apiKeyName: user.apiKeyName,
@@ -35,6 +41,7 @@ export class ReservationService {
         profileName: profile?.name,
         modelIds,
         targetIds,
+        targetSelections,
         createdAt: now,
         expiresAt: new Date(now.getTime() + expandedInput.durationMinutes * 60_000),
         keepaliveMinutes: expandedInput.keepaliveMinutes ?? DEFAULT_KEEPALIVE_MINUTES,
@@ -52,6 +59,10 @@ export class ReservationService {
     if (!reservation) throw new Error("Reservation not found");
     if (!user.isAdmin && reservation.username !== user.username) throw new Error("Reservation not found");
     return reservation;
+  }
+
+  async listActiveOwned(user: AuthenticatedUser, now = new Date()): Promise<Reservation[]> {
+    return (await this.repository.listActive(now)).filter((reservation) => reservation.username === user.username);
   }
 
   async markDone(id: string, user: AuthenticatedUser): Promise<Reservation> {
@@ -108,6 +119,19 @@ export class ReservationService {
       }
     }
     return targetIds;
+  }
+
+  private targetSelectionsForRequest(profile: ReservationProfile | undefined, modelIds: string[], targetIds: string[]): ReservationProfileSelection[] {
+    if (profile) {
+      return profile.selections.map((selection) => ({
+        targetId: selection.targetId,
+        modelIds: [...selection.modelIds]
+      }));
+    }
+    return targetIds.map((targetId) => ({
+      targetId,
+      modelIds: modelIds.filter((modelId) => this.catalog.getModel(modelId)?.targetIds.includes(targetId))
+    }));
   }
 
   private async getOwnedProfile(profileId: string, user: AuthenticatedUser): Promise<ReservationProfile> {

@@ -11,7 +11,7 @@ describePostgres("PostgreSQL schema and repositories", () => {
     try {
       await migratePostgresSchema(database.pool);
       await migratePostgresSchema(database.pool);
-      expect(await readPostgresSchemaState(database.pool)).toEqual({ currentVersion: POSTGRES_SCHEMA_VERSION, appliedVersions: [POSTGRES_SCHEMA_VERSION] });
+      expect(await readPostgresSchemaState(database.pool)).toEqual({ currentVersion: POSTGRES_SCHEMA_VERSION, appliedVersions: [1, 2] });
 
       const first = await createReservationRepository({ driver: "postgres", connectionString: database.connectionString, maxConnections: 3 });
       const createdAt = new Date("2026-07-01T12:30:00-05:00");
@@ -32,6 +32,7 @@ describePostgres("PostgreSQL schema and repositories", () => {
         profileName: profile.name,
         modelIds: ["model-1"],
         targetIds: ["target-1"],
+        targetSelections: [{ targetId: "target-1", modelIds: ["model-1"] }],
         createdAt,
         expiresAt: endedAt,
         endedAt,
@@ -107,7 +108,7 @@ describePostgres("PostgreSQL schema and repositories", () => {
       await first.close();
 
       const second = await createReservationRepository({ driver: "postgres", connectionString: database.connectionString, maxConnections: 3 });
-      expect(await second.repository.get(reservation.id)).toMatchObject({ id: reservation.id, status: "done", synthetic: true, profileId: profile.id });
+      expect(await second.repository.get(reservation.id)).toMatchObject({ id: reservation.id, status: "done", synthetic: true, profileId: profile.id, targetSelections: [{ targetId: "target-1", modelIds: ["model-1"] }] });
       expect(await second.reservationProfiles.get(profile.id)).toMatchObject({ id: profile.id, description: undefined });
       expect(await second.apiKeys.get("key-1")).toMatchObject({ keyHash: "sha256-test-hash", lastUsedAt: endedAt });
       expect(await second.authMethods.get("github-1")).toMatchObject({ config: { github: { clientSecret: "opaque-secret" } } });
@@ -143,12 +144,28 @@ describePostgres("PostgreSQL schema and repositories", () => {
         select column_name from information_schema.columns
         where table_schema = current_schema() and table_name = 'reservations'
       `);
-      expect(columns.rows.map((row) => row.column_name)).toEqual(expect.arrayContaining(["api_key_name", "profile_id", "profile_name"]));
+      expect(columns.rows.map((row) => row.column_name)).toEqual(expect.arrayContaining(["api_key_name", "profile_id", "profile_name", "target_selections"]));
       const providerColumns = await database.pool.query<{ column_name: string }>(`
         select column_name from information_schema.columns
         where table_schema = current_schema() and table_name = 'capacity_providers'
       `);
       expect(providerColumns.rows.map((row) => row.column_name)).toContain("provisioning_enabled");
+    } finally {
+      await database.cleanup();
+    }
+  });
+
+  it("fails closed when persisted target selections have an invalid shape", async () => {
+    const database = await createPostgresTestSchema();
+    try {
+      const handle = await createReservationRepository({ driver: "postgres", connectionString: database.connectionString, maxConnections: 3 });
+      const reservation = await handle.repository.create({
+        id: "invalid-selections", username: "clint", modelIds: ["model-1"], targetIds: ["target-1"],
+        createdAt: new Date(), expiresAt: new Date(Date.now() + 60_000), status: "active"
+      });
+      await database.pool.query("update reservations set target_selections = $1::jsonb where id = $2", [JSON.stringify({ targetId: "target-1", modelIds: ["model-1"] }), reservation.id]);
+      await expect(handle.repository.get(reservation.id)).rejects.toThrow("PostgreSQL reservation target_selections must be an array");
+      await handle.close();
     } finally {
       await database.cleanup();
     }

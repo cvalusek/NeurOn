@@ -2,74 +2,67 @@
 
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL%20v3-blue.svg)](https://www.gnu.org/licenses/agpl-3.0)
 
-NeurOn is a lightweight control plane for shared self-hosted LLM capacity. It
-lets developers reserve the runtime targets and models they expect to use,
-keeps matching capacity on while reservations or recent traffic need it, and
-scales the target back down when demand is gone.
+NeurOn is a lightweight control plane for shared, self-hosted LLM capacity. A
+developer reserves the targets and models they intend to use; NeurOn keeps the
+matching runtime available while that demand or recent traffic exists, then
+lets the expensive capacity turn off.
 
-NeurOn does not ship an inference image or create default capacity. Bring an
-OpenAI-compatible runtime by adding a provider and target in the UI or by
-supplying declarative configuration. Provider adapters currently support Docker
-containers, Docker Compose projects, RunPod, and AWS ECS/Auto Scaling Group
-targets.
+![NeurOn home page with an active reservation and capacity status](control-plane/docs/images/home-reservation.png)
 
-## Layout
+## How it works
 
-```text
-control-plane/        Fastify/TypeScript app, examples, and product docs
-hassleoff/            Separately deployable dead-man watchdog
-.github/workflows/    Control-plane build workflow
-```
+1. An operator connects existing or explicitly provisionable runtime capacity
+   as a target.
+2. A user saves a profile containing one or more target-and-model selections.
+3. The user reserves that profile for a duration and chooses a traffic
+   keepalive window.
+4. The reconciler aggregates everybody's demand, starts each required target,
+   keeps it available while it is still needed, and stops it only after demand
+   is gone.
 
-Detailed design and operations notes live in
-[control-plane/docs](control-plane/docs/index.md).
+Several users and reservations can safely overlap on the same target. A single
+profile can also reserve multiple target/model combinations for workflows that
+need more than one backend. Activation history records estimated runtime cost
+and attributes it to the real reservations that participated, including the
+traffic-only tail after their requested windows end.
 
-## Optional HassleOff
+For a guided product tour, see the [User guide](control-plane/docs/user-guide.md).
 
-The normal Compose file includes HassleOff as an opt-in profile. After setting
-the shared controller settings and a target-registration file as described in
-the [HassleOff operating guide](control-plane/docs/hassleoff.md), start the
-watchdog and then NeurOn:
+## What NeurOn owns
 
-```bash
-docker compose --profile hassleoff up -d hassleoff
-docker compose up -d neuron
-```
+NeurOn owns reservation intent and the control loop around runtime capacity. It
+does **not** bundle an inference image, download models, tune a runtime, or
+silently create general cloud infrastructure. Runtime behavior belongs in the
+external runtime project and target configuration.
 
-HassleOff defaults to `http://localhost:8091`; its admin status and safe
-synthetic test are at **Admin > HassleOff safety** in NeurOn. Running
-`docker compose up -d neuron` without the profile preserves the default
-NeurOn-only experience.
+| Provider | Normal lifecycle | Resource creation |
+| --- | --- | --- |
+| Docker container | Starts/stops a named container | Optional, explicit admin provisioning when an image is configured |
+| Docker Compose | Starts/stops an existing service | No image builds or model downloads |
+| AWS EC2 | Starts/stops **one pre-created instance** | Not implemented; NeurOn does not create EC2, AMIs, VPCs, security groups, roles, or volumes |
+| AWS ECS/ASG | Changes desired counts on existing ECS/ASG resources | Does not create clusters, services, ASGs, launch templates, or AMIs |
+| RunPod | Starts/stops an existing Pod | Optional, explicit admin provisioning when enabled |
+| Upstream NeurOn | Holds/releases an upstream reservation | No upstream provisioning |
 
-For an isolated fake-only verification stack that does not load a default
-`.env` file:
+Provider details and least-privilege examples are in
+[Providers](control-plane/docs/providers.md). In particular, the EC2 adapter is
+a lifecycle controller for an instance the operator already built; it is not an
+EC2 deployment integration.
 
-```bash
-docker compose --env-file control-plane/examples/compose-hassleoff.properties -f docker-compose.hassleoff.yml up --build
-```
+## Quick start
 
-NeurOn is at `http://localhost:18090`; HassleOff health/readiness is at
-`http://localhost:18091/healthz` and `http://localhost:18091/readyz`.
-
-## Quick Start
-
-Copy the example environment file:
+Copy the safe example configuration and run the local control plane:
 
 ```bash
 cp .env.example .env
-```
-
-Run NeurOn locally:
-
-```bash
 docker compose up --build neuron
 ```
 
-Open `http://localhost:8090`, sign in with any username and the configured
-shared password, then add providers and targets from Admin. The Docker socket is
-mounted so NeurOn can manage Docker targets when you configure a Docker provider.
+Open `http://localhost:8090`, sign in with a username and the configured shared
+password, then add providers and targets from Admin. The first login without a
+profile opens a short explanation and guides the user into profile creation.
 
-For app development without Docker:
+For application development without Docker:
 
 ```bash
 cd control-plane
@@ -77,58 +70,53 @@ npm install
 SHARED_PASSWORD=dev-password USE_FAKE_PROVIDER=true npm run dev
 ```
 
-## Environment
-
-Most local configuration lives in `.env`; see [.env.example](.env.example).
-Useful knobs:
-
-- `CONTROL_PLANE_PORT` sets the host port for the web app.
-- `SHARED_PASSWORD`, `COOKIE_SECRET`, and `ADMIN_USERS` configure auth.
-- `GITHUB_AUTH_CLIENT_ID` and `GITHUB_AUTH_CLIENT_SECRET` enable GitHub
-  sign-in; admins can manage persisted GitHub methods from Admin > Auth.
-- Users can create `sk-neuron-...` API keys for Bearer-auth API, OpenAPI, and
-  MCP clients.
-- `CAPACITY_TARGETS_FILE`, `CAPACITY_TARGETS_JSON`, or `CAPACITY_TARGET_KEYS`
-  define the capacity targets NeurOn can control.
-- `STORAGE_DRIVER=sqlite` is the local Compose default and persists the nine
-  control-plane repository families in `./data/neuron.db`.
-- The private PostgreSQL Compose overlay, migration command, dry-run, rollback
-  backup, and one-writer cutover procedure are documented in
-  [SQLite to PostgreSQL Migration](control-plane/docs/postgres-migration.md).
-- `USE_FAKE_PROVIDER=true` switches to the fake provider for tests/app-only
-  development.
-- `LITELLM_API_BASE_URL` and `LITELLM_API_KEY` enable traffic-based keepalive
-  from LiteLLM request logs.
-
-## Netskope / Corporate TLS
-
-If Docker builds fail with Python or npm certificate errors, use the Netskope
-overlay. Export your corporate root/intermediate certificates as `.crt` files
-under `docker/certs/` and run:
-
-```bash
-docker compose -f docker-compose.yml -f docker-compose.netskope.yml up --build control-plane
-```
-
-Certificate files under `docker/certs/` are ignored by git.
-
-## Configuration
-
-Targets are configuration-first. Each target lists the models users can reserve,
-provider details, Health URL, and optional LiteLLM backend metadata.
-
-Start with [control-plane/examples/capacity-targets.example.json](control-plane/examples/capacity-targets.example.json)
-or the env-expanded pattern documented in
-[control-plane/docs/configuration.md](control-plane/docs/configuration.md).
+The base Compose file defaults to durable SQLite for a simple single-node
+installation. The private PostgreSQL overlay, explicit transfer command,
+dry-run, backup, one-writer cutover, and rollback procedure are documented in
+[SQLite to PostgreSQL migration](control-plane/docs/postgres-migration.md).
+HassleOff is a separate watchdog with its own SQLite state and is never part of
+that control-plane database migration.
 
 ## Integrations
 
 NeurOn exposes:
 
+- the product UI at `http://localhost:8090`
 - Swagger UI at `http://localhost:8090/docs`
 - OpenAPI 3.0 at `http://localhost:8090/openapi.json`
-- MCP JSON-RPC at `http://localhost:8090/mcp`
+- authenticated MCP JSON-RPC at `http://localhost:8090/mcp`
 
-Create user API keys from `http://localhost:8090/api-keys`, then use them with
-`Authorization: Bearer sk-neuron-...`. See
-[control-plane/docs/integrations.md](control-plane/docs/integrations.md).
+Users create personal `sk-neuron-...` API keys from **API keys**. The full key
+is shown once and only its hash is stored. See
+[Integrations](control-plane/docs/integrations.md) for REST, MCP, Codex, and
+OpenCode examples.
+
+## Operations and updates
+
+Published builds expose their source revision. **Admin > Updates** compares the
+running revision with the latest successful `main` build and shows the release
+notes that will arrive with the restart. NeurOn coordinates a safe drain, but
+the deployment supervisor owns replacement of the process or container.
+
+Start with the [documentation index](control-plane/docs/index.md), then use:
+
+- [Configuration](control-plane/docs/configuration.md) for environment, target,
+  authentication, storage, and integration settings
+- [Operations](control-plane/docs/operations.md) for deployment, safe restarts,
+  maintenance mode, and failure behavior
+- [Architecture](control-plane/docs/architecture.md) for the ownership and
+  persistence boundaries
+- [HassleOff](control-plane/docs/hassleoff.md) for the separately deployed
+  dead-man watchdog
+
+## Repository layout
+
+```text
+control-plane/        Fastify/TypeScript app, tests, examples, and product docs
+hassleoff/            Separately deployable dead-man watchdog
+.github/workflows/    Control-plane build workflow
+```
+
+For the optional local HassleOff profile and its required safety sequence, use
+the [HassleOff operating guide](control-plane/docs/hassleoff.md). Corporate TLS
+builds are covered in [Configuration](control-plane/docs/configuration.md).

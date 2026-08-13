@@ -54,7 +54,10 @@ describePostgres("SQLite to PostgreSQL migration", () => {
         targetActivationReservations: 1
       });
       const migrated = await createReservationRepository({ driver: "postgres", connectionString: database.connectionString, maxConnections: 3 });
-      expect(await migrated.repository.get(fixture.reservationId)).toMatchObject({ status: "failed", synthetic: true, keepaliveMinutes: undefined, failureMessage: "terminal failure" });
+      expect(await migrated.repository.get(fixture.reservationId)).toMatchObject({
+        status: "failed", synthetic: true, keepaliveMinutes: undefined, failureMessage: "terminal failure",
+        targetSelections: [{ targetId: "target-migrate", modelIds: ["model-migrate"] }]
+      });
       expect(await migrated.reservationProfiles.get("profile-migrate")).toMatchObject({ description: undefined, defaultDurationMinutes: undefined });
       expect(await migrated.apiKeys.get("key-migrate")).toMatchObject({ keyHash: "opaque-hash-value", lastUsedAt: undefined });
       expect(await migrated.authMethods.get("github-migrate")).toMatchObject({ config: { github: { clientSecret: "auth-secret-value" } } });
@@ -117,6 +120,14 @@ describePostgres("SQLite to PostgreSQL migration", () => {
     } finally {
       await database.cleanup();
     }
+  });
+
+  it("refuses malformed target-specific reservation selections", async () => {
+    const fixture = await createPopulatedSqlite();
+    const sqlite = new Database(fixture.sqlitePath);
+    sqlite.prepare("update reservations set target_selections = ? where id = ?").run(JSON.stringify({ targetId: "target-migrate", modelIds: ["model-migrate"] }), fixture.reservationId);
+    sqlite.close();
+    expect(() => inspectSqliteForMigration(fixture.sqlitePath)).toThrow("SQLite source reservations.target_selections must be an array");
   });
 
   it("refuses a nonempty destination and a changed source after completion", async () => {
@@ -223,7 +234,8 @@ async function createPopulatedSqlite(): Promise<{ sqlitePath: string; reservatio
   });
   const reservation = await handle.repository.create({
     id: "reservation-migrate", username: "clint", apiKeyName: "migration-key", profileId: "profile-migrate", profileName: "Migration profile",
-    modelIds: ["model-migrate"], targetIds: ["target-migrate"], createdAt, expiresAt: endedAt, endedAt, status: "failed", failureMessage: "terminal failure", synthetic: true
+    modelIds: ["model-migrate"], targetIds: ["target-migrate"], targetSelections: [{ targetId: "target-migrate", modelIds: ["model-migrate"] }],
+    createdAt, expiresAt: endedAt, endedAt, status: "failed", failureMessage: "terminal failure", synthetic: true
   });
   await handle.apiKeys.create({ id: "key-migrate", username: "clint", name: "migration-key", prefix: "sk-neuron-redacted", keyHash: "opaque-hash-value", createdAt });
   await handle.authMethods.create({

@@ -80,8 +80,8 @@ curl -H "Authorization: Bearer sk-neuron-..." http://localhost:8090/api/status
 
 This repository includes a project-local OpenCode plugin at
 `.opencode/plugins/neuron.js`. It reads `NEURON_API_KEY` by default and creates
-a short NeurOn reservation before a chat message is sent. Later messages for
-the same model wait for health before the request is sent. Completion events
+a short NeurOn reservation before a chat message is sent. Every matching chat
+message waits for health before the request is sent. Completion events
 refresh that reservation to the configured duration from now without waiting for
 health again or stacking more time onto the old expiration.
 
@@ -111,11 +111,17 @@ Default behavior:
 - `NEURON_RESERVATION_DURATION_MINUTES=2`
 - `NEURON_RESERVATION_KEEPALIVE_MINUTES=2`
 - `NEURON_WAIT_FOR_HEALTHY=true`
+- `NEURON_ALLOWED_PROVIDERS` is unset, allowing any provider with a model that
+  maps to NeurOn
 
 When `NEURON_WAIT_FOR_HEALTHY` is enabled, the plugin blocks the chat message
 until all reservation targets report `healthy`. NeurOn performs any configured
 model warmup before reporting `healthy`, so the plugin only waits for NeurOn's
 readiness signal.
+
+Set `NEURON_ALLOWED_PROVIDERS` to a comma-separated OpenCode provider allowlist
+(for example, `litellm`) when the same OpenCode installation uses providers that
+must not create NeurOn reservations.
 
 The plugin maps OpenCode's LiteLLM-facing model name to NeurOn model metadata
 using model IDs, aliases, backend IDs, runtime IDs, and each target's

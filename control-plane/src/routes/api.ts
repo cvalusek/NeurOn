@@ -567,8 +567,20 @@ const reservationSchema = {
     keepaliveMinutes: { type: "number" },
     profileId: { type: "string" },
     profileName: { type: "string" },
+    synthetic: { type: "boolean" },
     endedAt: { type: "string", format: "date-time" },
     modelIds: { type: "array", items: { type: "string" } },
+    targetSelections: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          targetId: { type: "string" },
+          modelIds: { type: "array", items: { type: "string" } }
+        },
+        required: ["targetId", "modelIds"]
+      }
+    },
     targets: { type: "array", items: targetRefSchema },
     failureMessage: { type: "string" },
     costEstimate: {

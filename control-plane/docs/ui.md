@@ -37,9 +37,10 @@ GET /
 
 The main page contains:
 
-- current user's active reservation
+- every active reservation owned by the current user, each with independent
+  extend and end controls
 - reservation profile cards with target and primary model aliases
-- modal-based profile creation for target and model choices
+- profile creation for one or more target-specific model choices
 - duration quick buttons plus custom duration
 - keepalive quick buttons plus custom keepalive
 - start-form estimated cost based on target hourly cost, duration, and keepalive
@@ -66,10 +67,33 @@ Reservation profiles are user-owned saved launch shapes. The home page treats
 profiles as the main reservation path: users pick from a compact profile
 selector, adjust duration/keepalive if needed, and reserve. Target and model
 choices live in the new-profile modal so the main page can remain compact.
+Selecting a profile immediately updates the visible duration and keepalive
+buttons to its stored defaults. Single-model targets select their only model
+automatically; multi-model targets require an explicit model choice.
 Starting capacity from a profile still creates an ordinary reservation, and
 reservation cards show the profile name with a review modal when a reservation
-came from one. The profile data model stores selections as a list so future UI
-work can allow one profile to span multiple targets.
+came from one. A profile can span multiple targets, and its reservation stores a
+target-specific selection snapshot so each target warms only its own models.
+
+The reserve action is held in a bottom action bar alongside the current cost
+estimate so it remains visually connected to the form after profile review.
+Duration, keepalive, and profile labels expose concise help text on hover and
+keyboard focus.
+
+## First-Login Guide
+
+Routes:
+
+```text
+GET /welcome
+GET /help
+```
+
+Home redirects a signed-in user with no profiles to `/welcome`. The page
+explains the cost-control loop, profile intent, duration, keepalive, and traffic
+reservation, then opens `/profiles?create=1&onboarding=1`. After the first
+profile is saved, the user returns to Home. `/help` exposes the same explanation
+at any time from **How NeurOn works** in the navigation.
 
 ## Profiles Page
 
@@ -193,8 +217,8 @@ data.
 
 Defaults are production-friendly:
 
-- Reservation detail: 10 seconds
-- Main/admin status: 30 seconds
+- Reservation detail: 5 seconds
+- Main/admin status: 5 seconds
 
 Local development can override these to faster values through environment
 variables or compose defaults.

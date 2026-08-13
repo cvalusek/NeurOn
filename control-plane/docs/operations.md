@@ -61,6 +61,14 @@ replace its own container. **Admin > Updates** safely exits the current process;
 an external supervisor must then start a replacement task that pulls the newer
 image.
 
+When an update is available, NeurOn compares the running revision with that
+successful build. **What changes in this update** prefers curated Markdown
+fragments added under `control-plane/changes/`; if none exist in the comparison,
+it falls back to commit titles and links the full GitHub comparison. Patch-note
+fetch failures are shown separately and never affect reconciliation or restart
+safety. Private repositories can supply the same read-only GitHub token used by
+the update checker.
+
 For ECS, run NeurOn as an ECS service with desired count at least one. A stopped
 essential container causes the service scheduler to launch a replacement task.
 When using the mutable `latest` tag on ECS EC2 capacity, set the ECS agent image
@@ -153,6 +161,25 @@ If a provider operation fails:
 - the app process keeps running
 
 Traffic keepalive cannot resurrect a failed target by itself.
+
+For an AWS EC2 target that is observed as `stopping` while demand is on, the
+adapter waits rather than sending an invalid start request. The reconciler keeps
+the reservation active, reports the target as starting, and retries after AWS
+reports `stopped`. Terminal or missing instances still fail closed. This is
+control of a pre-created instance only; see [Providers](providers.md#aws-ec2).
+
+## Release notes
+
+Every user- or operator-visible control-plane change should add one concise
+Markdown file under `control-plane/changes/`. The first level-one heading is the
+Updates-screen title and the remaining text describes impact and any required
+operator action. Do not include credentials, private hostnames, migrated data,
+or internal incident detail.
+
+`npm run changes:check` validates fragment structure. CI also compares the
+branch with its base revision and requires a fragment when control-plane source,
+the application Dockerfile, control-plane-local Compose files, or dependencies
+change.
 
 ## Integration Checks
 

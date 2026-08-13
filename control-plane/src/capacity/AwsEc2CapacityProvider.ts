@@ -44,6 +44,17 @@ export class AwsEc2CapacityProvider implements CapacityProvider {
 
   async ensureTargetOn(target: CapacityTarget): Promise<void> {
     const instanceId = requireInstanceId(target);
+    const instance = await this.describeInstance(instanceId);
+    if (!instance) throw new Error(`EC2 instance ${instanceId} was not found`);
+
+    const state = instance.State?.Name;
+    if (state === "running" || state === "pending" || state === "stopping") return;
+    if (state === "shutting-down" || state === "terminated") {
+      throw new Error(`EC2 instance ${instanceId} is ${state} and cannot be restarted`);
+    }
+    if (state !== "stopped") {
+      throw new Error(`EC2 instance ${instanceId} cannot be started from state ${state ?? "unknown"}`);
+    }
     await this.ec2.send(new StartInstancesCommand({ InstanceIds: [instanceId] }));
   }
 

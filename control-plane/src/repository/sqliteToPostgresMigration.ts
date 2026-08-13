@@ -4,6 +4,7 @@ import path from "node:path";
 import Database from "better-sqlite3";
 import pg from "pg";
 import { migratePostgresSchema, POSTGRES_DATA_TABLES, POSTGRES_SCHEMA_VERSION, readPostgresSchemaState, validatePostgresSchema } from "./postgresSchema.js";
+import { parseReservationTargetSelections } from "../domain/reservationSelections.js";
 
 export const SQLITE_SOURCE_SCHEMA_VERSION = 1;
 
@@ -107,6 +108,9 @@ const sqliteNullableColumns = new Set([
   "target_runs.estimated_hourly_cost_usd",
   "target_run_reservation_links.ended_at"
 ]);
+const sqliteOptionalColumns: Record<string, string[]> = {
+  reservations: ["target_selections"]
+};
 
 export async function createConsistentSqliteBackup(
   sqlitePath: string,
@@ -246,7 +250,7 @@ function readSqliteDataset(sqlitePath: string): MigrationDataset {
     const dataset: MigrationDataset = {
       reservations: rows(db, "select * from reservations order by id asc").map((row) => ({
         id: text(row.id), username: text(row.username), apiKeyName: nullableText(row.api_key_name), profileId: nullableText(row.profile_id), profileName: nullableText(row.profile_name),
-        modelIds: json(row.model_ids), targetIds: json(row.target_ids), createdAt: iso(row.created_at), expiresAt: iso(row.expires_at), keepaliveMinutes: nullableNumber(row.keepalive_minutes),
+        modelIds: json(row.model_ids), targetIds: json(row.target_ids), ...(row.target_selections === null || row.target_selections === undefined ? {} : { targetSelections: parseReservationTargetSelections(json(row.target_selections), "SQLite source reservations.target_selections") }), createdAt: iso(row.created_at), expiresAt: iso(row.expires_at), keepaliveMinutes: nullableNumber(row.keepalive_minutes),
         endedAt: nullableIso(row.ended_at), status: text(row.status), failureMessage: nullableText(row.failure_message), synthetic: boolean(row.synthetic)
       })),
       reservationProfiles: rows(db, "select * from reservation_profiles order by id asc").map((row) => ({
@@ -313,7 +317,7 @@ async function readPostgresDataset(client: pg.PoolClient): Promise<MigrationData
   return {
     reservations: reservations.rows.map((row) => ({
       id: text(row.id), username: text(row.username), apiKeyName: nullableText(row.api_key_name), profileId: nullableText(row.profile_id), profileName: nullableText(row.profile_name),
-      modelIds: jsonObject(row.model_ids), targetIds: jsonObject(row.target_ids), createdAt: iso(row.created_at), expiresAt: iso(row.expires_at), keepaliveMinutes: nullableNumber(row.keepalive_minutes),
+      modelIds: jsonObject(row.model_ids), targetIds: jsonObject(row.target_ids), ...(row.target_selections === null || row.target_selections === undefined ? {} : { targetSelections: parseReservationTargetSelections(jsonObject(row.target_selections), "PostgreSQL destination reservations.target_selections") }), createdAt: iso(row.created_at), expiresAt: iso(row.expires_at), keepaliveMinutes: nullableNumber(row.keepalive_minutes),
       endedAt: nullableIso(row.ended_at), status: text(row.status), failureMessage: nullableText(row.failure_message), synthetic: boolean(row.synthetic)
     })),
     reservationProfiles: reservationProfiles.rows.map((row) => ({
@@ -344,9 +348,9 @@ async function readPostgresDataset(client: pg.PoolClient): Promise<MigrationData
 async function importDataset(client: pg.PoolClient, dataset: MigrationDataset): Promise<void> {
   for (const row of dataset.reservations) {
     await client.query(
-      `insert into reservations (id, username, api_key_name, profile_id, profile_name, model_ids, target_ids, created_at, expires_at, keepalive_minutes, ended_at, status, failure_message, synthetic)
-       values ($1,$2,$3,$4,$5,$6::jsonb,$7::jsonb,$8,$9,$10,$11,$12,$13,$14)`,
-      [row.id, row.username, row.apiKeyName, row.profileId, row.profileName, JSON.stringify(row.modelIds), JSON.stringify(row.targetIds), row.createdAt, row.expiresAt, row.keepaliveMinutes, row.endedAt, row.status, row.failureMessage, row.synthetic]
+      `insert into reservations (id, username, api_key_name, profile_id, profile_name, model_ids, target_ids, target_selections, created_at, expires_at, keepalive_minutes, ended_at, status, failure_message, synthetic)
+       values ($1,$2,$3,$4,$5,$6::jsonb,$7::jsonb,$8::jsonb,$9,$10,$11,$12,$13,$14,$15)`,
+      [row.id, row.username, row.apiKeyName, row.profileId, row.profileName, JSON.stringify(row.modelIds), JSON.stringify(row.targetIds), row.targetSelections == null ? null : JSON.stringify(row.targetSelections), row.createdAt, row.expiresAt, row.keepaliveMinutes, row.endedAt, row.status, row.failureMessage, row.synthetic]
     );
   }
   for (const row of dataset.reservationProfiles) {
@@ -418,7 +422,7 @@ function validateSqliteSchema(db: Database.Database): void {
       problems.push(`missing table ${table}`);
       continue;
     }
-    validateSqliteTable(db, table, expected, problems);
+    validateSqliteTable(db, table, expected, problems, sqliteOptionalColumns[table] ?? []);
   }
   const legacyTables = Object.keys(sqliteLegacyActivationColumns);
   const presentLegacyTables = legacyTables.filter((table) => tables.has(table));
@@ -431,7 +435,7 @@ function validateSqliteSchema(db: Database.Database): void {
   if (problems.length > 0) throw new Error(`SQLite source schema is incompatible with version ${SQLITE_SOURCE_SCHEMA_VERSION}: ${problems.join("; ")}`);
 }
 
-function validateSqliteTable(db: Database.Database, table: string, expected: string[], problems: string[]): void {
+function validateSqliteTable(db: Database.Database, table: string, expected: string[], problems: string[], optional: string[] = []): void {
   const tableInfo = db.prepare(`pragma table_info(${table})`).all() as Array<{ name: string; type: string; notnull: number; pk: number }>;
   const columns = new Map(tableInfo.map((row) => [row.name, row]));
   for (const column of expected) {
@@ -447,8 +451,12 @@ function validateSqliteTable(db: Database.Database, table: string, expected: str
     if (isPrimaryKey && actual.pk !== 1) problems.push(`${key} is not the primary key`);
     if (!isPrimaryKey && !sqliteNullableColumns.has(key) && actual.notnull !== 1) problems.push(`${key} nullability is incompatible`);
   }
+  for (const column of optional) {
+    const actual = columns.get(column);
+    if (actual && actual.type.toUpperCase() !== "TEXT") problems.push(`${table}.${column} has type ${actual.type || "untyped"}, expected TEXT`);
+  }
   for (const column of columns.keys()) {
-    if (!expected.includes(column)) problems.push(`unexpected ${table}.${column}`);
+    if (!expected.includes(column) && !optional.includes(column)) problems.push(`unexpected ${table}.${column}`);
   }
 }
 
@@ -458,6 +466,19 @@ function validateDatasetSemantics(dataset: MigrationDataset): void {
   const provisioningStatuses = new Set(["draft", "running", "completed", "failed", "aborting", "aborted"]);
   if (dataset.reservations.some((row) => !reservationStatuses.has(String(row.status)))) {
     throw new Error("SQLite source contains an unsupported reservation status");
+  }
+  for (const row of dataset.reservations) {
+    const targetIds = stringArray(row.targetIds, "reservation target IDs");
+    const modelIds = new Set(stringArray(row.modelIds, "reservation model IDs"));
+    const selections = row.targetSelections === undefined ? undefined : parseReservationTargetSelections(row.targetSelections, "reservation target selections");
+    if (selections) {
+      if (selections.length !== targetIds.length || selections.some((selection) => !targetIds.includes(selection.targetId))) {
+        throw new Error("SQLite source reservation target selections do not match target IDs");
+      }
+      if (selections.some((selection) => selection.modelIds.some((modelId) => !modelIds.has(modelId)))) {
+        throw new Error("SQLite source reservation target selections do not match model IDs");
+      }
+    }
   }
   if (dataset.targetActivations.some((row) => !activationStatuses.has(String(row.status)))) {
     throw new Error("SQLite source contains an unsupported target activation status");
@@ -621,4 +642,11 @@ function jsonObject<T = unknown>(value: unknown): T {
 
 function nullableJsonObject(value: unknown): unknown | null {
   return value === null || value === undefined ? null : jsonObject(value);
+}
+
+function stringArray(value: unknown, context: string): string[] {
+  if (!Array.isArray(value) || value.some((entry) => typeof entry !== "string" || entry.length === 0)) {
+    throw new Error(`SQLite source contains invalid ${context}`);
+  }
+  return value as string[];
 }

@@ -74,7 +74,11 @@ bootstrap outside NeurOn.
 
 For a target desired on:
 
-- Start the configured EC2 instance.
+- Start the configured EC2 instance when it is stopped.
+- If AWS is still stopping the instance, keep demand active and wait for a
+  later reconciliation pass. NeurOn reports the target as starting and issues
+  `StartInstances` only after AWS reports `stopped`.
+- Treat already pending or running instances as on without another start call.
 
 For a target desired off:
 

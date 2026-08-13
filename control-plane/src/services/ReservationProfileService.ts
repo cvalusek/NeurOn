@@ -1,6 +1,7 @@
 import type { ReservationProfileRepository } from "../domain/interfaces.js";
 import type { AuthenticatedUser, ReservationProfile, ReservationProfileSelection } from "../domain/types.js";
 import { ModelCatalog } from "./ModelCatalog.js";
+import { normalizeReservationProfileSelections } from "./reservationProfileSelections.js";
 
 const MAX_DURATION_MINUTES = 12 * 60;
 const MAX_KEEPALIVE_MINUTES = 60;
@@ -12,7 +13,7 @@ export class ReservationProfileService {
   ) {}
 
   async createForUser(user: AuthenticatedUser, input: ReservationProfileInput): Promise<ReservationProfile> {
-    const selections = this.validateSelections(input.selections);
+    const selections = normalizeReservationProfileSelections(this.catalog, input.selections);
     validateDefaults(input);
     return this.repository.create({
       username: user.username,
@@ -38,20 +39,6 @@ export class ReservationProfileService {
     return this.repository.deleteForUser(id, user.username);
   }
 
-  private validateSelections(selections: ReservationProfileSelection[]): ReservationProfileSelection[] {
-    if (selections.length === 0) throw new Error("Add at least one target to the reservation profile");
-    return selections.map((selection) => {
-      const targetIds = this.catalog.validateTargetIds([selection.targetId]);
-      const modelIds = this.catalog.canonicalModelIds(unique(selection.modelIds));
-      for (const modelId of modelIds) {
-        const model = this.catalog.getModel(modelId);
-        if (!model?.targetIds.includes(selection.targetId)) {
-          throw new Error(`Model ${modelId} is not available on target: ${selection.targetId}`);
-        }
-      }
-      return { targetId: targetIds[0], modelIds };
-    });
-  }
 }
 
 export interface ReservationProfileInput {
@@ -70,8 +57,4 @@ function validateDefaults(input: ReservationProfileInput): void {
   if (input.defaultKeepaliveMinutes !== undefined && (!Number.isFinite(input.defaultKeepaliveMinutes) || input.defaultKeepaliveMinutes <= 0 || input.defaultKeepaliveMinutes > MAX_KEEPALIVE_MINUTES)) {
     throw new Error(`Keepalive must be between 1 and ${MAX_KEEPALIVE_MINUTES} minutes`);
   }
-}
-
-function unique(values: string[]): string[] {
-  return Array.from(new Set(values));
 }

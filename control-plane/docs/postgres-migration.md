@@ -10,11 +10,14 @@ NeurOn supports one control-plane database owner at a time. Never run SQLite
 and PostgreSQL application writers concurrently. HassleOff owns a separate
 SQLite database; this procedure does not read, stop, migrate, or restart it.
 
-PostgreSQL schema version 1 is managed by the transactional
+PostgreSQL schema version 2 is managed by the transactional
 `neuron_schema_migrations` ledger. The application uses one bounded shared pool
 for all repositories. The explicit transfer command records a completed source
 identity in `neuron_data_migrations`; an exact rerun verifies and exits as a
 no-op, while a changed source or unexplained nonempty destination fails closed.
+Version 2 adds the target-specific model-selection snapshot used by multi-target
+reservations. Startup upgrades an already-current version 1 database in order
+and in a transaction before repositories begin serving requests.
 
 ## Durable scope
 

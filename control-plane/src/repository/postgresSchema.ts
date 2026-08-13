@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import type pg from "pg";
 
-export const POSTGRES_SCHEMA_VERSION = 1;
+export const POSTGRES_SCHEMA_VERSION = 2;
 
 export const POSTGRES_DATA_TABLES = [
   "reservations",
@@ -131,14 +131,19 @@ const schemaVersionOneSql = `
   );
 `;
 
+const schemaVersionTwoSql = `
+  alter table reservations add column if not exists target_selections jsonb;
+`;
+
 const migrations = [
-  { version: 1, name: "initial-centralized-schema", sql: schemaVersionOneSql }
+  { version: 1, name: "initial-centralized-schema", sql: schemaVersionOneSql },
+  { version: 2, name: "reservation-target-selections", sql: schemaVersionTwoSql }
 ] as const;
 
 const expectedColumns: Record<string, Record<string, { type: string; nullable: boolean }>> = {
   reservations: {
     id: required("text"), username: required("text"), api_key_name: optional("text"), profile_id: optional("text"), profile_name: optional("text"),
-    model_ids: required("jsonb"), target_ids: required("jsonb"), created_at: required("timestamptz"), expires_at: required("timestamptz"),
+    model_ids: required("jsonb"), target_ids: required("jsonb"), target_selections: optional("jsonb"), created_at: required("timestamptz"), expires_at: required("timestamptz"),
     keepalive_minutes: optional("int4"), ended_at: optional("timestamptz"), status: required("text"), failure_message: optional("text"), synthetic: required("bool")
   },
   reservation_profiles: {
@@ -203,7 +208,6 @@ export async function migratePostgresSchema(pool: pg.Pool): Promise<PostgresSche
     for (const migration of migrations) {
       if (appliedVersions.has(migration.version)) continue;
       await client.query(migration.sql);
-      await validatePostgresSchema(client);
       await client.query(
         "insert into neuron_schema_migrations (version, name, checksum) values ($1, $2, $3)",
         [migration.version, migration.name, checksum(migration.sql)]
@@ -281,6 +285,7 @@ async function validateExistingPostgresTablesForMigration(queryable: pg.PoolClie
     "reservations.api_key_name",
     "reservations.profile_id",
     "reservations.profile_name",
+    "reservations.target_selections",
     "capacity_providers.provisioning_enabled"
   ]);
   const problems: string[] = [];

@@ -6,6 +6,10 @@ import { describe, expect, it } from "vitest";
 import { AwsEc2CapacityProvider } from "../capacity/AwsEc2CapacityProvider.js";
 import { AwsEcsAsgCapacityProvider } from "../capacity/AwsEcsAsgCapacityProvider.js";
 import type { CapacityTarget } from "../domain/types.js";
+import { NoopBackendConfigSync } from "../litellm/LiteLlmBackendConfigSync.js";
+import { Reconciler } from "../reconciler/Reconciler.js";
+import { InMemoryReservationRepository } from "../repository/InMemoryReservationRepository.js";
+import { InMemoryTargetStatusRepository } from "../repository/InMemoryTargetStatusRepository.js";
 
 const ec2Target: CapacityTarget = {
   id: "ec2-gpu",
@@ -30,6 +34,9 @@ describe("AWS EC2 provider", () => {
       ec2: {
         send: async (command) => {
           commands.push(command);
+          if (command instanceof DescribeInstancesCommand) {
+            return { Reservations: [{ Instances: [{ InstanceId: "i-1234567890abcdef0", State: { Name: "stopped" } }] }] };
+          }
           return {};
         }
       }
@@ -38,10 +45,132 @@ describe("AWS EC2 provider", () => {
     await provider.ensureTargetOn(ec2Target);
     await provider.ensureTargetOff(ec2Target);
 
-    expect(commands[0]).toBeInstanceOf(StartInstancesCommand);
-    expect(commandInput(commands[0])).toEqual({ InstanceIds: ["i-1234567890abcdef0"] });
-    expect(commands[1]).toBeInstanceOf(StopInstancesCommand);
+    expect(commands[0]).toBeInstanceOf(DescribeInstancesCommand);
+    expect(commands[1]).toBeInstanceOf(StartInstancesCommand);
     expect(commandInput(commands[1])).toEqual({ InstanceIds: ["i-1234567890abcdef0"] });
+    expect(commands[2]).toBeInstanceOf(StopInstancesCommand);
+    expect(commandInput(commands[2])).toEqual({ InstanceIds: ["i-1234567890abcdef0"] });
+  });
+
+  it("waits for a stopping instance and starts it on a later stopped observation", async () => {
+    const commands: unknown[] = [];
+    const states: Array<"stopping" | "stopped"> = ["stopping", "stopped"];
+    const provider = new AwsEc2CapacityProvider("us-east-1", {
+      ec2: {
+        send: async (command) => {
+          commands.push(command);
+          if (command instanceof DescribeInstancesCommand) {
+            return {
+              Reservations: [{ Instances: [{
+                InstanceId: "i-1234567890abcdef0",
+                State: { Name: states.shift() }
+              }] }]
+            };
+          }
+          return {};
+        }
+      }
+    });
+
+    await provider.ensureTargetOn(ec2Target);
+    expect(commands.filter((command) => command instanceof StartInstancesCommand)).toHaveLength(0);
+
+    await provider.ensureTargetOn(ec2Target);
+    expect(commands.filter((command) => command instanceof StartInstancesCommand)).toHaveLength(1);
+    expect(commands[0]).toBeInstanceOf(DescribeInstancesCommand);
+    expect(commands[1]).toBeInstanceOf(DescribeInstancesCommand);
+    expect(commands[2]).toBeInstanceOf(StartInstancesCommand);
+  });
+
+  it("keeps reservation demand active until a stopping instance can restart", async () => {
+    const commands: unknown[] = [];
+    const states: Array<"stopping" | "stopped" | "pending"> = ["stopping", "stopping", "stopped", "pending"];
+    const provider = new AwsEc2CapacityProvider("us-east-1", {
+      ec2: {
+        send: async (command) => {
+          commands.push(command);
+          if (command instanceof DescribeInstancesCommand) {
+            return {
+              Reservations: [{ Instances: [{
+                InstanceId: "i-1234567890abcdef0",
+                State: { Name: states.shift() }
+              }] }]
+            };
+          }
+          return {};
+        }
+      }
+    });
+    const reservations = new InMemoryReservationRepository();
+    const statuses = new InMemoryTargetStatusRepository();
+    const now = new Date("2026-08-13T10:00:00.000Z");
+    const reservation = await reservations.create({
+      username: "clint",
+      modelIds: ["qwen"],
+      targetIds: [ec2Target.id],
+      createdAt: now,
+      expiresAt: new Date("2026-08-13T11:00:00.000Z"),
+      status: "active"
+    });
+    const reconciler = new Reconciler([ec2Target], reservations, statuses, provider, new NoopBackendConfigSync());
+
+    await reconciler.reconcile(now);
+    expect(statuses.get(ec2Target.id)).toMatchObject({
+      desired: "on",
+      observed: "starting",
+      message: "Waiting for target to finish stopping before restart"
+    });
+    expect((await reservations.get(reservation.id))?.status).toBe("active");
+    expect(commands.filter((command) => command instanceof StartInstancesCommand)).toHaveLength(0);
+
+    await reconciler.reconcile(new Date("2026-08-13T10:00:10.000Z"));
+    expect(commands.filter((command) => command instanceof StartInstancesCommand)).toHaveLength(1);
+    expect(statuses.get(ec2Target.id)).toMatchObject({
+      desired: "on",
+      observed: "starting",
+      message: "EC2 instance starting"
+    });
+    expect((await reservations.get(reservation.id))?.status).toBe("active");
+  });
+
+  it("does not issue start calls for instances already running or pending", async () => {
+    const commands: unknown[] = [];
+    const states: Array<"running" | "pending"> = ["running", "pending"];
+    const provider = new AwsEc2CapacityProvider("us-east-1", {
+      ec2: {
+        send: async (command) => {
+          commands.push(command);
+          return {
+            Reservations: [{ Instances: [{
+              InstanceId: "i-1234567890abcdef0",
+              State: { Name: states.shift() }
+            }] }]
+          };
+        }
+      }
+    });
+
+    await provider.ensureTargetOn(ec2Target);
+    await provider.ensureTargetOn(ec2Target);
+
+    expect(commands).toHaveLength(2);
+    expect(commands.every((command) => command instanceof DescribeInstancesCommand)).toBe(true);
+  });
+
+  it("fails closed when an instance cannot be restarted", async () => {
+    const commands: unknown[] = [];
+    const provider = new AwsEc2CapacityProvider("us-east-1", {
+      ec2: {
+        send: async (command) => {
+          commands.push(command);
+          return { Reservations: [{ Instances: [{ InstanceId: "i-1234567890abcdef0", State: { Name: "shutting-down" } }] }] };
+        }
+      }
+    });
+
+    await expect(provider.ensureTargetOn(ec2Target)).rejects.toThrow("is shutting-down and cannot be restarted");
+    expect(commands).toHaveLength(1);
+    expect(commands[0]).toBeInstanceOf(DescribeInstancesCommand);
   });
 
   it("maps instance lifecycle states to NeurOn status", async () => {

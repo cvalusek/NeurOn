@@ -116,6 +116,9 @@ The estimate is intentionally observational:
 
 Provider errors must not crash the app. The reconciler catches provider errors,
 marks the target failed, and fails active reservations that need the target.
+An observed `stopping` state while demand is desired on is a recoverable
+transition, not a provider failure: the target is shown as starting and its
+reservations remain active while the provider waits to restart it safely.
 
 HassleOff interlock failures use the same visible path and include the target
 and reason in the status message. They are never converted into a direct

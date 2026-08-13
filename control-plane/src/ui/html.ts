@@ -5,7 +5,7 @@ import type { ProviderView } from "../services/ProviderService.js";
 import type { TargetView } from "../services/TargetService.js";
 import { litellmRoutePrefixes } from "../litellm/modelRouting.js";
 import type { ShutdownStatus } from "../services/ShutdownCoordinator.js";
-import type { UpdateStatus } from "../services/UpdateChecker.js";
+import { safeGithubRepositoryUrl, type UpdateStatus } from "../services/UpdateChecker.js";
 
 export interface HassleOffSafetyView {
   configured: boolean;
@@ -85,6 +85,7 @@ export function layout(title: string, user: AuthenticatedUser | undefined, body:
     .home-grid .panel { margin-bottom: 0; }
     .profile-strip { display: grid; grid-template-columns: minmax(180px, 1fr) auto; gap: 10px; align-items: end; margin-bottom: 14px; }
     .profile-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+    .profile-actions.below { margin-top: 10px; justify-content: flex-end; }
     .profile-picker { position: relative; }
     .profile-picker summary { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 12px; align-items: center; border: 1px solid #aab4ad; border-radius: 8px; padding: 12px; background: #fbfcfb; cursor: pointer; list-style: none; }
     .profile-picker summary::-webkit-details-marker { display: none; }
@@ -95,6 +96,9 @@ export function layout(title: string, user: AuthenticatedUser | undefined, body:
     .profile-card-button[aria-pressed="true"] { border-color: #0f766e; background: #e7f5f2; box-shadow: inset 0 0 0 1px #0f766e; }
     .profile-card-title { display: flex; flex-wrap: wrap; gap: 8px; justify-content: space-between; align-items: center; }
     .quick-start { display: grid; gap: 14px; }
+    .reserve-bar { position: sticky; bottom: 10px; z-index: 4; display: flex; gap: 12px; justify-content: space-between; align-items: center; border: 1px solid #86b8ad; border-radius: 8px; background: rgba(240, 250, 247, 0.97); padding: 12px; box-shadow: 0 8px 24px rgba(23, 32, 42, 0.14); }
+    .reserve-bar .start-cost { border: 0; background: transparent; padding: 0; margin: 0; }
+    .keepalive-control { padding-bottom: 82px; }
     .compact-summary { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 8px; }
     .status-details { margin-top: 10px; }
     .status-details summary { cursor: pointer; color: #334155; font-weight: 700; }
@@ -120,6 +124,10 @@ export function layout(title: string, user: AuthenticatedUser | undefined, body:
     .model-meta { margin-top: 7px; font-size: 12px; color: #657266; }
     .status-grid { display: grid; gap: 12px; }
     .target-status-card { border: 1px solid #d8ddd7; border-radius: 8px; padding: 14px; background: #fbfcfb; }
+    .profile-target-selections { display: grid; gap: 12px; }
+    .profile-target-selection:not(.selected) [data-profile-target-models] { opacity: 0.55; }
+    .profile-target-toggle { display: flex; gap: 10px; align-items: start; cursor: pointer; }
+    .profile-target-toggle > span { display: grid; gap: 2px; }
     .target-status-head, .reservation-card { display: flex; justify-content: space-between; gap: 12px; align-items: start; }
     .target-status-meta, .reservation-meta { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
     .reservation-list { display: grid; gap: 8px; margin-top: 12px; }
@@ -144,6 +152,9 @@ export function layout(title: string, user: AuthenticatedUser | undefined, body:
     table { width: 100%; border-collapse: collapse; background: white; border: 1px solid #d8ddd7; }
     th, td { text-align: left; padding: 9px; border-bottom: 1px solid #e7ebe6; vertical-align: top; }
     .muted { color: #657266; } .status { font-weight: 700; } .row { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+    .help-tip { position: relative; display: inline-grid; place-items: center; width: 19px; height: 19px; margin-left: 5px; border: 1px solid #829087; border-radius: 999px; color: #475569; background: white; font-size: 12px; font-weight: 800; cursor: help; vertical-align: middle; }
+    .help-tip::after { content: attr(data-tip); position: absolute; left: 50%; bottom: calc(100% + 8px); z-index: 30; width: min(280px, 75vw); padding: 9px 10px; border-radius: 6px; background: #17202a; color: white; font-size: 12px; font-weight: 500; line-height: 1.35; box-shadow: 0 6px 20px rgba(23, 32, 42, 0.25); opacity: 0; visibility: hidden; transform: translate(-50%, 4px); transition: 100ms ease; pointer-events: none; }
+    .help-tip:hover::after, .help-tip:focus-visible::after { opacity: 1; visibility: visible; transform: translate(-50%, 0); }
     .actions { display: flex; justify-content: flex-end; margin-top: 16px; }
     .secret-box { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; padding: 12px; border: 1px solid #0f766e; border-radius: 6px; background: #f0faf7; }
     .secret-box code { flex: 1 1 360px; overflow-wrap: anywhere; font: 13px ui-monospace, SFMono-Regular, Menlo, monospace; }
@@ -201,6 +212,7 @@ export function layout(title: string, user: AuthenticatedUser | undefined, body:
         <div class="drawer-branch">
           <a href="/">Home</a>
           <a href="/profiles">Profiles</a>
+          <a href="/help">How NeurOn works</a>
           <a href="/api-keys">API keys</a>
           ${user ? `<form method="post" action="/logout"><button class="drawer-action" type="submit">Sign out</button></form>` : ""}
         </div>
@@ -298,10 +310,32 @@ export function loginPage(error = "", methods: Array<Pick<AuthMethod, "id" | "di
   </section>`);
 }
 
+export function welcomePage(user: AuthenticatedUser, hasProfiles: boolean, helpMode: boolean): string {
+  const nextHref = hasProfiles ? "/" : "/profiles?create=1&onboarding=1";
+  const nextLabel = hasProfiles ? "Return home" : "Create your first profile";
+  return layout(helpMode ? "How NeurOn works" : "Welcome to NeurOn", user, `<section class="panel">
+    <p class="pill">${helpMode ? "Guide" : "Getting started"}</p>
+    <h1>${helpMode ? "How NeurOn works" : "Shared model capacity without paying for idle time"}</h1>
+    <p>NeurOn turns configured model servers on while people need them and lets them stop after demand ends. Sharing targets and avoiding idle runtime reduces infrastructure cost without making every user manage the underlying provider.</p>
+  </section>
+  <div class="field-grid">
+    <section class="panel"><h2>1. Build a profile</h2><p>Choose one or more target-and-model combinations that belong to a workflow. If a target has only one model, NeurOn selects it automatically.</p></section>
+    <section class="panel"><h2>2. Reserve capacity</h2><p>Select the profile on Home, choose how long you expect to work, and press <strong>Reserve capacity</strong>. You can hold more than one reservation and manage each one separately.</p></section>
+    <section class="panel"><h2>3. Use your model</h2><p>The server status shows startup progress and model aliases. Copy the appropriate alias into your connected tool once the target is healthy.</p></section>
+  </div>
+  <section class="panel">
+    <h2>Timing and traffic</h2>
+    <p><strong>Duration</strong> is the planned working time. <strong>Keepalive</strong> is the extra idle window after demand ends, which helps avoid a shutdown between nearby requests.</p>
+    <p>A <strong>traffic reservation</strong> is NeurOn's short-lived signal that a configured model was recently used. It can keep an already-participating activation warm, but it does not represent a separate person or start failed capacity by itself.</p>
+    <p class="muted">NeurOn controls targets an administrator has configured. For example, its EC2 adapter starts and stops an existing instance; it does not create AWS infrastructure.</p>
+    <div class="actions"><a href="${nextHref}"><button class="large" type="button">${nextLabel}</button></a></div>
+  </section>`);
+}
+
 export function startPage(user: AuthenticatedUser, targets: Array<{ target: CapacityTarget; models: ModelDefinition[] }>, profiles: ReservationProfile[] = [], error = "", costEstimates: Record<string, { hourlyUsd: number }> = {}, statusPollSeconds = 5): string {
   const initialTargetId = targets[0]?.target.id ?? "";
   return layout("NeurOn", user, `<div class="home-grid"><div><section class="panel">
-    <h2>Your reservation</h2>
+    <h2>Your reservations</h2>
     <div id="current-reservation"><p class="muted">Loading...</p></div>
   </section>
   <section class="panel">
@@ -312,19 +346,19 @@ export function startPage(user: AuthenticatedUser, targets: Array<{ target: Capa
       <input id="keepalive-minutes" type="hidden" name="keepaliveMinutes" value="2">
       <input id="reservation-profile-id" type="hidden" name="profileId" value="">
       <div class="profile-strip">
-        <div><strong>Reservation profile</strong></div>
-        <div class="profile-actions">
-          <button class="secondary" type="button" data-review-profile>Review</button>
-          <button class="secondary" type="button" data-open-modal="profile-modal">New</button>
-        </div>
+        <div><strong>Reservation profile</strong>${helpTip("A profile remembers the targets, models, duration, and keepalive you use together.")}</div>
       </div>
       ${profilePicker(profiles, targets)}
+      <div class="profile-actions below">
+        <button class="secondary" type="button" data-review-profile>Review selected</button>
+        <button class="secondary" type="button" data-open-modal="profile-modal">Create profile</button>
+      </div>
       <p id="profile-selection-error" class="status" hidden></p>
       ${durationControls()}
       ${keepaliveControls()}
-      <div id="start-cost-estimate" class="start-cost">Estimated cost: Not available</div>
-      <div class="actions">
-        <button type="submit">Reserve</button>
+      <div class="reserve-bar">
+        <div id="start-cost-estimate" class="start-cost">Estimated cost: Not available</div>
+        <button class="large" type="submit">Reserve capacity</button>
       </div>
     </form>
   </section>
@@ -347,8 +381,6 @@ export function startPage(user: AuthenticatedUser, targets: Array<{ target: Capa
     const keepalive = document.querySelector('#keepalive-minutes');
     const custom = document.querySelector('#custom-duration');
     const customKeepalive = document.querySelector('#custom-keepalive');
-    const modelInputs = [...document.querySelectorAll('input[name="modelIds"]')];
-    const targetInputs = [...document.querySelectorAll('input[name="profileTargetChoice"]')];
     const durationButtons = [...document.querySelectorAll('[data-duration], [data-custom-duration]')];
     const keepaliveButtons = [...document.querySelectorAll('[data-keepalive], [data-custom-keepalive]')];
     const customWrap = document.querySelector('#custom-duration-wrap');
@@ -358,7 +390,8 @@ export function startPage(user: AuthenticatedUser, targets: Array<{ target: Capa
     const profileSelectInput = document.querySelector('#reservation-profile-id');
     const profilePicker = document.querySelector('#profile-picker');
     const profilePickerSummary = document.querySelector('#profile-picker-summary');
-    const profileTargetInput = document.querySelector('#profile-target-id');
+    const profileForm = document.querySelector('#profile-form');
+    const profileTargetInputs = [...profileForm.querySelectorAll('[data-profile-target]')];
     const profileDurationInput = document.querySelector('#profile-duration-minutes');
     const profileKeepaliveInput = document.querySelector('#profile-keepalive-minutes');
     const profileDurationButtons = [...document.querySelectorAll('[data-profile-duration], [data-profile-custom-duration]')];
@@ -422,27 +455,35 @@ export function startPage(user: AuthenticatedUser, targets: Array<{ target: Capa
     };
     const formatDateTime = (iso) => new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(iso));
     const formatUsd = (value) => '$' + new Intl.NumberFormat(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(value ?? 0);
-    const selectedTargetId = () => targetInputs.find(input => input.checked)?.value ?? targetInputs[0]?.value;
     const selectedProfile = () => profiles.find(profile => profile.id === profileSelectInput?.value);
-    const selectedProfileTargetId = () => selectedProfile()?.selections[0]?.targetId;
+    const selectedProfileTargetIds = () => [...new Set(selectedProfile()?.selections.map(selection => selection.targetId) ?? [])];
     const updateStartCostEstimate = () => {
-      const targetId = selectedProfileTargetId();
-      const targetCost = costLookup[targetId];
-      if (!targetCost?.hourlyUsd && targetCost?.hourlyUsd !== 0) {
+      const targetIds = selectedProfileTargetIds();
+      const hourlyCosts = targetIds.map(targetId => costLookup[targetId]?.hourlyUsd);
+      if (targetIds.length === 0 || hourlyCosts.some(hourlyUsd => hourlyUsd === undefined)) {
         startCostEstimate.textContent = 'Estimated cost: Not available';
         return;
       }
       const durationMinutes = Math.max(0, Number(duration.value) || 0);
       const keepaliveMinutes = Math.max(0, Number(keepalive.value) || 0);
       const estimatedMinutes = durationMinutes + keepaliveMinutes;
-      const estimatedCost = targetCost.hourlyUsd * estimatedMinutes / 60;
-      startCostEstimate.textContent = 'Estimated cost: ' + formatUsd(estimatedCost) + ' for ' + estimatedMinutes + ' min (duration + keepalive)';
+      const hourlyUsd = hourlyCosts.reduce((total, value) => total + value, 0);
+      const estimatedCost = hourlyUsd * estimatedMinutes / 60;
+      const targetSummary = targetIds.length > 1 ? ' across ' + targetIds.length + ' targets' : '';
+      startCostEstimate.textContent = 'Estimated cost: ' + formatUsd(estimatedCost) + ' for ' + estimatedMinutes + ' min' + targetSummary + ' (duration + keepalive)';
     };
     const updateSelectedProfileSummary = () => {
       if (profileSelectionError) profileSelectionError.hidden = true;
     };
-    const syncProfileTarget = () => {
-      profileTargetInput.value = selectedTargetId() ?? '';
+    const syncProfileSelections = () => {
+      profileTargetInputs.forEach(input => {
+        const card = input.closest('[data-profile-target-card]');
+        const selected = input.checked;
+        card?.classList.toggle('selected', selected);
+        const models = [...card.querySelectorAll('[data-profile-model]')];
+        models.forEach(model => { model.disabled = !selected; });
+        if (selected && models.length === 1) models[0].checked = true;
+      });
     };
     const syncProfileDefaultButtons = (value, buttons, customButton, customInput, customWrap, attr) => {
       const matching = buttons.find(button => button.dataset[attr] === String(value));
@@ -472,20 +513,8 @@ export function startPage(user: AuthenticatedUser, targets: Array<{ target: Capa
     };
     const applyProfile = (profile) => {
       if (!profile) return;
-      const firstSelection = profile.selections[0];
-      if (firstSelection) {
-        const targetInput = targetInputs.find(input => input.value === firstSelection.targetId);
-        if (targetInput) {
-          targetInput.checked = true;
-          selectTarget(firstSelection.targetId);
-        }
-        modelInputs.forEach(input => {
-          input.checked = !input.disabled && firstSelection.modelIds.includes(input.value);
-        });
-      }
-      if (profile.defaultDurationMinutes) duration.value = String(profile.defaultDurationMinutes);
-      if (profile.defaultKeepaliveMinutes) keepalive.value = String(profile.defaultKeepaliveMinutes);
-      syncProfileTarget();
+      if (profile.defaultDurationMinutes) setDurationValue(profile.defaultDurationMinutes);
+      if (profile.defaultKeepaliveMinutes) setKeepaliveValue(profile.defaultKeepaliveMinutes);
       updateSelectedProfileSummary();
       updateStartCostEstimate();
     };
@@ -522,14 +551,21 @@ export function startPage(user: AuthenticatedUser, targets: Array<{ target: Capa
       return escapeText(reservation.status + ' at ' + formatDateTime(reservation.expiresAt));
     };
     const reservationTargets = (reservation) => reservation.targets.map(target => targetLookup[target.id]?.displayName ?? target.id).join(', ');
-    const reservationCard = (reservation, includeActions = false) => {
+    const reservationModelsForTarget = (reservation, targetId) => targetId
+      ? (reservation.targetSelections?.find(selection => selection.targetId === targetId)?.modelIds ?? reservation.modelIds)
+      : reservation.modelIds;
+    const reservationCard = (reservation, includeActions = false, targetId) => {
       const profileButton = reservation.profileName ? '<button class="copy-chip primary" type="button" data-profile-id="' + escapeText(reservation.profileId ?? '') + '">' + escapeText(reservation.profileName) + '</button>' : '';
+      const trafficContext = reservation.synthetic ? '<span class="pill">traffic reservation</span><span class="help-tip" tabindex="0" role="note" aria-label="Recent observed traffic is temporarily keeping this already-needed target available." data-tip="Recent observed traffic is temporarily keeping this already-needed target available.">?</span>' : '';
       const actions = includeActions
         ? '<div class="reservation-actions"><form method="post" action="/reservations/' + reservation.reservationId + '/extend"><button class="secondary" name="durationMinutes" value="1" type="submit">+1 min</button></form><form method="post" action="/reservations/' + reservation.reservationId + '/extend"><button class="secondary" name="durationMinutes" value="2" type="submit">+2 min</button></form><form method="post" action="/reservations/' + reservation.reservationId + '/extend"><button class="secondary" name="durationMinutes" value="5" type="submit">+5 min</button></form><form method="post" action="/reservations/' + reservation.reservationId + '/extend"><button class="secondary" name="durationMinutes" value="15" type="submit">+15 min</button></form><form method="post" action="/reservations/' + reservation.reservationId + '/extend"><button class="secondary" name="durationMinutes" value="30" type="submit">+30 min</button></form><form method="post" action="/reservations/' + reservation.reservationId + '/done"><button class="danger" type="submit">I\\'m done</button></form></div>'
         : '';
-      return '<div class="reservation-card"><div><div class="reservation-meta">' + statusBadge(reservation.status) + '<strong>' + escapeText(reservation.displayUsername ?? reservation.username) + '</strong><span class="muted">' + reservationTimeHtml(reservation) + '</span>' + profileButton + '</div><div class="muted">' + escapeText(reservationTargets(reservation)) + '</div>' + reservationCostLine(reservation.costEstimate) + modelChipRow(reservation.modelIds) + '</div>' + actions + '</div>';
+      return '<div class="reservation-card"><div><div class="reservation-meta">' + statusBadge(reservation.status) + '<strong>' + escapeText(reservation.displayUsername ?? reservation.username) + '</strong><span class="muted">' + reservationTimeHtml(reservation) + '</span>' + profileButton + trafficContext + '</div><div class="muted">' + escapeText(reservationTargets(reservation)) + '</div>' + reservationCostLine(reservation.costEstimate) + modelChipRow(reservationModelsForTarget(reservation, targetId)) + '</div>' + actions + '</div>';
     };
-    const compactReservationCard = (reservation) => '<div class="reservation-card compact"><div><div class="reservation-meta">' + statusBadge(reservation.status) + '<strong>' + escapeText(reservation.displayUsername ?? reservation.username) + '</strong><span class="muted">' + reservationTimeHtml(reservation) + '</span></div><div class="muted">' + escapeText(reservationTargets(reservation)) + ' | ' + (reservation.modelIds.length ? reservation.modelIds.length + ' models' : 'All models') + '</div></div></div>';
+    const compactReservationCard = (reservation, targetId) => {
+      const models = reservationModelsForTarget(reservation, targetId);
+      return '<div class="reservation-card compact"><div><div class="reservation-meta">' + statusBadge(reservation.status) + '<strong>' + escapeText(reservation.displayUsername ?? reservation.username) + '</strong><span class="muted">' + reservationTimeHtml(reservation) + '</span>' + (reservation.synthetic ? '<span class="pill" title="Recent observed traffic is temporarily keeping this already-needed target available.">traffic reservation</span>' : '') + '</div><div class="muted">' + escapeText(reservationTargets(reservation)) + ' | ' + (models.length ? models.length + ' models' : 'All models') + '</div></div></div>';
+    };
     const orderTargetsForStatus = (capacityTargets, reservations) => {
       const reservedTargetIds = new Set(reservations.flatMap(reservation => reservation.targets.map(target => target.id)));
       const priority = (target) => reservedTargetIds.has(target.id) ? 0 : target.desired === 'on' ? 1 : 2;
@@ -542,50 +578,45 @@ export function startPage(user: AuthenticatedUser, targets: Array<{ target: Capa
       const relevant = reservations.filter(reservation => reservation.targets.some(candidate => candidate.id === target.id));
       const mine = relevant.filter(reservation => reservation.username === currentUser);
       const others = relevant.filter(reservation => reservation.username !== currentUser);
-      const modelCount = new Set(relevant.flatMap(reservation => reservation.modelIds)).size;
+      const modelCount = new Set(relevant.flatMap(reservation => reservationModelsForTarget(reservation, target.id))).size;
       const summary = '<span class="muted">' + relevant.length + ' active reservations</span><span class="muted">' + (target.activeUsers?.length ?? 0) + ' users</span><span class="muted">' + (modelCount || 'All') + ' models</span>';
       const userLine = target.activeUsers?.length ? '<span class="muted">Users: ' + escapeText(target.activeUsers.join(', ')) + '</span>' : '<span class="muted">No active users</span>';
-      const mineRows = mine.length ? mine.map(reservation => reservationCard(reservation)).join('') : '';
-      const otherRows = others.length ? '<details class="status-details"><summary>' + others.length + ' other reservations</summary><div class="reservation-list">' + others.map(compactReservationCard).join('') + '</div></details>' : '';
+      const mineRows = mine.length ? mine.map(reservation => reservationCard(reservation, false, target.id)).join('') : '';
+      const otherRows = others.length ? '<details class="status-details"><summary>' + others.length + ' other reservations</summary><div class="reservation-list">' + others.map(reservation => compactReservationCard(reservation, target.id)).join('') + '</div></details>' : '';
       const rows = relevant.length ? mineRows + otherRows : '<p class="muted">No reservations for this server</p>';
       return '<section class="target-status-card"><div class="target-status-head"><div><h3>' + escapeText(target.displayName) + '</h3><div class="target-status-meta">' + statusPill(target.desired) + statusPill(target.observed) + summary + startupEstimate(target) + '</div></div><div class="muted">' + escapeText(target.provider) + '</div></div><p class="muted">' + escapeText(target.message) + '</p><div class="target-status-meta">' + userLine + '</div><div class="reservation-list">' + rows + '</div></section>';
     };
-    const selectDuration = (button) => {
+    const selectDuration = (button, focus = true) => {
       durationButtons.forEach(candidate => candidate.setAttribute('aria-pressed', candidate === button ? 'true' : 'false'));
       const isCustom = Boolean(button?.dataset.customDuration);
       customWrap.classList.toggle('hidden', !isCustom);
       duration.value = isCustom ? custom.value : button?.dataset.duration ?? duration.value;
-      if (isCustom) custom.focus();
+      if (isCustom && focus) custom.focus();
       updateStartCostEstimate();
     };
     durationButtons.forEach(button => button.addEventListener('click', () => selectDuration(button)));
-    const selectKeepalive = (button) => {
+    const selectKeepalive = (button, focus = true) => {
       keepaliveButtons.forEach(candidate => candidate.setAttribute('aria-pressed', candidate === button ? 'true' : 'false'));
       const isCustom = Boolean(button?.dataset.customKeepalive);
       customKeepaliveWrap.classList.toggle('hidden', !isCustom);
       keepalive.value = isCustom ? customKeepalive.value : button?.dataset.keepalive ?? keepalive.value;
-      if (isCustom) customKeepalive.focus();
+      if (isCustom && focus) customKeepalive.focus();
       updateStartCostEstimate();
     };
     keepaliveButtons.forEach(button => button.addEventListener('click', () => selectKeepalive(button)));
-    const selectTarget = (targetId) => {
-      document.querySelectorAll('[data-target-models]').forEach(group => {
-        const active = group.dataset.targetModels === targetId;
-        group.hidden = !active;
-        group.querySelectorAll('input[name="modelIds"]').forEach(input => {
-          input.disabled = !active;
-          if (!active) input.checked = false;
-        });
-      });
-      syncProfileTarget();
+    const setDurationValue = (value) => {
+      const matching = durationButtons.find(button => button.dataset.duration === String(value));
+      if (matching) return selectDuration(matching, false);
+      custom.value = String(value);
+      selectDuration(document.querySelector('[data-custom-duration]'), false);
     };
-    targetInputs.forEach(input => input.addEventListener('change', () => {
-      selectTarget(input.value);
-    }));
-    selectTarget(targetInputs.find(input => input.checked)?.value ?? targetInputs[0]?.value);
-    modelInputs.forEach(input => input.addEventListener('change', () => {
-      syncProfileTarget();
-    }));
+    const setKeepaliveValue = (value) => {
+      const matching = keepaliveButtons.find(button => button.dataset.keepalive === String(value));
+      if (matching) return selectKeepalive(matching, false);
+      customKeepalive.value = String(value);
+      selectKeepalive(document.querySelector('[data-custom-keepalive]'), false);
+    };
+    profileTargetInputs.forEach(input => input.addEventListener('change', syncProfileSelections));
     profileSelectInput?.addEventListener('change', () => applyProfile(selectedProfile()));
     document.querySelector('[data-review-profile]')?.addEventListener('click', () => {
       const modal = document.querySelector('#profile-review-modal');
@@ -596,7 +627,7 @@ export function startPage(user: AuthenticatedUser, targets: Array<{ target: Capa
       const opener = event.target.closest('[data-open-modal]');
       if (opener) {
         document.getElementById(opener.dataset.openModal).hidden = false;
-        syncProfileTarget();
+        syncProfileSelections();
         syncProfileDefaultsFromStart();
       }
       if (event.target.closest('[data-close-modal]')) event.target.closest('.modal').hidden = true;
@@ -628,16 +659,16 @@ export function startPage(user: AuthenticatedUser, targets: Array<{ target: Capa
     document.querySelectorAll('[data-select-profile]').forEach(candidate => candidate.setAttribute('aria-pressed', String(candidate.dataset.selectProfile === profileSelectInput.value)));
     applyProfile(selectedProfile());
     if (profilePickerSummary) profilePickerSummary.innerHTML = profileSummaryHtml(selectedProfile());
-    syncProfileTarget();
+    syncProfileSelections();
     syncProfileDefaultsFromStart();
     async function refreshServerStatus() {
       const res = await fetch('/api/status');
       if (!res.ok) return;
       const data = await res.json();
-      const current = data.activeReservations.find(reservation => reservation.username === ${JSON.stringify(user.username)});
-      document.querySelector('#current-reservation').innerHTML = current
-        ? reservationCard(current, true)
-        : '<p class="muted">No active reservation</p>';
+      const current = data.activeReservations.filter(reservation => reservation.username === currentUser);
+      document.querySelector('#current-reservation').innerHTML = current.length
+        ? '<div class="reservation-list">' + current.map(reservation => reservationCard(reservation, true)).join('') + '</div>'
+        : '<p class="muted">No active reservations. Choose a profile below, adjust the timing if needed, then select Reserve capacity.</p>';
       const orderedTargets = orderTargetsForStatus(data.capacityTargets, data.reservations);
       document.querySelector('#server-status').innerHTML = orderedTargets.length
         ? '<div class="status-grid">' + orderedTargets.map(target => targetStatusCard(target, data.reservations)).join('') + '</div>'
@@ -733,20 +764,26 @@ export function apiKeysPage(user: AuthenticatedUser, apiKeys: ApiKey[], createdT
   </script>`);
 }
 
-export function profilesPage(user: AuthenticatedUser, profiles: ReservationProfile[], targets: Array<{ target: CapacityTarget; models: ModelDefinition[] }>): string {
+export function profilesPage(
+  user: AuthenticatedUser,
+  profiles: ReservationProfile[],
+  targets: Array<{ target: CapacityTarget; models: ModelDefinition[] }>,
+  options: { openCreate?: boolean; onboarding?: boolean; error?: string } = {}
+): string {
   const initialTargetId = targets[0]?.target.id ?? "";
   const rows = profiles.length
     ? profiles.map((profile) => profileListCard(profile, targets)).join("")
     : `<p class="muted">No reservation profiles yet.</p>`;
   return layout("NeurOn Profiles", user, `<section class="panel">
+    ${options.onboarding ? `<p class="pill">Getting started</p><h1>Create your first profile</h1><p class="muted">A profile connects the servers and models you use together. NeurOn will select the only model automatically on single-model targets.</p>` : ""}
+    ${options.error ? `<p class="status">${escapeHtml(options.error)}</p>` : ""}
     <div class="target-status-head"><h1>Profiles</h1><button type="button" data-open-modal="profile-modal">New profile</button></div>
     <div class="summary-list">${rows}</div>
   </section>
-  ${profileCreateModal(targets, initialTargetId, "/profiles")}
+  ${profileCreateModal(targets, initialTargetId, options.onboarding ? "/" : "/profiles")}
   <script type="module">
     const form = document.querySelector('#profile-form');
-    const targetInputs = [...form.querySelectorAll('input[name="profileTargetChoice"]')];
-    const targetIdInput = form.querySelector('#profile-target-id');
+    const targetInputs = [...form.querySelectorAll('[data-profile-target]')];
     const profileDurationInput = form.querySelector('#profile-duration-minutes');
     const profileKeepaliveInput = form.querySelector('#profile-keepalive-minutes');
     const profileDurationButtons = [...form.querySelectorAll('[data-profile-duration], [data-profile-custom-duration]')];
@@ -755,15 +792,14 @@ export function profilesPage(user: AuthenticatedUser, profiles: ReservationProfi
     const profileCustomKeepalive = form.querySelector('#profile-custom-keepalive');
     const profileCustomDurationWrap = form.querySelector('#profile-custom-duration-wrap');
     const profileCustomKeepaliveWrap = form.querySelector('#profile-custom-keepalive-wrap');
-    const selectTarget = (targetId) => {
-      targetIdInput.value = targetId ?? '';
-      form.querySelectorAll('[data-target-models]').forEach(group => {
-        const active = group.dataset.targetModels === targetId;
-        group.hidden = !active;
-        group.querySelectorAll('input[name="modelIds"]').forEach(input => {
-          input.disabled = !active;
-          if (!active) input.checked = false;
-        });
+    const syncTargets = () => {
+      targetInputs.forEach(input => {
+        const card = input.closest('[data-profile-target-card]');
+        const selected = input.checked;
+        card?.classList.toggle('selected', selected);
+        const models = [...card.querySelectorAll('[data-profile-model]')];
+        models.forEach(model => { model.disabled = !selected; });
+        if (selected && models.length === 1) models[0].checked = true;
       });
     };
     const selectProfileDuration = (button) => {
@@ -780,12 +816,12 @@ export function profilesPage(user: AuthenticatedUser, profiles: ReservationProfi
       profileKeepaliveInput.value = isCustom ? profileCustomKeepalive.value : button?.dataset.profileKeepalive ?? profileKeepaliveInput.value;
       if (isCustom) profileCustomKeepalive.focus();
     };
-    targetInputs.forEach(input => input.addEventListener('change', () => selectTarget(input.value)));
+    targetInputs.forEach(input => input.addEventListener('change', syncTargets));
     profileDurationButtons.forEach(button => button.addEventListener('click', () => selectProfileDuration(button)));
     profileKeepaliveButtons.forEach(button => button.addEventListener('click', () => selectProfileKeepalive(button)));
     profileCustomDuration.addEventListener('input', () => selectProfileDuration(form.querySelector('[data-profile-custom-duration]')));
     profileCustomKeepalive.addEventListener('input', () => selectProfileKeepalive(form.querySelector('[data-profile-custom-keepalive]')));
-    selectTarget(targetInputs.find(input => input.checked)?.value ?? targetInputs[0]?.value);
+    syncTargets();
     document.addEventListener('click', async (event) => {
       const copy = event.target.closest('[data-copy]');
       if (copy) {
@@ -804,6 +840,7 @@ export function profilesPage(user: AuthenticatedUser, profiles: ReservationProfi
       if (event.target.closest('[data-close-modal]')) event.target.closest('.modal').hidden = true;
       if (event.target.classList?.contains('modal')) event.target.hidden = true;
     });
+    if (${options.openCreate ? "true" : "false"}) document.querySelector('#profile-modal').hidden = false;
   </script>`);
 }
 
@@ -918,6 +955,13 @@ export function updatesPage(
     ? shutdown.targetStates.map((target) => `<tr><td>${escapeHtml(target.displayName)}</td><td><code>${escapeHtml(target.id)}</code></td><td>${escapeHtml(target.desired)}</td><td><span class="pill ${escapeHtml(target.observed)}">${escapeHtml(target.observed)}</span></td></tr>`).join("")
     : `<tr><td colspan="4" class="muted">No targets configured.</td></tr>`;
   const activeRestart = shutdown.mode !== "idle";
+  const releaseNotes = update.releaseNotes?.length
+    ? `<div class="summary-list">${update.releaseNotes.map((note) => {
+        const noteUrl = safeGithubRepositoryUrl(note.url, update.repository);
+        return `<article class="target-status-card"><div class="target-status-head"><strong>${escapeHtml(note.title)}</strong>${note.revision ? `<code>${escapeHtml(note.revision)}</code>` : ""}</div>${note.details ? `<p>${escapeHtml(note.details)}</p>` : ""}${noteUrl ? `<a href="${escapeHtml(noteUrl)}" target="_blank" rel="noreferrer">View change</a>` : ""}</article>`;
+      }).join("")}</div>`
+    : `<p class="muted">${update.updateAvailable ? "No individual patch notes were published for this comparison." : "Patch notes appear here when an update is available."}</p>`;
+  const compareUrl = safeGithubRepositoryUrl(update.compareUrl, update.repository);
   return layout("NeurOn Updates", user, `<section class="panel">
     <h1>Updates and restart</h1>
     ${error ? `<p class="status">${escapeHtml(error)}</p>` : ""}
@@ -929,6 +973,11 @@ export function updatesPage(
       <p><strong>Last checked</strong><br>${update.checkedAt ? escapeHtml(new Date(update.checkedAt).toLocaleString()) : "<span class=\"muted\">Not checked</span>"}</p>
     </div>
     <form method="post" action="/admin/updates/check"><button class="secondary" type="submit">Check now</button></form>
+  </section>
+  <section class="panel">
+    <div class="target-status-head"><h2>What changes in this update</h2>${compareUrl ? `<a href="${escapeHtml(compareUrl)}" target="_blank" rel="noreferrer">Full comparison</a>` : ""}</div>
+    ${update.releaseNotesError ? `<p class="status">Patch notes could not be loaded: ${escapeHtml(update.releaseNotesError)}</p>` : ""}
+    ${releaseNotes}
   </section>
   <section class="panel">
     <h2>Restart safety</h2>
@@ -2126,10 +2175,8 @@ function escapeHtml(value: string): string {
   return value.replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;" })[char]!);
 }
 
-function targetOption(target: CapacityTarget, checked: boolean): string {
-  const details = [`Provider: ${target.provider}`, `${target.modelIds.length} models`];
-  if (target.modelsMax) details.push(`models-max: ${target.modelsMax}`);
-  return `<label class="option"><input type="radio" name="profileTargetChoice" value="${escapeHtml(target.id)}" ${checked ? "checked" : ""}><span><strong>${escapeHtml(target.displayName)}</strong><br><span class="muted">${escapeHtml(details.join(" | "))}</span></span></label>`;
+function helpTip(message: string): string {
+  return `<span class="help-tip" tabindex="0" role="note" aria-label="${escapeHtml(message)}" data-tip="${escapeHtml(message)}">?</span>`;
 }
 
 function profilePicker(profiles: ReservationProfile[], targets: Array<{ target: CapacityTarget; models: ModelDefinition[] }>): string {
@@ -2161,7 +2208,7 @@ function profilePickerCard(profile: ReservationProfile, targets: Array<{ target:
 
 function durationControls(): string {
   return `<div>
-    <h2>Duration</h2>
+    <h2>Duration${helpTip("How long you expect to use the capacity. You can extend an active reservation later.")}</h2>
     <div class="row" aria-label="Duration">
       <button class="choice" type="button" data-duration="1" aria-pressed="false">1 min</button>
       <button class="choice" type="button" data-duration="2" aria-pressed="true">2 min</button>
@@ -2179,8 +2226,8 @@ function durationControls(): string {
 }
 
 function keepaliveControls(): string {
-  return `<div>
-    <h2>Keepalive</h2>
+  return `<div class="keepalive-control">
+    <h2>Keepalive${helpTip("Extra idle time after the reservation ends. Recent model traffic can refresh this window so capacity does not stop between nearby requests.")}</h2>
     <div class="row" aria-label="Keepalive">
       <button class="choice" type="button" data-keepalive="1" aria-pressed="false">1 min</button>
       <button class="choice" type="button" data-keepalive="2" aria-pressed="true">2 min</button>
@@ -2234,7 +2281,6 @@ function profileCreateModal(targets: Array<{ target: CapacityTarget; models: Mod
       <div class="target-status-head"><h2>New reservation profile</h2><button class="secondary" type="button" data-close-modal>Close</button></div>
       <form id="profile-form" method="post" action="/reservation-profiles">
         <input type="hidden" name="returnTo" value="${escapeHtml(returnTo)}">
-        <input id="profile-target-id" type="hidden" name="targetId" value="${escapeHtml(initialTargetId)}">
         <input id="profile-duration-minutes" type="hidden" name="defaultDurationMinutes" value="2">
         <input id="profile-keepalive-minutes" type="hidden" name="defaultKeepaliveMinutes" value="2">
         <div class="field-grid">
@@ -2242,14 +2288,34 @@ function profileCreateModal(targets: Array<{ target: CapacityTarget; models: Mod
           <p><label>Description<br><input name="description" type="text" placeholder="Target and models for this workflow"></label></p>
         </div>
         ${profileDefaultControls()}
-        <h2>Target</h2>
-        <div class="targets">${targets.map(({ target }, index) => targetOption(target, index === 0)).join("")}</div>
-        <h2>Models</h2>
-        ${targets.map(({ target, models }) => `<div class="model-group" data-target-models="${escapeHtml(target.id)}" ${target.id === initialTargetId ? "" : "hidden"}>${modelFamilySections(models)}</div>`).join("")}
+        <h2>Targets and models</h2>
+        <p class="muted">Add every server this workflow needs, then choose the models to prepare on each one.</p>
+        <div class="profile-target-selections">${targets.map(({ target, models }, index) => profileTargetSelection(target, models, target.id === initialTargetId || (index === 0 && !initialTargetId))).join("")}</div>
         <div class="actions"><button type="submit">Save profile</button></div>
       </form>
     </div>
   </div>`;
+}
+
+function profileTargetSelection(target: CapacityTarget, models: ModelDefinition[], selected: boolean): string {
+  const modelContent = models.length === 0
+    ? `<p class="muted">No models are known yet. This reserves the target and leaves its full discovered runtime available.</p>`
+    : models.length === 1
+      ? `<p class="muted">This target has one model, so NeurOn selects it automatically.</p><div class="models">${profileModelOption(target.id, models[0], true)}</div>`
+      : `<p class="muted">Choose at least one model for this target.</p>${groupModelsByFamily(models).map(([family, familyModels]) => `<section class="family"><h3>${escapeHtml(family)}</h3><div class="models">${familyModels.map((model) => profileModelOption(target.id, model, false)).join("")}</div></section>`).join("")}`;
+  return `<section class="target-status-card profile-target-selection" data-profile-target-card>
+    <label class="profile-target-toggle"><input type="checkbox" name="selectionTargetIds" value="${escapeHtml(target.id)}" data-profile-target ${selected ? "checked" : ""}><span><strong>${escapeHtml(target.displayName)}</strong><span class="muted"><code>${escapeHtml(target.id)}</code></span></span></label>
+    <div data-profile-target-models>${modelContent}</div>
+  </section>`;
+}
+
+function profileModelOption(targetId: string, model: ModelDefinition, selected: boolean): string {
+  const value = JSON.stringify({ targetId, modelId: model.id });
+  const aliases = aliasesForDisplay(model);
+  const recommendedAlias = aliases[0];
+  const context = model.contextLabel ? `<span class="pill" title="${escapeHtml(contextTitle(model))}">${escapeHtml(model.contextLabel)}</span>` : "";
+  const description = model.description ? `<div class="muted">${escapeHtml(model.description)}</div>` : "";
+  return `<label class="option"><input type="checkbox" name="selectionModels" value="${escapeHtml(value)}" data-profile-model ${selected ? "checked" : ""}><span class="model-body"><span class="model-head"><strong>${escapeHtml(model.displayName)}</strong>${context}</span>${description}<span class="copy-row">${recommendedAlias ? copyChip(recommendedAlias, "primary") : ""}</span></span></label>`;
 }
 
 function profileReviewModal(profiles: ReservationProfile[], targets: Array<{ target: CapacityTarget; models: ModelDefinition[] }>): string {
@@ -2293,34 +2359,6 @@ function primaryAliasesForProfile(profile: ReservationProfile, modelLookup: Reco
   return Array.from(new Set(profile.selections.flatMap((selection) => selection.modelIds.map((modelId) => modelLookup[modelId]?.recommendedAlias ?? modelId)))).slice(0, 6);
 }
 
-function modelOption(model: ModelDefinition): string {
-  const aliases = aliasesForDisplay(model);
-  const recommendedAlias = aliases[0];
-  const otherAliases = aliases.filter((alias) => alias !== recommendedAlias && alias !== model.id);
-  const runtimeModelIds = model.runtimeModelIds?.filter((id) => !aliases.includes(id) && id !== model.id) ?? [];
-  const chips = [
-    recommendedAlias ? copyChip(recommendedAlias, "primary") : "",
-    recommendedAlias !== model.id ? copyChip(model.id) : "",
-    ...otherAliases.map((alias) => copyChip(alias)),
-    ...runtimeModelIds.map((id) => copyChip(id))
-  ].join("");
-  const context = model.contextLabel ? `<span class="pill" title="${escapeHtml(contextTitle(model))}">${escapeHtml(model.contextLabel)}</span>` : "";
-  const description = model.description ? `<div class="muted">${escapeHtml(model.description)}</div>` : "";
-  const tags = model.tags?.length ? `<span class="tag-row">${model.tags.map(modelTag).join("")}</span>` : "";
-  const meta = runtimeMetaLine(model);
-  return `<label class="option"><input type="checkbox" name="modelIds" value="${escapeHtml(model.id)}"><span class="model-body"><span class="model-head"><strong>${escapeHtml(model.displayName)}</strong>${context}</span>${description}${tags}${meta}<span class="copy-row">${chips}</span></span></label>`;
-}
-
-function modelFamilySections(models: ModelDefinition[]): string {
-  if (models.length === 0) return `<p class="muted">No models discovered yet. Reserving this target keeps the full runtime available.</p>`;
-  return groupModelsByFamily(models)
-    .map(
-      ([family, familyModels]) =>
-        `<section class="family"><h3>${escapeHtml(family)}</h3><div class="models">${familyModels.map((model) => modelOption(model)).join("")}</div></section>`
-    )
-    .join("");
-}
-
 function groupModelsByFamily(models: ModelDefinition[]): Array<[string, ModelDefinition[]]> {
   const groups = new Map<string, ModelDefinition[]>();
   for (const model of models) {
@@ -2348,11 +2386,6 @@ function copyChip(value: string, variant = ""): string {
   return `<button class="${classes}" type="button" data-copy="${escapeHtml(value)}" title="Copy ${escapeHtml(value)}">${escapeHtml(value)}</button>`;
 }
 
-function modelTag(tag: NonNullable<ModelDefinition["tags"]>[number]): string {
-  const title = tag.title ? ` title="${escapeHtml(tag.title)}"` : "";
-  return `<span class="model-tag"${title}>${escapeHtml(tag.label)}</span>`;
-}
-
 function contextTitle(model: ModelDefinition): string {
   const meta = model.runtimeMeta;
   if (!meta) return "Context window";
@@ -2362,35 +2395,8 @@ function contextTitle(model: ModelDefinition): string {
   return details.length ? details.join(", ") : "Context window";
 }
 
-function runtimeMetaLine(model: ModelDefinition): string {
-  const meta = model.runtimeMeta;
-  if (!meta) return "";
-  const details = [
-    meta.n_params ? `${formatCompactNumber(meta.n_params)} params` : "",
-    meta.size ? formatBytes(meta.size) : "",
-    meta.n_vocab ? `${formatInteger(meta.n_vocab)} vocab` : "",
-    meta.n_embd ? `${formatInteger(meta.n_embd)} embd` : ""
-  ].filter(Boolean);
-  return details.length ? `<div class="model-meta">${escapeHtml(details.join(" | "))}</div>` : "";
-}
-
 function formatInteger(value: number): string {
   return new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 }).format(value);
-}
-
-function formatCompactNumber(value: number): string {
-  return new Intl.NumberFormat("en-US", { notation: "compact", maximumFractionDigits: 1 }).format(value);
-}
-
-function formatBytes(value: number): string {
-  const units = ["B", "KB", "MB", "GB", "TB"];
-  let size = value;
-  let unitIndex = 0;
-  while (size >= 1000 && unitIndex < units.length - 1) {
-    size /= 1000;
-    unitIndex += 1;
-  }
-  return `${new Intl.NumberFormat("en-US", { maximumFractionDigits: 1 }).format(size)} ${units[unitIndex]}`;
 }
 
 function modelLookupForTargets(targets: Array<{ target: CapacityTarget; models: ModelDefinition[] }>): Record<string, { displayName: string; recommendedAlias: string }> {

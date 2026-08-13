@@ -42,6 +42,9 @@ referenced through NeurOn target configuration.
   their own pools or run startup DDL.
 - Model choices are owned by target configuration. Do not infer the production
   catalog from external preset files.
+- Reservation profiles may contain multiple target/model selections. Preserve
+  the per-target mapping when storing a reservation; aggregate target/model
+  arrays remain a compatibility surface for legacy records and clients.
 
 ## Configuration Rules
 
@@ -107,3 +110,8 @@ or Docker for ordinary unit tests.
 Update `control-plane/docs/` when changing design rationale, config shape,
 provider behavior, API/auth/integration surfaces, or reconciler semantics. The
 docs are part of the product surface for future operators and agents.
+
+Add a concise `control-plane/changes/*.md` fragment for every user- or
+operator-visible control-plane change so the Updates screen can explain the
+delta between the running and available revisions. Never put secrets or private
+deployment data in a release-note fragment.

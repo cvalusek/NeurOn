@@ -8,10 +8,27 @@ export interface UpdateStatus {
   updateAvailable?: boolean;
   checkedAt?: string;
   error?: string;
+  compareUrl?: string;
+  releaseNotes?: ReleaseNote[];
+  releaseNotesError?: string;
+}
+
+export interface ReleaseNote {
+  title: string;
+  details?: string;
+  revision?: string;
+  url?: string;
+  curated: boolean;
 }
 
 interface WorkflowRunsResponse {
   workflow_runs?: Array<{ head_sha?: string }>;
+}
+
+interface CompareResponse {
+  html_url?: string;
+  commits?: Array<{ sha?: string; html_url?: string; commit?: { message?: string } }>;
+  files?: Array<{ filename?: string; status?: string }>;
 }
 
 export class UpdateChecker {
@@ -43,14 +60,9 @@ export class UpdateChecker {
     const checkedAt = this.clock().toISOString();
     try {
       const response = await this.fetcher(
-        `https://api.github.com/repos/${this.config.repository}/actions/workflows/build-control-plane.yml/runs?branch=main&status=success&per_page=1`,
+        `${this.repositoryApiUrl()}/actions/workflows/build-control-plane.yml/runs?branch=main&status=success&per_page=1`,
         {
-          headers: {
-            accept: "application/vnd.github+json",
-            "user-agent": "NeurOn-update-checker",
-            "x-github-api-version": "2022-11-28",
-            ...(this.config.githubToken ? { authorization: `Bearer ${this.config.githubToken}` } : {})
-          },
+          headers: this.githubHeaders(),
           signal: AbortSignal.timeout(10_000)
         }
       );
@@ -58,15 +70,85 @@ export class UpdateChecker {
       const body = await response.json() as WorkflowRunsResponse;
       const latestRevision = body.workflow_runs?.[0]?.head_sha;
       if (!latestRevision) throw new Error("No successful main image build was found");
+      const updateAvailable = status.currentRevision ? !sameRevision(status.currentRevision, latestRevision) : undefined;
+      let releaseNotes: ReleaseNote[] | undefined;
+      let releaseNotesError: string | undefined;
+      let compareUrl: string | undefined;
+      if (updateAvailable && status.currentRevision) {
+        try {
+          const comparison = await this.fetchComparison(status.currentRevision, latestRevision);
+          releaseNotes = comparison.releaseNotes;
+          compareUrl = comparison.compareUrl;
+        } catch (error) {
+          releaseNotesError = error instanceof Error ? error.message : String(error);
+          compareUrl = this.compareWebUrl(status.currentRevision, latestRevision);
+        }
+      }
       return this.cache({
         ...status,
         latestRevision,
-        updateAvailable: status.currentRevision ? !sameRevision(status.currentRevision, latestRevision) : undefined,
-        checkedAt
+        updateAvailable,
+        checkedAt,
+        compareUrl,
+        releaseNotes,
+        releaseNotesError
       });
     } catch (error) {
       return this.cache({ ...status, checkedAt, error: error instanceof Error ? error.message : String(error) });
     }
+  }
+
+  private async fetchComparison(currentRevision: string, latestRevision: string): Promise<{ compareUrl?: string; releaseNotes: ReleaseNote[] }> {
+    const response = await this.fetcher(
+      `${this.repositoryApiUrl()}/compare/${encodeURIComponent(currentRevision)}...${encodeURIComponent(latestRevision)}`,
+      { headers: this.githubHeaders(), signal: AbortSignal.timeout(10_000) }
+    );
+    if (!response.ok) throw new Error(`GitHub comparison returned HTTP ${response.status}`);
+    const comparison = await response.json() as CompareResponse;
+    const fragments = (comparison.files ?? []).filter((file) =>
+      file.status !== "removed" && /^control-plane\/changes\/[^/]+\.md$/u.test(file.filename ?? "")
+    );
+    const curated = (await Promise.all(fragments.slice(0, 20).map(async (file) => {
+      const noteResponse = await this.fetcher(
+        this.repositoryContentsApiUrl(file.filename!, latestRevision),
+        { headers: this.githubHeaders("application/vnd.github.raw+json"), signal: AbortSignal.timeout(10_000) }
+      );
+      if (!noteResponse.ok) throw new Error(`GitHub release note returned HTTP ${noteResponse.status}`);
+      return parseReleaseNote(await noteResponse.text());
+    }))).filter((note): note is ReleaseNote => Boolean(note));
+    const compareUrl = safeGithubRepositoryUrl(comparison.html_url, this.config.repository)
+      ?? this.compareWebUrl(currentRevision, latestRevision);
+    if (curated.length > 0) return { compareUrl, releaseNotes: curated };
+
+    const commits = (comparison.commits ?? []).map((commit) => ({
+      title: firstLine(commit.commit?.message) || "Untitled change",
+      revision: commit.sha?.slice(0, 12),
+      url: safeGithubRepositoryUrl(commit.html_url, this.config.repository),
+      curated: false
+    }));
+    return { compareUrl, releaseNotes: commits.slice(-30) };
+  }
+
+  private githubHeaders(accept = "application/vnd.github+json"): Record<string, string> {
+    return {
+      accept,
+      "user-agent": "NeurOn-update-checker",
+      "x-github-api-version": "2022-11-28",
+      ...(this.config.githubToken ? { authorization: `Bearer ${this.config.githubToken}` } : {})
+    };
+  }
+
+  private repositoryApiUrl(): string {
+    return `https://api.github.com/repos/${encodedRepositoryPath(this.config.repository)}`;
+  }
+
+  private repositoryContentsApiUrl(filename: string, revision: string): string {
+    const encodedFilename = filename.split("/").map(encodeURIComponent).join("/");
+    return `${this.repositoryApiUrl()}/contents/${encodedFilename}?ref=${encodeURIComponent(revision)}`;
+  }
+
+  private compareWebUrl(currentRevision: string, latestRevision: string): string {
+    return `https://github.com/${encodedRepositoryPath(this.config.repository)}/compare/${encodeURIComponent(currentRevision)}...${encodeURIComponent(latestRevision)}`;
   }
 
   private baseStatus(): UpdateStatus {
@@ -80,6 +162,49 @@ export class UpdateChecker {
   private cache(status: UpdateStatus): UpdateStatus {
     this.cached = status;
     return status;
+  }
+}
+
+function parseReleaseNote(markdown: string): ReleaseNote | undefined {
+  const normalized = markdown.replace(/\r\n/g, "\n").trim();
+  if (!normalized) return undefined;
+  const lines = normalized.split("\n");
+  const title = lines[0].replace(/^#\s+/u, "").trim();
+  if (!title) return undefined;
+  const details = lines.slice(1).join("\n").trim() || undefined;
+  return { title, details, curated: true };
+}
+
+function firstLine(value: string | undefined): string {
+  return value?.split(/\r?\n/u)[0]?.trim() ?? "";
+}
+
+function encodedRepositoryPath(repository: string): string {
+  const segments = repository.split("/");
+  if (segments.length !== 2 || segments.some((segment) => !/^[a-z0-9_.-]+$/iu.test(segment))) {
+    throw new Error("GitHub repository must use the owner/name format");
+  }
+  return segments.map(encodeURIComponent).join("/");
+}
+
+export function safeGithubRepositoryUrl(value: string | undefined, repository: string): string | undefined {
+  if (!value) return undefined;
+  try {
+    const url = new URL(value);
+    const expectedPrefix = `/${repository.toLowerCase()}/`;
+    if (
+      url.protocol !== "https:" ||
+      url.hostname.toLowerCase() !== "github.com" ||
+      url.port !== "" ||
+      !url.pathname.toLowerCase().startsWith(expectedPrefix) ||
+      url.username ||
+      url.password
+    ) {
+      return undefined;
+    }
+    return url.toString();
+  } catch {
+    return undefined;
   }
 }
 

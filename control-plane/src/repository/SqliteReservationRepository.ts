@@ -4,6 +4,7 @@ import path from "node:path";
 import { nanoid } from "nanoid";
 import type { ReservationRepository } from "../domain/interfaces.js";
 import type { Reservation, ReservationStatus } from "../domain/types.js";
+import { parseReservationTargetSelections } from "../domain/reservationSelections.js";
 
 interface ReservationRow {
   id: string;
@@ -13,6 +14,7 @@ interface ReservationRow {
   profile_name: string | null;
   model_ids: string;
   target_ids: string;
+  target_selections: string | null;
   created_at: string;
   expires_at: string;
   keepalive_minutes: number | null;
@@ -38,10 +40,10 @@ export class SqliteReservationRepository implements ReservationRepository {
     this.db
       .prepare(
         `insert into reservations (
-          id, username, api_key_name, profile_id, profile_name, model_ids, target_ids, created_at, expires_at,
+          id, username, api_key_name, profile_id, profile_name, model_ids, target_ids, target_selections, created_at, expires_at,
           keepalive_minutes, ended_at, status, failure_message, synthetic
         ) values (
-          @id, @username, @apiKeyName, @profileId, @profileName, @modelIds, @targetIds, @createdAt, @expiresAt,
+          @id, @username, @apiKeyName, @profileId, @profileName, @modelIds, @targetIds, @targetSelections, @createdAt, @expiresAt,
           @keepaliveMinutes, @endedAt, @status, @failureMessage, @synthetic
         )`
       )
@@ -72,6 +74,7 @@ export class SqliteReservationRepository implements ReservationRepository {
           profile_name = @profileName,
           model_ids = @modelIds,
           target_ids = @targetIds,
+          target_selections = @targetSelections,
           created_at = @createdAt,
           expires_at = @expiresAt,
           keepalive_minutes = @keepaliveMinutes,
@@ -119,6 +122,7 @@ export class SqliteReservationRepository implements ReservationRepository {
         profile_name text,
         model_ids text not null,
         target_ids text not null,
+        target_selections text,
         created_at text not null,
         expires_at text not null,
         keepalive_minutes integer,
@@ -141,6 +145,9 @@ export class SqliteReservationRepository implements ReservationRepository {
     if (!columns.some((column) => column.name === "profile_name")) {
       this.db.exec("alter table reservations add column profile_name text");
     }
+    if (!columns.some((column) => column.name === "target_selections")) {
+      this.db.exec("alter table reservations add column target_selections text");
+    }
   }
 }
 
@@ -153,6 +160,7 @@ function toSqlParams(reservation: Reservation) {
     profileName: reservation.profileName ?? null,
     modelIds: JSON.stringify(reservation.modelIds),
     targetIds: JSON.stringify(reservation.targetIds),
+    targetSelections: reservation.targetSelections ? JSON.stringify(reservation.targetSelections) : null,
     createdAt: reservation.createdAt.toISOString(),
     expiresAt: reservation.expiresAt.toISOString(),
     keepaliveMinutes: reservation.keepaliveMinutes ?? null,
@@ -172,6 +180,7 @@ function fromRow(row: ReservationRow): Reservation {
     profileName: row.profile_name ?? undefined,
     modelIds: JSON.parse(row.model_ids) as string[],
     targetIds: JSON.parse(row.target_ids) as string[],
+    targetSelections: parseReservationTargetSelections(row.target_selections ? JSON.parse(row.target_selections) : undefined, "SQLite reservation target_selections"),
     createdAt: new Date(row.created_at),
     expiresAt: new Date(row.expires_at),
     keepaliveMinutes: row.keepalive_minutes ?? undefined,
@@ -189,6 +198,7 @@ function cloneReservation(reservation: Reservation): Reservation {
     profileName: reservation.profileName,
     modelIds: [...reservation.modelIds],
     targetIds: [...reservation.targetIds],
+    targetSelections: reservation.targetSelections?.map((selection) => ({ ...selection, modelIds: [...selection.modelIds] })),
     createdAt: new Date(reservation.createdAt),
     expiresAt: new Date(reservation.expiresAt),
     endedAt: reservation.endedAt ? new Date(reservation.endedAt) : undefined

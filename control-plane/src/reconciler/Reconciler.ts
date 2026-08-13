@@ -104,13 +104,19 @@ export class Reconciler {
         const runtimeTarget = withProviderRuntimeEndpoints(target, providerStatus);
         let observed = desired === "off" && providerStatus.observed === "healthy" ? "stopping" : providerStatus.observed;
         let message = providerStatus.message;
+        if (desired === "on" && providerStatus.observed === "stopping") {
+          observed = "starting";
+          message = "Waiting for target to finish stopping before restart";
+        }
         if (desired === "on" && providerStatus.observed === "healthy" && this.healthChecker && runtimeTarget.healthUrl) {
           const health = await this.healthChecker.check(runtimeTarget);
           observed = health.ok ? "healthy" : "starting";
           message = health.message;
         }
         if (desired === "on" && observed === "healthy" && this.modelWarmup) {
-          const modelIds = targetReservations.flatMap((reservation) => reservation.modelIds);
+          const modelIds = targetReservations.flatMap((reservation) =>
+            reservation.targetSelections?.find((selection) => selection.targetId === target.id)?.modelIds ?? reservation.modelIds
+          );
           try {
             await this.modelWarmup.warmupTargetModels(runtimeTarget, modelIds);
           } catch (error) {

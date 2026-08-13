@@ -1,7 +1,7 @@
 import crypto from "node:crypto";
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
-import type { AppConfig, AuthMethod, CapacityProviderDefinition, CapacityTarget, RuntimeProfile } from "../domain/types.js";
+import type { AppConfig, AuthMethod, CapacityProviderDefinition, CapacityTarget, ReservationProfileSelection, RuntimeProfile } from "../domain/types.js";
 import type { CapacityProvider } from "../domain/interfaces.js";
 import { SharedPasswordAuthProvider } from "../auth/SharedPasswordAuthProvider.js";
 import { OidcAuthService, type OidcLoginState } from "../auth/OidcAuthService.js";
@@ -17,7 +17,7 @@ import { CostEstimationService } from "../services/CostEstimationService.js";
 import { TargetService } from "../services/TargetService.js";
 import { TargetProvisioningService } from "../services/TargetProvisioningService.js";
 import type { HassleOffSafetyView } from "../ui/html.js";
-import { activationPage, adminAuthPage, apiKeysPage, hassleOffSafetyPage, loginPage, profilesPage, providerAdminPage, reservationHistoryPage, reservationPage, startPage, targetAdminPage, updatesPage } from "../ui/html.js";
+import { activationPage, adminAuthPage, apiKeysPage, hassleOffSafetyPage, loginPage, profilesPage, providerAdminPage, reservationHistoryPage, reservationPage, startPage, targetAdminPage, updatesPage, welcomePage } from "../ui/html.js";
 import { requireUser } from "../utils/http.js";
 import type { HassleOffClient } from "../safety/HassleOffClient.js";
 
@@ -132,19 +132,32 @@ export function registerUiRoutes(
 
   app.get("/", async (request, reply) => {
     const query = z.object({ error: z.string().optional() }).parse(request.query);
+    const user = requireUser(request);
+    const profiles = await reservationProfileService.listForUser(user);
+    if (profiles.length === 0 && (await reservationService.listActiveOwned(user)).length === 0) return reply.redirect("/welcome");
     const targets = catalog.listTargets().map((target) => ({ target, models: catalog.listModelsForTarget(target.id) }));
     const costEstimates = await startCostEstimates(targets.map(({ target }) => target), costEstimation);
+    return reply.type("text/html").send(startPage(user, targets, profiles, query.error, costEstimates, config.adminStatusPollSeconds));
+  });
+  app.get("/welcome", async (request, reply) => {
     const user = requireUser(request);
-    return reply.type("text/html").send(startPage(user, targets, await reservationProfileService.listForUser(user), query.error, costEstimates, config.adminStatusPollSeconds));
+    const hasProfiles = (await reservationProfileService.listForUser(user)).length > 0;
+    return reply.type("text/html").send(welcomePage(user, hasProfiles, false));
+  });
+  app.get("/help", async (request, reply) => {
+    const user = requireUser(request);
+    const hasProfiles = (await reservationProfileService.listForUser(user)).length > 0;
+    return reply.type("text/html").send(welcomePage(user, hasProfiles, true));
   });
   app.get("/api-keys", async (request, reply) => {
     const user = requireUser(request);
     return reply.type("text/html").send(apiKeysPage(user, await apiKeyService.listForUser(user)));
   });
   app.get("/profiles", async (request, reply) => {
+    const query = z.object({ create: z.string().optional(), onboarding: z.string().optional(), error: z.string().optional() }).parse(request.query);
     const user = requireUser(request);
     const targets = catalog.listTargets().map((target) => ({ target, models: catalog.listModelsForTarget(target.id) }));
-    return reply.type("text/html").send(profilesPage(user, await reservationProfileService.listForUser(user), targets));
+    return reply.type("text/html").send(profilesPage(user, await reservationProfileService.listForUser(user), targets, { openCreate: query.create === "1", onboarding: query.onboarding === "1", error: query.error }));
   });
   app.post("/api-keys", async (request, reply) => {
     const user = requireUser(request);
@@ -183,24 +196,26 @@ export function registerUiRoutes(
           name: z.string().min(1),
           description: z.string().optional(),
           modelIds: z.union([z.string(), z.array(z.string())]).optional(),
-          targetId: z.string(),
+          targetId: z.string().optional(),
+          selectionTargetIds: z.union([z.string(), z.array(z.string())]).optional(),
+          selectionModels: z.union([z.string(), z.array(z.string())]).optional(),
           returnTo: z.enum(["/", "/profiles"]).default("/"),
           defaultDurationMinutes: z.coerce.number().optional(),
           defaultKeepaliveMinutes: z.coerce.number().optional()
         })
         .parse(request.body);
-      const modelIds = raw.modelIds ? (Array.isArray(raw.modelIds) ? raw.modelIds : [raw.modelIds]) : [];
+      const selections = profileSelectionsFromForm(raw);
       await reservationProfileService.createForUser(requireUser(request), {
         name: raw.name,
         description: raw.description,
-        selections: [{ targetId: raw.targetId, modelIds }],
+        selections,
         defaultDurationMinutes: raw.defaultDurationMinutes,
         defaultKeepaliveMinutes: raw.defaultKeepaliveMinutes
       });
       return reply.redirect(raw.returnTo);
     } catch (error) {
       const message = error instanceof Error ? error.message : "Could not save reservation profile";
-      return reply.redirect(`/?error=${encodeURIComponent(message)}`);
+      return reply.redirect(`/profiles?create=1&error=${encodeURIComponent(message)}`);
     }
   });
   app.post("/reservation-profiles/:id/delete", async (request, reply) => {
@@ -553,6 +568,29 @@ export function registerUiRoutes(
       return reply.redirect(`/admin/targets?error=${encodeURIComponent(message)}`);
     }
   });
+}
+
+function profileSelectionsFromForm(raw: {
+  targetId?: string;
+  modelIds?: string | string[];
+  selectionTargetIds?: string | string[];
+  selectionModels?: string | string[];
+}): ReservationProfileSelection[] {
+  const selectedTargets = listFormValues(raw.selectionTargetIds);
+  if (selectedTargets.length === 0) {
+    if (!raw.targetId) return [];
+    return [{ targetId: raw.targetId, modelIds: listFormValues(raw.modelIds) }];
+  }
+  const modelsByTarget = new Map<string, string[]>();
+  for (const encoded of listFormValues(raw.selectionModels)) {
+    const parsed = z.object({ targetId: z.string(), modelId: z.string() }).parse(JSON.parse(encoded));
+    modelsByTarget.set(parsed.targetId, [...(modelsByTarget.get(parsed.targetId) ?? []), parsed.modelId]);
+  }
+  return selectedTargets.map((targetId) => ({ targetId, modelIds: modelsByTarget.get(targetId) ?? [] }));
+}
+
+function listFormValues(value: string | string[] | undefined): string[] {
+  return value === undefined ? [] : Array.isArray(value) ? value : [value];
 }
 
 const providerFormSchema = z.object({

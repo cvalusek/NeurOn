@@ -49,7 +49,7 @@ test("requires sign-in before showing protected pages", async ({ page }) => {
   await page.getByLabel("Username").fill("ui-user");
   await page.getByLabel("Password").fill(password);
   await page.getByRole("button", { name: "Sign in" }).click();
-  await expect(page).toHaveURL(`${baseUrl}/`);
+  await expect(page).toHaveURL(`${baseUrl}/welcome`);
   await expect(page.locator("header")).toContainText("ui-user");
 });
 
@@ -103,13 +103,48 @@ test("supports custom reservation duration and keepalive controls", async ({ pag
   await expect(page.locator("#current-reservation")).toContainText("active");
 });
 
-test("prevents reserving without selecting or creating a profile", async ({ page }) => {
+test("guides users without profiles into profile creation", async ({ page }) => {
   await signIn(page, "validation-user");
+  await expect(page.getByRole("heading", { name: "Shared model capacity without paying for idle time" })).toBeVisible();
+  await page.getByRole("button", { name: "Create your first profile" }).click();
+  await expect(page).toHaveURL(/\/profiles\?create=1&onboarding=1$/);
+  await expect(page.locator("#profile-modal")).toBeVisible();
+});
 
-  await page.getByRole("button", { name: "Reserve" }).click();
+test("updates visible timing choices when selecting a profile", async ({ page }) => {
+  await signIn(page, "profile-default-user");
+  await page.evaluate(async () => {
+    for (const profile of [
+      { name: "Short", defaultDurationMinutes: 5, defaultKeepaliveMinutes: 15 },
+      { name: "Long", defaultDurationMinutes: 30, defaultKeepaliveMinutes: 1 }
+    ]) {
+      await fetch("/api/reservation-profiles", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ ...profile, selections: [{ targetId: "prefer-smol", modelIds: [] }] })
+      });
+    }
+  });
+  await page.goto(baseUrl);
+  await expect(page.locator('[data-duration="30"]')).toHaveAttribute("aria-pressed", "true");
+  await expect(page.locator('[data-keepalive="1"]')).toHaveAttribute("aria-pressed", "true");
+  await page.locator("#profile-picker > summary").click();
+  await page.locator('[data-select-profile]', { hasText: "Short" }).click();
+  await expect(page.locator("#duration-minutes")).toHaveValue("5");
+  await expect(page.locator('[data-duration="5"]')).toHaveAttribute("aria-pressed", "true");
+  await expect(page.locator("#keepalive-minutes")).toHaveValue("15");
+  await expect(page.locator('[data-keepalive="15"]')).toHaveAttribute("aria-pressed", "true");
+});
 
-  await expect(page).toHaveURL(`${baseUrl}/`);
-  await expect(page.locator("#current-reservation")).toContainText("No active reservation");
+test("shows and manages multiple active reservations", async ({ page }) => {
+  await signIn(page, "multi-reservation-user");
+  await createSmolProfile(page);
+  await page.getByRole("button", { name: "Reserve capacity" }).click();
+  await page.getByRole("button", { name: "Reserve capacity" }).click();
+  await expect(page.locator("#current-reservation .reservation-card")).toHaveCount(2);
+  await expect(page.locator("#current-reservation").getByRole("button", { name: "I'm done" })).toHaveCount(2);
+  await page.locator("#current-reservation").getByRole("button", { name: "I'm done" }).first().click();
+  await expect(page.locator("#current-reservation .reservation-card")).toHaveCount(1);
 });
 
 test("shows and completes the standalone reservation page", async ({ page }) => {
@@ -135,10 +170,14 @@ test("shows and completes the standalone reservation page", async ({ page }) => 
 
 test("shows reservation cost and activation history", async ({ page }) => {
   await signIn(page, "cost-user");
-  await reserveSmolModel(page);
+  await createSmolProfile(page);
+  await page.locator('[data-duration="30"]').click();
+  await page.getByRole("button", { name: "Reserve capacity" }).click();
+  await expect(page.locator("#current-reservation")).toContainText("active");
 
-  await reconcile(new Date("2026-06-25T10:00:00.000Z"));
-  await reconcile(new Date("2026-06-25T10:15:00.000Z"));
+  const costWindowStart = new Date(Date.now() + 1_000);
+  await reconcile(costWindowStart);
+  await reconcile(new Date(costWindowStart.getTime() + 15 * 60_000));
 
   await page.reload();
   await expect(page.locator("#current-reservation")).toContainText("Cost so far:");
@@ -405,7 +444,7 @@ async function signIn(page: Page, username: string) {
   await page.getByLabel("Username").fill(username);
   await page.getByLabel("Password").fill(password);
   await page.getByRole("button", { name: "Sign in" }).click();
-  await expect(page).toHaveURL(`${baseUrl}/`);
+  await expect(page).toHaveURL(`${baseUrl}/welcome`);
 }
 
 async function reserveSmolModel(page: Page) {
@@ -415,10 +454,13 @@ async function reserveSmolModel(page: Page) {
 }
 
 async function createSmolProfile(page: Page) {
-  await page.getByRole("button", { name: "New", exact: true }).click();
+  if (page.url().endsWith("/welcome")) {
+    await page.getByRole("button", { name: "Create your first profile" }).click();
+  } else {
+    await page.getByRole("button", { name: "Create profile" }).click();
+  }
   const modal = page.locator("#profile-modal");
   await modal.getByLabel("Name").fill("Smol profile");
-  await modal.locator("label.option", { hasText: "Qwen Smol" }).click();
   await modal.getByRole("button", { name: "Save profile" }).click();
   await expect(page).toHaveURL(`${baseUrl}/`);
   await expect(page.locator("#start-form")).toContainText("Smol profile");

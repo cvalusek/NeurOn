@@ -66,10 +66,8 @@ describe("maintenance mode", () => {
 
     expect(health.json()).toEqual({ ok: true, storageDriver: "memory", maintenanceMode: true });
     expect(mutation.statusCode).toBe(503);
-    expect(home.statusCode).toBe(200);
-    expect(home.body).toContain("orderTargetsForStatus(data.capacityTargets, data.reservations)");
-    expect(home.body).toContain("setInterval(updateCountdowns, 1000)");
-    expect(home.body).toContain("setInterval(refreshServerStatus, 10000)");
+    expect(home.statusCode).toBe(302);
+    expect(home.headers.location).toBe("/welcome");
     expect(hassleOff.statusCode).toBe(200);
     expect(fetchMock).not.toHaveBeenCalled();
   });
@@ -81,7 +79,7 @@ describe("API authentication context", () => {
     const { app } = await buildApp({ ...config, adminUsers: ["actual"] }, models);
     const auth = { authorization: `Basic ${Buffer.from("other:secret").toString("base64")}` };
 
-    const response = await app.inject({ method: "GET", url: "/", headers: auth });
+    const response = await app.inject({ method: "GET", url: "/welcome", headers: auth });
     await app.close();
 
     expect(response.statusCode).toBe(200);
@@ -123,7 +121,7 @@ describe("API authentication context", () => {
       headers: { authorization: `Basic ${Buffer.from("actual:secret").toString("base64")}` }
     });
     const sessionCookie = new SharedPasswordAuthProvider(undefined, ["actual"], "test-cookie-secret").createCookie("actual");
-    const sessionRequest = await app.inject({ method: "GET", url: "/", headers: { cookie: `llm_control_auth=${sessionCookie}` } });
+    const sessionRequest = await app.inject({ method: "GET", url: "/welcome", headers: { cookie: `llm_control_auth=${sessionCookie}` } });
     await app.close();
 
     expect(login.statusCode).toBe(200);
@@ -189,6 +187,57 @@ describe("API authentication context", () => {
     });
   });
 
+  it("auto-selects a target's only model and preserves multi-target profile mappings on reservations", async () => {
+    process.env.USE_FAKE_PROVIDER = "true";
+    const multiConfig: AppConfig = {
+      ...config,
+      capacityTargets: [
+        { id: "t1", displayName: "T1", provider: "aws-ecs", modelIds: ["m1"] },
+        { id: "t2", displayName: "T2", provider: "aws-ecs", modelIds: ["m2", "m3"] }
+      ]
+    };
+    const multiModels: ModelDefinition[] = [
+      { id: "m1", displayName: "M1", aliases: ["m1"], targetIds: ["t1"] },
+      { id: "m2", displayName: "M2", aliases: ["m2"], targetIds: ["t2"] },
+      { id: "m3", displayName: "M3", aliases: ["m3"], targetIds: ["t2"] }
+    ];
+    const { app } = await buildApp(multiConfig, multiModels);
+    const auth = { authorization: `Basic ${Buffer.from("actual:secret").toString("base64")}` };
+    const createdProfile = await app.inject({
+      method: "POST",
+      url: "/api/reservation-profiles",
+      headers: auth,
+      payload: { name: "Two targets", selections: [{ targetId: "t1", modelIds: [] }, { targetId: "t2", modelIds: ["m3"] }], defaultDurationMinutes: 10 }
+    });
+    expect(createdProfile.statusCode).toBe(201);
+    expect(createdProfile.json().selections).toEqual([{ targetId: "t1", modelIds: ["m1"] }, { targetId: "t2", modelIds: ["m3"] }]);
+
+    const reservation = await app.inject({ method: "POST", url: "/api/reservations", headers: auth, payload: { profileId: createdProfile.json().id } });
+    await app.close();
+
+    expect(reservation.statusCode).toBe(201);
+    expect(reservation.json()).toMatchObject({
+      modelIds: ["m1", "m3"],
+      targetSelections: [{ targetId: "t1", modelIds: ["m1"] }, { targetId: "t2", modelIds: ["m3"] }],
+      targets: [{ id: "t1" }, { id: "t2" }]
+    });
+  });
+
+  it("requires model choices when a selected target exposes multiple models", async () => {
+    process.env.USE_FAKE_PROVIDER = "true";
+    const targetWithChoices = { id: "t1", displayName: "T1", provider: "aws-ecs", modelIds: ["m1", "m2"] };
+    const choiceModels: ModelDefinition[] = [
+      { id: "m1", displayName: "M1", aliases: ["m1"], targetIds: ["t1"] },
+      { id: "m2", displayName: "M2", aliases: ["m2"], targetIds: ["t1"] }
+    ];
+    const { app } = await buildApp({ ...config, capacityTargets: [targetWithChoices] }, choiceModels);
+    const auth = { authorization: `Basic ${Buffer.from("actual:secret").toString("base64")}` };
+    const response = await app.inject({ method: "POST", url: "/api/reservation-profiles", headers: auth, payload: { name: "Incomplete", selections: [{ targetId: "t1", modelIds: [] }] } });
+    await app.close();
+    expect(response.statusCode).toBe(400);
+    expect(response.json().error).toContain("Choose at least one model");
+  });
+
   it("serves a profiles page for the current user's reservation profiles", async () => {
     process.env.USE_FAKE_PROVIDER = "true";
     const { app } = await buildApp(config, models);
@@ -252,11 +301,18 @@ describe("API authentication context", () => {
       url: `/reservations/${response.json().reservationId}`,
       headers: { authorization: `Basic ${Buffer.from("actual:secret").toString("base64")}` }
     });
+    const home = await app.inject({
+      method: "GET",
+      url: "/",
+      headers: { authorization: `Basic ${Buffer.from("actual:secret").toString("base64")}` }
+    });
     await app.close();
 
     expect(response.statusCode).toBe(201);
     expect(response.json()).toMatchObject({ modelIds: ["m1"], targets: [{ id: "t1" }] });
     expect(response.json().profileId).toBeUndefined();
+    expect(home.statusCode).toBe(200);
+    expect(home.body).toContain("Your reservations");
     expect(page.body).toContain("setInterval(updateReservationTime, 1000)");
     expect(page.body).toContain("String(seconds).padStart(2, '0')");
   });

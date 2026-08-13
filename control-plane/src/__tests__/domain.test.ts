@@ -4,6 +4,7 @@ import type { CapacityTarget, ModelDefinition } from "../domain/types.js";
 import { NoopBackendConfigSync } from "../litellm/LiteLlmBackendConfigSync.js";
 import { Reconciler } from "../reconciler/Reconciler.js";
 import { InMemoryReservationRepository } from "../repository/InMemoryReservationRepository.js";
+import { InMemoryReservationProfileRepository } from "../repository/InMemoryReservationProfileRepository.js";
 import { InMemoryTargetModelDiscoveryRepository } from "../repository/InMemoryTargetModelDiscoveryRepository.js";
 import { InMemoryTargetStatusRepository } from "../repository/InMemoryTargetStatusRepository.js";
 import { ModelCatalog } from "../services/ModelCatalog.js";
@@ -95,6 +96,30 @@ describe("reservation behavior", () => {
     const reservation = (await repository.list())[0];
     expect(reservation.modelIds).toEqual([]);
     expect(reservation.targetIds).toEqual([target.id]);
+  });
+
+  it("normalizes legacy single-model profiles when creating a reservation", async () => {
+    const singleTarget: CapacityTarget = { ...target, id: "single", modelIds: ["qwen"] };
+    const singleModels: ModelDefinition[] = [{ id: "qwen", displayName: "Qwen", aliases: ["qwen"], targetIds: [singleTarget.id] }];
+    const repository = new InMemoryReservationRepository();
+    const profiles = new InMemoryReservationProfileRepository();
+    const profile = await profiles.create({ username: "clint", name: "Legacy", selections: [{ targetId: singleTarget.id, modelIds: [] }] });
+    const service = new ReservationService(repository, new ModelCatalog(singleModels, [singleTarget]), profiles);
+
+    const reservation = await service.createForUser({ username: "clint", isAdmin: false }, { profileId: profile.id, durationMinutes: 5 });
+
+    expect(reservation.modelIds).toEqual(["qwen"]);
+    expect(reservation.targetSelections).toEqual([{ targetId: singleTarget.id, modelIds: ["qwen"] }]);
+  });
+
+  it("rejects legacy profiles that omit a choice on a multi-model target", async () => {
+    const repository = new InMemoryReservationRepository();
+    const profiles = new InMemoryReservationProfileRepository();
+    const profile = await profiles.create({ username: "clint", name: "Legacy", selections: [{ targetId: target.id, modelIds: [] }] });
+    const service = new ReservationService(repository, new ModelCatalog(models, [target]), profiles);
+
+    await expect(service.createForUser({ username: "clint", isAdmin: false }, { profileId: profile.id, durationMinutes: 5 }))
+      .rejects.toThrow(`Choose at least one model for target: ${target.id}`);
   });
 
   it("can extend a reservation from now instead of stacking onto the previous expiry", async () => {

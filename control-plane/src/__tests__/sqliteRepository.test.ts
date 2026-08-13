@@ -1,6 +1,7 @@
 import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import Database from "better-sqlite3";
 import { afterEach, describe, expect, it } from "vitest";
 import { authenticateApiKey, ApiKeyService } from "../services/ApiKeyService.js";
 import type { AuthenticatedUser } from "../domain/types.js";
@@ -29,6 +30,7 @@ describe("SqliteReservationRepository", () => {
       apiKeyName: "OpenCode",
       modelIds: ["m1"],
       targetIds: ["t1"],
+      targetSelections: [{ targetId: "t1", modelIds: ["m1"] }],
       createdAt: new Date("2026-06-27T12:00:00.000Z"),
       expiresAt: new Date("2026-06-27T13:00:00.000Z"),
       keepaliveMinutes: 2,
@@ -43,10 +45,28 @@ describe("SqliteReservationRepository", () => {
       apiKeyName: "OpenCode",
       modelIds: ["m1"],
       targetIds: ["t1"],
+      targetSelections: [{ targetId: "t1", modelIds: ["m1"] }],
       status: "active"
     });
     expect(await second.listActive(new Date("2026-06-27T12:30:00.000Z"))).toHaveLength(1);
     second.close();
+  });
+
+  it("fails closed when persisted target selections have an invalid shape", async () => {
+    tempDir = await mkdtemp(path.join(os.tmpdir(), "neuron-sqlite-"));
+    const databasePath = path.join(tempDir, "neuron.db");
+    const repository = new SqliteReservationRepository(databasePath);
+    const reservation = await repository.create({
+      username: "clint", modelIds: ["m1"], targetIds: ["t1"], createdAt: new Date(), expiresAt: new Date(Date.now() + 60_000), status: "active"
+    });
+    repository.close();
+    const database = new Database(databasePath);
+    database.prepare("update reservations set target_selections = ? where id = ?").run(JSON.stringify({ targetId: "t1", modelIds: ["m1"] }), reservation.id);
+    database.close();
+
+    const reopened = new SqliteReservationRepository(databasePath);
+    await expect(reopened.get(reservation.id)).rejects.toThrow("SQLite reservation target_selections must be an array");
+    reopened.close();
   });
 });
 

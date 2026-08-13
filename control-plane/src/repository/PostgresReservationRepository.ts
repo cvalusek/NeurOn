@@ -2,6 +2,7 @@ import { nanoid } from "nanoid";
 import pg from "pg";
 import type { ReservationRepository } from "../domain/interfaces.js";
 import type { Reservation, ReservationStatus } from "../domain/types.js";
+import { parseReservationTargetSelections } from "../domain/reservationSelections.js";
 
 interface ReservationRow {
   id: string;
@@ -11,6 +12,7 @@ interface ReservationRow {
   profile_name: string | null;
   model_ids: string[] | string;
   target_ids: string[] | string;
+  target_selections: Array<{ targetId: string; modelIds: string[] }> | string | null;
   created_at: Date | string;
   expires_at: Date | string;
   keepalive_minutes: number | null;
@@ -32,9 +34,9 @@ export class PostgresReservationRepository implements ReservationRepository {
     const values = toSqlValues(reservation);
     await this.pool.query(
       `insert into reservations (
-        id, username, api_key_name, profile_id, profile_name, model_ids, target_ids, created_at, expires_at,
+        id, username, api_key_name, profile_id, profile_name, model_ids, target_ids, target_selections, created_at, expires_at,
         keepalive_minutes, ended_at, status, failure_message, synthetic
-      ) values ($1, $2, $3, $4, $5, $6::jsonb, $7::jsonb, $8, $9, $10, $11, $12, $13, $14)`,
+      ) values ($1, $2, $3, $4, $5, $6::jsonb, $7::jsonb, $8::jsonb, $9, $10, $11, $12, $13, $14, $15)`,
       values
     );
     return cloneReservation(reservation);
@@ -62,13 +64,14 @@ export class PostgresReservationRepository implements ReservationRepository {
         profile_name = $5,
         model_ids = $6::jsonb,
         target_ids = $7::jsonb,
-        created_at = $8,
-        expires_at = $9,
-        keepalive_minutes = $10,
-        ended_at = $11,
-        status = $12,
-        failure_message = $13,
-        synthetic = $14
+        target_selections = $8::jsonb,
+        created_at = $9,
+        expires_at = $10,
+        keepalive_minutes = $11,
+        ended_at = $12,
+        status = $13,
+        failure_message = $14,
+        synthetic = $15
       where id = $1`,
       toSqlValues(updated)
     );
@@ -105,6 +108,7 @@ function toSqlValues(reservation: Reservation): unknown[] {
     reservation.profileName ?? null,
     JSON.stringify(reservation.modelIds),
     JSON.stringify(reservation.targetIds),
+    reservation.targetSelections ? JSON.stringify(reservation.targetSelections) : null,
     reservation.createdAt,
     reservation.expiresAt,
     reservation.keepaliveMinutes ?? null,
@@ -118,6 +122,10 @@ function toSqlValues(reservation: Reservation): unknown[] {
 function fromRow(row: ReservationRow): Reservation {
   const modelIds = typeof row.model_ids === "string" ? (JSON.parse(row.model_ids) as string[]) : row.model_ids;
   const targetIds = typeof row.target_ids === "string" ? (JSON.parse(row.target_ids) as string[]) : row.target_ids;
+  const targetSelections = parseReservationTargetSelections(
+    typeof row.target_selections === "string" ? JSON.parse(row.target_selections) : row.target_selections,
+    "PostgreSQL reservation target_selections"
+  );
   return {
     id: row.id,
     username: row.username,
@@ -126,6 +134,7 @@ function fromRow(row: ReservationRow): Reservation {
     profileName: row.profile_name ?? undefined,
     modelIds,
     targetIds,
+    targetSelections,
     createdAt: new Date(row.created_at),
     expiresAt: new Date(row.expires_at),
     keepaliveMinutes: row.keepalive_minutes ?? undefined,
@@ -143,6 +152,7 @@ function cloneReservation(reservation: Reservation): Reservation {
     profileName: reservation.profileName,
     modelIds: [...reservation.modelIds],
     targetIds: [...reservation.targetIds],
+    targetSelections: reservation.targetSelections?.map((selection) => ({ ...selection, modelIds: [...selection.modelIds] })),
     createdAt: new Date(reservation.createdAt),
     expiresAt: new Date(reservation.expiresAt),
     endedAt: reservation.endedAt ? new Date(reservation.endedAt) : undefined

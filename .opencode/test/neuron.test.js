@@ -1,6 +1,15 @@
 import { describe, it, beforeEach } from "node:test";
 import assert from "node:assert/strict";
-import { candidateModelIds, ensureReservation, isCompletionEvent, matchLiteLlmModel, refreshExistingReservation, resetNeurOnPluginState } from "../plugins/neuron.js";
+import {
+  candidateModelIds,
+  createNeurOnHooks,
+  ensureReservation,
+  isCompletionEvent,
+  matchLiteLlmModel,
+  matchesAllowedProvider,
+  refreshExistingReservation,
+  resetNeurOnPluginState
+} from "../plugins/neuron.js";
 
 const targets = [
   {
@@ -68,6 +77,97 @@ describe("NeurOn OpenCode plugin", () => {
     assert.deepEqual(refreshes, ["r1"]);
   });
 
+  it("uses the awaited chat.message hook to reserve and wait before returning", async () => {
+    const calls = [];
+    const client = {
+      config: {
+        durationMinutes: 2,
+        keepaliveMinutes: 2,
+        waitForHealthy: true,
+        allowedProviders: ["litellm"]
+      },
+      async getStatus() {
+        calls.push("status");
+        return { capacityTargets: targets, models };
+      },
+      async createReservation() {
+        calls.push("create");
+        return { reservationId: "r1", targets: [{ id: "t1", observed: "provisioning" }] };
+      },
+      async waitForHealthy(reservationId) {
+        calls.push(`wait:${reservationId}`);
+        return { reservationId, targets: [{ id: "t1", observed: "healthy" }] };
+      }
+    };
+
+    const hooks = createNeurOnHooks(client);
+    await hooks["chat.message"]({
+      sessionID: "s1",
+      model: { providerID: "litellm", modelID: "prefer/gemma-4" }
+    });
+
+    assert.deepEqual(calls, ["status", "create", "wait:r1"]);
+  });
+
+  it("filters providers before making any NeurOn request", async () => {
+    let statusCalls = 0;
+    const hooks = createNeurOnHooks({
+      config: { allowedProviders: ["litellm"] },
+      async getStatus() {
+        statusCalls += 1;
+        return { capacityTargets: targets, models };
+      }
+    });
+
+    await hooks["chat.message"]({
+      sessionID: "s1",
+      model: { providerID: "openai", modelID: "prefer/gemma-4" }
+    });
+
+    assert.equal(statusCalls, 0);
+    assert.equal(matchesAllowedProvider("LiteLLM", "gemma-4", ["litellm"]), true);
+    assert.equal(matchesAllowedProvider("openai", "gemma-4", ["litellm"]), false);
+  });
+
+  it("shares aliases for one model without treating another model on the target as ready", async () => {
+    const targetWithTwoModels = [{
+      ...targets[0],
+      modelIds: ["gemma-4-26b-a4b", "qwen-3.6-27b"]
+    }];
+    const modelsWithTwoModels = [
+      ...models,
+      {
+        id: "qwen-3.6-27b",
+        aliases: ["qwen-3.6"],
+        backendModelIds: [],
+        targetIds: ["t1"]
+      }
+    ];
+    const creates = [];
+    const refreshes = [];
+    const client = {
+      config: { waitForHealthy: false },
+      async getStatus() {
+        return { capacityTargets: targetWithTwoModels, models: modelsWithTwoModels };
+      },
+      async createReservation(match) {
+        creates.push(match.modelIds[0]);
+        return { reservationId: `r${creates.length}`, targets: [] };
+      },
+      async refreshReservation(reservationId) {
+        refreshes.push(reservationId);
+        return { reservationId, targets: [] };
+      }
+    };
+
+    await ensureReservation(client, "prefer/gemma-4");
+    await ensureReservation(client, "gemma-4-26b-a4b");
+    await ensureReservation(client, "prefer/qwen-3.6");
+
+    assert.deepEqual(creates, ["gemma-4-26b-a4b", "qwen-3.6-27b"]);
+    assert.deepEqual(refreshes, ["r1"]);
+  });
+
   it("waits for health from the chat hook path", async () => {
     const waits = [];
     const client = {
@@ -126,5 +226,46 @@ describe("NeurOn OpenCode plugin", () => {
     assert.equal(isCompletionEvent({ event: { type: "message.updated", properties: { status: "completed" } } }), true);
     assert.equal(isCompletionEvent({ event: { type: "message.updated", properties: { info: { time: { completed: 123 } } } } }), true);
     assert.equal(isCompletionEvent({ event: { type: "message.updated", properties: { status: "streaming" } } }), false);
+  });
+
+  it("refreshes once for OpenCode's completed-message and idle event pair", async () => {
+    const refreshes = [];
+    const client = {
+      config: { waitForHealthy: false, allowedProviders: ["litellm"] },
+      async getStatus() {
+        return { capacityTargets: targets, models };
+      },
+      async createReservation() {
+        return { reservationId: "r1", targets: [] };
+      },
+      async refreshReservation(reservationId) {
+        refreshes.push(reservationId);
+        return { reservationId, targets: [] };
+      }
+    };
+    const hooks = createNeurOnHooks(client);
+    await hooks["chat.message"]({
+      sessionID: "s1",
+      model: { providerID: "litellm", modelID: "prefer/gemma-4" }
+    });
+    await hooks.event({
+      event: {
+        type: "message.updated",
+        properties: {
+          info: {
+            role: "assistant",
+            sessionID: "s1",
+            modelID: "prefer/gemma-4",
+            providerID: "litellm",
+            time: { completed: 123 }
+          }
+        }
+      }
+    });
+    await hooks.event({
+      event: { type: "session.idle", properties: { sessionID: "s1" } }
+    });
+
+    assert.deepEqual(refreshes, ["r1"]);
   });
 });

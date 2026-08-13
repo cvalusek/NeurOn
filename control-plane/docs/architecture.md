@@ -34,6 +34,9 @@ Important fields:
 - optional `synthetic` for traffic keepalive reservations
 - optional `profileId` and `profileName` when the reservation was created from
   a saved reservation profile
+- optional `targetSelections`, an immutable snapshot of the exact model IDs
+  selected for each target. Legacy reservations without this field keep the
+  original aggregate `modelIds` and `targetIds` behavior.
 
 A reservation contributes to desired capacity only when it is active and its
 expiration is in the future.
@@ -42,14 +45,14 @@ expiration is in the future.
 
 A reservation profile is a user-owned saved launch shape. It records one or more
 target selections, each with the model IDs the user expects to use on that
-target. Current UI creation saves one target selection, but the stored shape is
-already a list so future workflows can span multiple targets without replacing
-the concept.
+target. The UI can combine several target/model selections in one profile and
+automatically selects the only model on single-model targets.
 
 Profiles are not runtime provider presets. They do not tune inference images,
 download models, or infer a production catalog. They only store user reservation
-intent and are expanded by `ReservationService` into the same `modelIds` and
-`targetIds` used by direct reservations.
+intent. `ReservationService` snapshots the target-specific selections onto the
+reservation while retaining aggregate `modelIds` and `targetIds` for compatible
+clients and legacy records.
 
 ### TargetActivation
 
@@ -61,6 +64,12 @@ Target activation reservations connect an activation to the reservations that
 contributed to it. They accumulate estimated cost allocated back to each
 reservation. Reservation API payloads expose their sum as
 `costEstimate`.
+
+Synthetic traffic reservations never receive cost. When an activation enters a
+traffic-only tail, its durable links to the latest real participating
+reservations remain the allocation owners until new real demand supersedes
+them. This keeps attribution stable across control-plane restarts without
+claiming that the traffic source identifies a user.
 
 Configured hourly target estimates take precedence. Providers may otherwise
 return a current hourly estimate through `getTargetCostEstimate`; AWS EC2 uses
@@ -167,8 +176,8 @@ into AWS, Docker, LiteLLM, or a concrete repository from unrelated code.
 1. Auth resolves an `AuthenticatedUser`.
 2. UI or API creates a reservation with model IDs, duration, and keepalive
    window, or with a `profileId` plus duration/keepalive.
-3. `ReservationService` maps models to targets through `ModelCatalog`, expanding
-   the profile first when one was provided.
+3. `ReservationService` validates target-specific model selections through
+   `ModelCatalog`, expanding the profile first when one was provided.
 4. Request handler stores intent only. It does not directly start or stop
    infrastructure.
 5. A successful reservation mutation requests a non-blocking, coalesced

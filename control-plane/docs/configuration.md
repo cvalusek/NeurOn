@@ -365,9 +365,12 @@ Update checks are automatically enabled when `NEURON_BUILD_SHA` is present and
 are disabled for ordinary source checkouts. `NEURON_UPDATE_GITHUB_TOKEN` is
 optional for private repositories or higher GitHub API limits; inject it as a
 secret and do not store it in target configuration. The token needs read-only
-access to repository Actions metadata. The task also needs outbound HTTPS access
-to `api.github.com`; check failures are reported in the admin page and never
-affect reconciliation.
+access to repository Actions metadata and repository content. The task also
+needs outbound HTTPS access to `api.github.com`. NeurOn compares the running and
+available revisions, displays changed
+`control-plane/changes/*.md` fragments, and falls back to commit titles when a
+range has no curated fragments. Check or patch-note failures are reported in the
+admin page and never affect reconciliation.
 
 Update controls are available from **Admin > Updates**. See
 [Operations](operations.md#safe-update-restarts) for shutdown semantics and

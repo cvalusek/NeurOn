@@ -99,6 +99,32 @@ describe("reconciler decisions", () => {
     expect(statuses.get("t1")?.observed).toBe("failed");
   });
 
+  it("keeps reservations active while desired-on capacity finishes stopping", async () => {
+    const repository = new InMemoryReservationRepository();
+    const statuses = new InMemoryTargetStatusRepository();
+    const provider = new FakeCapacityProvider();
+    const now = new Date("2026-08-13T10:00:00.000Z");
+    const reservation = await repository.create({
+      username: "clint",
+      modelIds: ["m1"],
+      targetIds: ["t1"],
+      createdAt: now,
+      expiresAt: new Date("2026-08-13T11:00:00.000Z"),
+      status: "active"
+    });
+    provider.statuses.set("t1", { observed: "stopping", message: "EC2 instance stopping" });
+    const reconciler = new Reconciler([target], repository, statuses, provider, new NoopBackendConfigSync());
+
+    await reconciler.reconcile(now);
+
+    expect(statuses.get("t1")).toMatchObject({
+      desired: "on",
+      observed: "starting",
+      message: "Waiting for target to finish stopping before restart"
+    });
+    expect(await repository.get(reservation.id)).toMatchObject({ status: "active" });
+  });
+
   it("records startup duration estimates from Starting to healthy", async () => {
     const repository = new InMemoryReservationRepository();
     const statuses = new InMemoryTargetStatusRepository();
@@ -192,6 +218,35 @@ describe("reconciler decisions", () => {
 
     expect(modelWarmup.calls).toEqual([["m1"]]);
     expect(statuses.get("t1")).toMatchObject({ desired: "on", observed: "healthy" });
+  });
+
+  it("warms only the models selected for each target in a multi-target reservation", async () => {
+    const secondTarget: CapacityTarget = { ...target, id: "t2", displayName: "T2", modelIds: ["m2"] };
+    const repository = new InMemoryReservationRepository();
+    const statuses = new InMemoryTargetStatusRepository();
+    const provider = new FakeCapacityProvider();
+    provider.statuses.set("t1", { observed: "healthy", message: "Running" });
+    provider.statuses.set("t2", { observed: "healthy", message: "Running" });
+    await repository.create({
+      username: "clint",
+      modelIds: ["m1", "m2"],
+      targetIds: ["t1", "t2"],
+      targetSelections: [{ targetId: "t1", modelIds: ["m1"] }, { targetId: "t2", modelIds: ["m2"] }],
+      createdAt: new Date("2026-06-25T10:00:00.000Z"),
+      expiresAt: new Date("2026-06-25T11:00:00.000Z"),
+      status: "active"
+    });
+    const calls: Array<{ targetId: string; modelIds: string[] }> = [];
+    const modelWarmup = {
+      async warmupTargetModels(warmupTarget: CapacityTarget, modelIds: string[]) {
+        calls.push({ targetId: warmupTarget.id, modelIds });
+      }
+    };
+    const reconciler = new Reconciler([target, secondTarget], repository, statuses, provider, new NoopBackendConfigSync(), undefined, undefined, modelWarmup as never);
+
+    await reconciler.reconcile(new Date("2026-06-25T10:00:00.000Z"));
+
+    expect(calls).toEqual([{ targetId: "t1", modelIds: ["m1"] }, { targetId: "t2", modelIds: ["m2"] }]);
   });
 
   it("records target activations and allocates estimated cost to active reservations", async () => {

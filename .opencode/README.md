@@ -8,6 +8,11 @@ waits until NeurOn reports the matching target healthy, then lets the request
 continue. After completions, it refreshes the same reservation to keep capacity
 warm without stacking long reservation tails.
 
+The wait happens in OpenCode's awaited `chat.message` hook. A cold target does
+not receive the model request and ask the user to retry later: the original
+request remains pending until NeurOn reports readiness or the configured wait
+times out.
+
 ## Install
 
 Install the package wherever OpenCode loads npm plugins:
@@ -34,6 +39,7 @@ Optional:
 
 ```env
 NEURON_API_BASE_URL=http://localhost:8090
+NEURON_ALLOWED_PROVIDERS=litellm
 NEURON_RESERVATION_DURATION_MINUTES=2
 NEURON_RESERVATION_KEEPALIVE_MINUTES=2
 NEURON_WAIT_FOR_HEALTHY=true
@@ -41,11 +47,20 @@ NEURON_WAIT_TIMEOUT_SECONDS=600
 NEURON_WAIT_POLL_SECONDS=5
 ```
 
+`NEURON_ALLOWED_PROVIDERS` is a comma-separated, case-insensitive allowlist of
+OpenCode provider IDs. Leave it unset or empty to allow any provider whose model
+can be mapped to NeurOn. Set it when OpenCode also uses providers that should
+never create NeurOn reservations.
+
 ## Model Mapping
 
 OpenCode model names are LiteLLM-facing names. NeurOn maps those names through
 configured model IDs, aliases, backend IDs, runtime IDs, and target
 `litellmDisplayPrefix` metadata.
+
+Aliases for the same target and canonical model refresh one reservation. Models
+that share a target retain separate reservations because each can require its
+own warmup.
 
 If LiteLLM aliases a route prefix away, configure NeurOn with an empty display
 prefix for that target.

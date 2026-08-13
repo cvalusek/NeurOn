@@ -106,7 +106,8 @@ export async function buildApp(config: AppConfig, models: ModelDefinition[], opt
   const modelWarmup = new ModelWarmupService(catalog);
   const costEstimation = new CostEstimationService(
     reservationRepository.targetActivations,
-    config.maintenanceMode ? undefined : capacityProvider
+    config.maintenanceMode ? undefined : capacityProvider,
+    reservations
   );
   const trafficPoller =
     config.litellmApiBaseUrl && config.litellmApiKey && config.litellmTrafficPollSeconds > 0

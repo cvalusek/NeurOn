@@ -54,6 +54,7 @@ function cloneReservation(reservation: Reservation): Reservation {
     profileName: reservation.profileName,
     modelIds: [...reservation.modelIds],
     targetIds: [...reservation.targetIds],
+    targetSelections: reservation.targetSelections?.map((selection) => ({ ...selection, modelIds: [...selection.modelIds] })),
     createdAt: new Date(reservation.createdAt),
     expiresAt: new Date(reservation.expiresAt),
     endedAt: reservation.endedAt ? new Date(reservation.endedAt) : undefined

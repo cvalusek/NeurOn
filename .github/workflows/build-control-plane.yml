@@ -41,6 +41,8 @@ jobs:
         working-directory: control-plane
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: "20"
@@ -49,6 +51,10 @@ jobs:
       - run: npm ci
       - run: npm run typecheck
       - run: npm run lint
+      - name: Validate release notes
+        env:
+          RELEASE_BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: npm run changes:check -- "$RELEASE_BASE_SHA"
       - run: npm test
       - uses: docker/setup-buildx-action@v3
       - name: Prepare image name

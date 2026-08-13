@@ -20,8 +20,10 @@ export function reservationJson(reservation: Reservation, statuses: TargetStatus
     keepaliveMinutes: reservation.keepaliveMinutes,
     profileId: reservation.profileId,
     profileName: reservation.profileName,
+    synthetic: reservation.synthetic ?? false,
     endedAt: reservation.endedAt?.toISOString(),
     modelIds: reservation.modelIds,
+    targetSelections: reservation.targetSelections,
     targets: reservation.targetIds.map((targetId) => {
       const status = statuses.find((candidate) => candidate.targetId === targetId);
       return {

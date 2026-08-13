@@ -63,6 +63,8 @@ export interface Reservation {
   profileName?: string;
   modelIds: string[];
   targetIds: string[];
+  /** Exact target/model snapshot used by profiles and multi-target requests. Absent on legacy reservations. */
+  targetSelections?: ReservationProfileSelection[];
   createdAt: Date;
   expiresAt: Date;
   keepaliveMinutes?: number;

@@ -1,4 +1,4 @@
-import type { CapacityProvider, TargetActivationRepository } from "../domain/interfaces.js";
+import type { CapacityProvider, ReservationRepository, TargetActivationRepository } from "../domain/interfaces.js";
 import type { CapacityTarget, Reservation, TargetActivation, TargetCostEstimateConfig } from "../domain/types.js";
 
 export interface ReservationCostEstimate {
@@ -21,7 +21,8 @@ export interface TargetCostEstimateProvider {
 export class CostEstimationService {
   constructor(
     private readonly targetActivations: TargetActivationRepository,
-    private readonly costProvider?: CapacityProvider | TargetCostEstimateProvider
+    private readonly costProvider?: CapacityProvider | TargetCostEstimateProvider,
+    private readonly reservations?: Pick<ReservationRepository, "get">
   ) {}
 
   async reconcileTargetActivation(target: CapacityTarget, activeReservations: Reservation[], desired: "on" | "off", now: Date): Promise<void> {
@@ -39,7 +40,7 @@ export class CostEstimationService {
     }
 
     const activation = openActivation ?? await this.createActivation(target, now);
-    const reservationIds = activeReservations.map((reservation) => reservation.id);
+    const reservationIds = await this.attributionReservationIds(activation.id, activeReservations);
     await this.allocateElapsedCost(activation, reservationIds, now);
     await this.targetActivations.closeInactiveReservations(activation.id, reservationIds, now);
   }
@@ -88,6 +89,32 @@ export class CostEstimationService {
     } catch {
       return undefined;
     }
+  }
+
+  private async attributionReservationIds(targetActivationId: string, activeReservations: Reservation[]): Promise<string[]> {
+    const realReservationIds = activeReservations
+      .filter((reservation) => !reservation.synthetic)
+      .map((reservation) => reservation.id);
+    if (realReservationIds.length > 0) return realReservationIds;
+
+    // Synthetic traffic reservations keep the target on, but never own cost. During
+    // that tail, durable activation links retain the most recent real participants.
+    if (!this.reservations) return [];
+    const links = await this.targetActivations.listActivationReservations(targetActivationId);
+    const realLinks = (await Promise.all(links.map(async (link) => ({
+      link,
+      reservation: await this.reservations?.get(link.reservationId)
+    }))))
+      .filter(({ reservation }) => reservation && !reservation.synthetic)
+      .map(({ link }) => link);
+    const openLinks = realLinks.filter((link) => !link.endedAt);
+    if (openLinks.length > 0) return openLinks.map((link) => link.reservationId);
+
+    const lastEndedAt = realLinks.reduce((latest, link) => Math.max(latest, link.endedAt?.getTime() ?? -Infinity), -Infinity);
+    if (!Number.isFinite(lastEndedAt)) return [];
+    return realLinks
+      .filter((link) => link.endedAt?.getTime() === lastEndedAt)
+      .map((link) => link.reservationId);
   }
 
   private async allocateElapsedCost(activation: TargetActivation, reservationIds: string[], now: Date): Promise<void> {
