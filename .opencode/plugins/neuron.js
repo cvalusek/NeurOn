@@ -1,15 +1,33 @@
 // NeurOn plugin - auto-loads from ~/.config/opencode/plugins/
 // Manages reservation lifecycle: cold-start detection → reservation → warmup wait → healthy
-// Config via env: NEURON_API_BASE_URL, NEURON_API_KEY, NEURON_ALLOWED_PROVIDERS (default: litellm)
+// Config via env: NEURON_API_BASE_URL, NEURON_API_KEY, NEURON_ALLOWED_PROVIDERS (optional provider filter)
+
+import fs from "node:fs/promises";
 
 const DEFAULT_POLL_S = 5;
 const DEFAULT_DURATION_MINUTES = 2;
 const DEFAULT_WAIT_TIMEOUT_S = 600;
+const NEURON_LOG_FILE = process.env.NEURON_LOG_FILE ||
+  (process.env.USERPROFILE ? `${process.env.USERPROFILE}\\neuron-plugin.log` : `${process.env.HOME || "."}/neuron-plugin.log`);
+
+function log(msg) {
+  fs.appendFile(NEURON_LOG_FILE, `${new Date().toISOString()} ${msg}\n`).catch(() => {});
+}
+
+let _statusCache = null;
+let _statusCacheTime = 0;
+let _statusInflight = null;
+const STATUS_CACHE_TTL = 3000;
 
 const state = {
   reservations: new Map(),
-  inflight: new Map()
+  inflight: new Map(),
+  inflightTarget: new Map(),
+  retryState: new Map(),
+  keepaliveTimers: new Map()
 };
+const transportFailures = new Map(); // sessionID → timestamp
+const warmupLocks = new Map(); // targetId → { promise }
 
 class NeurOnClient {
   constructor(config) {
@@ -53,8 +71,10 @@ class NeurOnClient {
       lastReservation = await this.request(
         `/api/reservations/${encodeURIComponent(reservationId)}/status`
       );
-      if (lastReservation.targets?.every((t) => t.observed === "healthy"))
+      if (lastReservation.targets?.every((t) => t.observed === "healthy")) {
+        invalidateStatusCache();
         return lastReservation;
+      }
       const failed = lastReservation.targets?.find((t) => t.observed === "failed");
       if (failed)
         throw new Error(`NeurOn target ${failed.id} failed: ${failed.message}`);
@@ -68,22 +88,40 @@ class NeurOnClient {
     );
   }
 
-  async request(path, options = {}) {
+  async request(path, options = {}, requestTimeoutMs) {
     if (!this.config.apiKey)
       throw new Error("NEURON_API_KEY is required for the NeurOn OpenCode plugin");
-    const response = await fetch(`${this.config.apiBaseUrl}${path}`, {
-      ...options,
-      headers: {
-        "content-type": "application/json",
-        authorization: `Bearer ${this.config.apiKey}`,
-        ...(options.headers ?? {})
+    const controller = new AbortController();
+    const timeout = requestTimeoutMs ?? this.config.requestTimeoutMs;
+    const timer = setTimeout(() => controller.abort(), timeout);
+    try {
+      const response = await fetch(`${this.config.apiBaseUrl}${path}`, {
+        ...options,
+        headers: {
+          "content-type": "application/json",
+          authorization: `Bearer ${this.config.apiKey}`,
+          ...(options.headers ?? {})
+        },
+        signal: controller.signal
+      });
+      if (!response.ok) {
+        const body = await response.text();
+        throw new NeurOnApiError(response.status, path, body, response.statusText);
       }
-    });
-    if (!response.ok) {
-      const body = await response.text();
-      throw new NeurOnApiError(response.status, path, body, response.statusText);
+      const raw = await response.text();
+      try {
+        return JSON.parse(raw);
+      } catch (parseErr) {
+        throw new NeurOnApiError(0, path, `Failed to parse response: ${raw}`, 'invalid_json');
+      }
+    } catch (error) {
+      if (error?.name === 'AbortError') {
+        throw new NeurOnApiError(0, path, 'Request timed out', 'timeout');
+      }
+      throw error;
+    } finally {
+      clearTimeout(timer);
     }
-    return response.json();
   }
 }
 
@@ -98,13 +136,14 @@ class NeurOnApiError extends Error {
 
 function loadConfig() {
   const raw = process.env.NEURON_ALLOWED_PROVIDERS;
-  // Empty string or unset = allow all providers; otherwise use the list
-  const allowedProviders =
-    raw === "" || raw == null
-      ? []
-      : raw.split(",").map((p) => p.trim()).filter(Boolean);
+  const allowedProviders = raw
+    ? raw.split(",").map((p) => p.trim()).filter(Boolean)
+    : [];
+  const baseUrl = process.env.NEURON_API_BASE_URL || "http://localhost:8090";
+  if (!baseUrl.startsWith("http://") && !baseUrl.startsWith("https://"))
+    throw new Error("NEURON_API_BASE_URL must be a valid http:// or https:// URL");
   return {
-    apiBaseUrl: trimSlash(process.env.NEURON_API_BASE_URL ?? "http://localhost:8090"),
+    apiBaseUrl: trimSlash(baseUrl),
     apiKey: process.env.NEURON_API_KEY,
     durationMinutes: positiveNumber(
       process.env.NEURON_RESERVATION_DURATION_MINUTES,
@@ -117,6 +156,14 @@ function loadConfig() {
     waitForHealthy: boolEnv(process.env.NEURON_WAIT_FOR_HEALTHY, true),
     waitTimeoutMs: positiveNumber(process.env.NEURON_WAIT_TIMEOUT_SECONDS, DEFAULT_WAIT_TIMEOUT_S) * 1000,
     pollMs: positiveNumber(process.env.NEURON_WAIT_POLL_SECONDS, DEFAULT_POLL_S) * 1000,
+    requestTimeoutMs: positiveNumber(process.env.NEURON_REQUEST_TIMEOUT_MS, 8000),
+    preflightTimeoutMs: positiveNumber(process.env.NEURON_PREFLIGHT_TIMEOUT_MS, 2000),
+    cooldownPeriodMs: positiveNumber(process.env.NEURON_COOLDOWN_PERIOD_MS, 30000),
+    retryMaxAttempts: positiveNumber(process.env.NEURON_RETRY_MAX_ATTEMPTS, 3),
+    retryBaseMs: positiveNumber(process.env.NEURON_RETRY_BASE_MS, 1000),
+    retryMaxMs: positiveNumber(process.env.NEURON_RETRY_MAX_MS, 8000),
+    blockOnColdMessage: boolEnv(process.env.NEURON_BLOCK_ON_COLD_MESSAGE, false),
+    strictProviderMatch: boolEnv(process.env.NEURON_STRICT_PROVIDER_MATCH, false),
     allowedProviders
   };
 }
@@ -125,43 +172,135 @@ function loadConfig() {
 
 function splitProvider(modelId) {
   const slash = modelId.indexOf("/");
-  if (slash > 0) {
+  if (slash > 0 && slash < modelId.length - 1) {
     return { provider: modelId.slice(0, slash), bareModelId: modelId.slice(slash + 1) };
   }
   return { provider: undefined, bareModelId: modelId };
 }
 
+function canonicalizeModel(provider, modelId) {
+  const split = splitProvider(modelId ?? "");
+  const finalProvider = provider ?? split.provider;
+  const bareModelId = split.bareModelId;
+  const fullModel = finalProvider ? `${finalProvider}/${bareModelId}` : bareModelId;
+  return { provider: finalProvider, bareModelId, fullModel };
+}
+
 function matchesAllowedProvider(providerId, modelId, allowedProviders) {
-  // If no providers are restricted, allow all
-  if (allowedProviders.length === 0) return true;
+  if (!allowedProviders.length) return true;
   if (providerId) {
     for (const p of allowedProviders)
       if (providerId.toLowerCase() === p.toLowerCase()) return true;
+    log(`allowed-provider skip: provider=${providerId} model=${modelId} allowed=${allowedProviders.join(",")}`);
     return false;
   }
   for (const p of allowedProviders)
     if (modelId.startsWith(p + "/")) return true;
+  log(`allowed-provider skip: provider=none model=${modelId} allowed=${allowedProviders.join(",")}`);
   return false;
 }
 
 // ── Model → target matching ───────────────────────────────
 
-function matchLiteLlmModel(targets, models, bareModelId) {
+function resolveProviderFallback(fallbackTargets, bareModelId, strictProviderMatch) {
+  if (!strictProviderMatch && fallbackTargets.length === 1) {
+    return { targetIds: [fallbackTargets[0].id] };
+  }
+  if (!strictProviderMatch && fallbackTargets.length > 1) {
+    const providers = [...new Set(fallbackTargets.map((t) => t.provider?.toLowerCase()).filter(Boolean))];
+    if (providers.length === 1) {
+      return { targetIds: [fallbackTargets[0].id] };
+    }
+    if (providers.length === 0) {
+      return { error: 'provider_mapping_error', detail: `Model "${bareModelId}" has multiple NeurOn targets with missing provider metadata.` };
+    }
+    return { error: 'provider_mapping_error', detail: `Model "${bareModelId}" is on multiple NeurOn providers (${providers.join(", ")}). Configure provider mapping or use strict provider labels.` };
+  }
+  return null;
+}
+
+function matchLiteLlmModel(targets, models, bareModelId, provider, strictProviderMatch = false) {
   const modelByLookup = buildModelLookup(models);
 
-  // Try bare model ID first (e.g. "qwen-3.6-27b") against model lookup
+  // ── Pass 1: Model lookup with provider preference ────────────────
   const model = modelByLookup.get(bareModelId);
   if (model && model.targetIds?.length) {
+    if (provider) {
+      const pLower = provider.toLowerCase();
+      const providerFallbackTargets = [];
+      for (const target of targets) {
+        if (model.targetIds.includes(target.id) &&
+            target.provider?.toLowerCase() === pLower) {
+          return { modelIds: [model.id], targetIds: [target.id] };
+        }
+        if (model.targetIds.includes(target.id)) {
+          providerFallbackTargets.push(target);
+        }
+      }
+      const fallback = resolveProviderFallback(providerFallbackTargets, bareModelId, strictProviderMatch);
+      if (fallback) {
+        if (fallback.error) return fallback;
+        return { modelIds: [model.id], targetIds: fallback.targetIds };
+      }
+      return { error: 'provider_mapping_error', detail: `Model "${bareModelId}" not found on provider "${provider}".` };
+    }
+    // No provider — collect providers hosting this model for ambiguity check
+    const pass1Providers = new Set();
+    let pass1Primary = null;
     for (const target of targets) {
-      if (model.targetIds.includes(target.id))
-        return { modelIds: [model.id], targetIds: [target.id] };
+      if (model.targetIds.includes(target.id)) {
+        if (!pass1Primary) pass1Primary = target;
+        if (target.provider) pass1Providers.add(target.provider.toLowerCase());
+      }
+    }
+    if (pass1Providers.size > 1) {
+      return { error: `ambiguous_model_mapping`, detail: `Model "${bareModelId}" is available on providers: ${[...pass1Providers].join(", ")}. Specify provider explicitly.` };
+    }
+    if (pass1Primary) {
+      return { modelIds: [model.id], targetIds: [pass1Primary.id] };
     }
   }
 
-  // Fallback: match bareModelId directly against any target's modelIds
+  // ── Pass 2: Direct target modelIds match ─────────────────────────
+  let primaryMatch = null;
+  const providerFallbackMatches = [];
+  let altProviders = new Set();
+
   for (const target of targets) {
-    if (target.modelIds?.includes(bareModelId))
-      return { modelIds: [bareModelId], targetIds: [target.id] };
+    if (!target.modelIds?.includes(bareModelId)) continue;
+
+    if (provider) {
+      const tProv = target.provider?.toLowerCase();
+      if (tProv === provider.toLowerCase()) {
+        return { modelIds: [bareModelId], targetIds: [target.id] };
+      }
+      providerFallbackMatches.push(target);
+      if (tProv) altProviders.add(tProv);
+    } else {
+      if (!primaryMatch) primaryMatch = target;
+      if (target.provider) {
+        altProviders.add(target.provider.toLowerCase());
+      }
+    }
+  }
+
+  // Provider was given but no exact match found
+  if (provider) {
+    const fallback = resolveProviderFallback(providerFallbackMatches, bareModelId, strictProviderMatch);
+    if (fallback) {
+      if (fallback.error) return fallback;
+      return { modelIds: [bareModelId], targetIds: fallback.targetIds };
+    }
+    return { error: 'provider_mapping_error', detail: `Model "${bareModelId}" not found on provider "${provider}". Available providers: ${[...altProviders].join(", ")}.` };
+  }
+
+  // No provider specified but multiple providers host this model — ambiguous
+  if (!provider && altProviders.size > 1) {
+    return { error: `ambiguous_model_mapping`, detail: `Model "${bareModelId}" is available on providers: ${[...altProviders].join(", ")}. Specify provider explicitly.` };
+  }
+
+  if (primaryMatch) {
+    return { modelIds: [bareModelId], targetIds: [primaryMatch.id] };
   }
 
   return undefined;
@@ -175,8 +314,9 @@ function buildModelLookup(models) {
       ...(model.aliases ?? []),
       ...(model.backendModelIds ?? []),
       ...(model.runtimeModelIds ?? [])
-    ])
-      lookup.set(id, model);
+    ]) {
+      if (id) lookup.set(id, model);
+    }
   }
   return lookup;
 }
@@ -187,76 +327,307 @@ function findTargetStatus(targets, targetId) {
   return undefined;
 }
 
-// ── Reservation flow (keyed by target ID) ──────────────────
-
-function ensureReservation(client, modelId) {
-  // Resolve model → target first to deduplicate across models sharing a target
-  return resolveTargetForModel(client, modelId).then(async ({ targetId, match }) => {
-    const existing = state.inflight.get(targetId);
-    if (existing) {
-      return existing;
-    }
-    const promise = reserveOrRefreshTarget(client, targetId, match).finally(() =>
-      state.inflight.delete(targetId)
-    );
-    state.inflight.set(targetId, promise);
-    return promise;
+async function getCachedStatus(client) {
+  // 1. Return cached resolved status while TTL valid
+  if (_statusCache && Date.now() - _statusCacheTime < STATUS_CACHE_TTL) {
+    return _statusCache;
+  }
+  // 2. If stale and fetch in-flight, await the in-flight request
+  if (_statusInflight) {
+    return _statusInflight;
+  }
+  // 3. Fetch new, set inflight, save resolved value+time, clear inflight
+  _statusInflight = client.getStatus().then((result) => {
+    _statusCache = result;
+    _statusCacheTime = Date.now();
+    _statusInflight = null;
+    return result;
+  }).catch((e) => {
+    _statusInflight = null;
+    throw e;
   });
+  return _statusInflight;
 }
 
-async function resolveTargetForModel(client, modelId) {
-  const status = await client.getStatus();
-  const { bareModelId } = splitProvider(modelId);
+function invalidateStatusCache() {
+  _statusCache = null;
+  _statusCacheTime = 0;
+}
+
+// ── Reservation flow (keyed by model ID + target ID) ────────
+
+function ensureReservation(client, modelId, sessionID) {
+  const inflightKey = `${sessionID}::${modelId}`;
+  const existing = state.inflight.get(inflightKey);
+  if (existing) {
+    return existing;
+  }
+
+  const promise = resolveTargetForModel(client, modelId, sessionID)
+    .then(async ({ targetId, match }) => {
+      // Secondary dedup at target level for models sharing targets
+      const targetInflightKey = `${sessionID}::${targetId}`;
+      const targetInflight = state.inflightTarget.get(targetInflightKey);
+      if (targetInflight) return targetInflight;
+
+      const p = reserveOrRefreshTarget(client, targetId, match, sessionID).finally(() => {
+        state.inflightTarget.delete(targetInflightKey);
+      });
+      state.inflightTarget.set(targetInflightKey, p);
+      return p;
+    })
+    .finally(() => { state.inflight.delete(inflightKey); });
+
+  state.inflight.set(inflightKey, promise);
+  return promise;
+}
+
+async function resolveTargetForModel(client, modelId, sessionID) {
+  let status;
+  try {
+    status = await getCachedStatus(client);
+  } catch (error) {
+    log(`resolve target failure: model=${modelId} session=${sessionID} error=${error?.message ?? error}`);
+    throw error;
+  }
+  const splitResult = splitProvider(modelId);
   const match = matchLiteLlmModel(
     status.capacityTargets ?? [],
     status.models ?? [],
-    bareModelId
+    splitResult.bareModelId,
+    splitResult.provider,
+    client.config.strictProviderMatch
   );
-  if (!match)
+  if (!match) {
+    log(`resolve target failure: model=${modelId} session=${sessionID} targetId=none reason=no_match`);
     throw new Error(
       `NeurOn could not map OpenCode model "${modelId}" to a capacity target`
     );
+  }
+  if (match.error) {
+    log(`resolve target failure: model=${modelId} session=${sessionID} targetId=none reason=${match.error}`);
+    throw new Error(`NeurOn ${match.error}: ${match.detail}`);
+  }
   const targetId = match.targetIds[0];
   const targetInfo = findTargetStatus(status.capacityTargets ?? [], targetId);
-  return { targetId, match, targetHealthy: targetInfo?.observed === "healthy" };
-}
+  const targetHealthy = targetInfo?.observed === "healthy";
+  const resKey = `${sessionID}::${targetId}`;
 
-async function reserveOrRefreshTarget(client, targetId, match) {
-  // Check if we already have a reservation for this target
-  const existing = state.reservations.get(targetId);
-  if (existing) {
+  // If target is healthy and this session has no local reservation, adopt the server-side one
+  if (targetHealthy && !state.reservations.has(resKey)) {
     try {
-      const refreshed = await client.refreshReservation(existing.reservationId);
-      return saveReservation(targetId, refreshed);
-    } catch (error) {
-      if (!isRecoverableReservationError(error)) throw error;
-      state.reservations.delete(targetId);
+      adoptExistingReservation(targetId, status, sessionID, client);
+    } catch (e) {
+      /* ignore — we'll create a new reservation if needed */
     }
   }
-  const reservation = await client.createReservation(match);
-  return saveReservation(targetId, reservation);
+
+  log(`resolve target success: model=${modelId} session=${sessionID} targetId=${targetId} observed=${targetInfo?.observed ?? "unknown"}`);
+  return { targetId, match, targetHealthy, resKey };
 }
 
-function saveReservation(targetId, reservation) {
-  state.reservations.set(targetId, reservation);
+// Determine if an error is transient and worth retrying.
+// Transient: timeout (status 0), rate-limited (429), server errors (5xx).
+// Permanent (no retry): 4xx client errors, mapping/config errors.
+function isTransientError(err) {
+  if (err instanceof NeurOnApiError) {
+    // status 0 = timeout/network failure → transient
+    if (err.status === 0) return true;
+    // 429 rate limited → transient
+    if (err.status === 429) return true;
+    // 5xx server errors → transient
+    if (err.status >= 500 && err.status < 600) return true;
+    // All other 4xx are permanent — do not retry
+    return false;
+  }
+  // Network/transport errors (non-NeurOnApiError) → assume transient
+  return true;
+}
+
+// Bounded exponential backoff with jitter for reservation retries.
+async function retryWithBackoff(key, fn, maxAttempts, baseMs, maxMs) {
+  const rs = state.retryState.get(key) ?? { attempts: 0, nextDelay: baseMs };
+  let lastErr;
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    try {
+      const result = await fn();
+      // Success — reset retry state immediately
+      state.retryState.delete(key);
+      return result;
+    } catch (err) {
+      lastErr = err;
+      // Permanent errors — fail fast without further retries
+      if (!isTransientError(err)) throw err;
+      if (attempt < maxAttempts - 1) {
+        const jitter = Math.random() * rs.nextDelay;
+        const delay = rs.nextDelay + jitter;
+        await sleep(Math.min(delay, maxMs));
+        rs.nextDelay = Math.min(rs.nextDelay * 2, maxMs);
+        rs.attempts = attempt + 1;
+      }
+    }
+  }
+  state.retryState.delete(key);
+  throw lastErr;
+}
+
+// Acquire a shared warmup lock for a target. The first caller becomes the
+// "leader" and executes fn() (which should create the reservation and wait
+// for healthy). Subsequent callers on the same targetId await the leader's
+// promise. On success or failure the lock is released and any queued callers
+// proceed.
+async function acquireWarmupLock(targetId, fn) {
+  const existing = warmupLocks.get(targetId);
+  if (existing) {
+    log(`warmup lock acquired (queued): targetId=${targetId}`);
+    return existing.promise;
+  }
+
+  log(`warmup lock acquired (leader): targetId=${targetId}`);
+  const promise = fn().finally(() => {
+    warmupLocks.delete(targetId);
+  });
+  warmupLocks.set(targetId, { promise });
+  return promise;
+}
+
+async function reserveOrRefreshTarget(client, targetId, match, sessionID) {
+  const resKey = `${sessionID}::${targetId}`;
+  const existingEntry = state.reservations.get(resKey);
+  if (existingEntry) {
+    if (existingEntry.expiresAt < Date.now()) {
+      state.reservations.delete(resKey);
+    } else {
+      try {
+        log(`reservation decision: refresh local targetId=${targetId} session=${sessionID} reservationId=${existingEntry.reservation.reservationId}`);
+        const refreshed = await client.refreshReservation(existingEntry.reservation.reservationId);
+        return saveReservation(targetId, refreshed, sessionID, client);
+      } catch (error) {
+        state.reservations.delete(resKey);
+      }
+    }
+  }
+
+  // Before creating, check the server directly for a reservation another session made.
+  const status = await getCachedStatus(client);
+  const adopted = adoptExistingReservation(targetId, status, sessionID, client);
+  if (adopted) {
+    log(`reservation decision: adopt remote+refresh targetId=${targetId} session=${sessionID} reservationId=${adopted.reservationId}`);
+    const refreshed = await client.refreshReservation(adopted.reservationId);
+    return saveReservation(targetId, refreshed, sessionID, client);
+  }
+
+  // Fall through to create new reservation (with retry backoff + jitter)
+  const retryKey = `${sessionID}::${targetId}::reserve`;
+  let reservation;
+  try {
+    log(`reservation decision: create new reservation targetId=${targetId} session=${sessionID}`);
+    reservation = await retryWithBackoff(
+      retryKey,
+      () => client.createReservation(match),
+      client.config.retryMaxAttempts,
+      client.config.retryBaseMs,
+      client.config.retryMaxMs
+    );
+  } catch (error) {
+    log(`reservation create fail: targetId=${targetId} session=${sessionID} error=${error?.message ?? error}`);
+    throw error;
+  }
+  saveReservation(targetId, reservation, sessionID, client);
+  try {
+    if (client.config.waitForHealthy) {
+      await client.waitForHealthy(reservation.reservationId);
+    }
+  } catch (e) {
+    state.reservations.delete(resKey);
+    throw e;
+  }
   return reservation;
 }
 
-async function refreshExistingReservation(client, modelId) {
-  try {
-    const { targetId } = await resolveTargetForModel(client, modelId);
-    const existing = state.reservations.get(targetId);
-    if (!existing) return undefined;
-    const refreshed = await client.refreshReservation(existing.reservationId);
-    state.reservations.set(targetId, refreshed);
-    return refreshed;
-  } catch (e) {
-    return undefined;
+function saveReservation(targetId, reservation, sessionID, client) {
+  const minutes = reservation.keepaliveMinutes ?? reservation.durationMinutes ?? DEFAULT_DURATION_MINUTES;
+  const entry = {
+    reservation,
+    expiresAt: Date.now() + minutes * 60 * 1000
+  };
+  const resKey = `${sessionID}::${targetId}`;
+  state.reservations.set(resKey, entry);
+
+  // Start periodic keepalive: refresh at 50% of durationMinutes
+  stopKeepaliveTimer(resKey);
+  if (client && client.config) {
+    const refreshMs = Math.max((client.config.durationMinutes * 60 * 1000) / 2, 30000);
+    const timer = setInterval(() => {
+      const current = state.reservations.get(resKey);
+      if (!current) {
+        stopKeepaliveTimer(resKey);
+        return;
+      }
+      client.refreshReservation(current.reservation.reservationId)
+        .then((refreshed) => {
+          const mins = refreshed.keepaliveMinutes ?? refreshed.durationMinutes ?? DEFAULT_DURATION_MINUTES;
+          current.reservation = refreshed;
+          current.expiresAt = Date.now() + mins * 60 * 1000;
+          log(`keepalive refresh: targetId=${targetId} session=${sessionID} reservationId=${refreshed.reservationId}`);
+        })
+        .catch((e) => {
+          log(`keepalive refresh fail: targetId=${targetId} session=${sessionID} error=${e?.message ?? e}`);
+          if (e instanceof NeurOnApiError && e.status >= 400 && e.status < 500 && e.status !== 429) {
+            state.reservations.delete(resKey);
+            stopKeepaliveTimer(resKey);
+          }
+        });
+    }, refreshMs);
+    timer.unref?.();
+    state.keepaliveTimers.set(resKey, timer);
+  }
+  return reservation;
+}
+
+function stopKeepaliveTimer(resKey) {
+  const timer = state.keepaliveTimers.get(resKey);
+  if (timer) {
+    clearInterval(timer);
+    state.keepaliveTimers.delete(resKey);
   }
 }
 
-function isRecoverableReservationError(error) {
-  return error instanceof NeurOnApiError && [400, 404].includes(error.status);
+function adoptExistingReservation(targetId, status, sessionID, client) {
+  const active = [
+    ...(status.activeReservations ?? []),
+    ...(status.reservations ?? [])
+  ];
+  for (const res of active) {
+    const targets = res.targets ?? [];
+    for (const t of targets) {
+      if ((t.id ?? t) === targetId && res.status === "active") {
+        saveReservation(targetId, res, sessionID, client);
+        return res;
+      }
+    }
+  }
+  return null;
+}
+
+async function refreshExistingReservation(client, modelId, sessionID) {
+  try {
+    const { targetId } = await resolveTargetForModel(client, modelId, sessionID);
+    const key = `${sessionID}::${targetId}`;
+    const existingEntry = state.reservations.get(key);
+    if (!existingEntry) return undefined;
+    try {
+      const refreshed = await client.refreshReservation(existingEntry.reservation.reservationId);
+      saveReservation(targetId, refreshed, sessionID, client);
+      return refreshed;
+    } catch (e) {
+      // Refresh failed — drop the stale entry so it does not linger until expiry.
+      state.reservations.delete(key);
+      return undefined;
+    }
+  } catch (e) {
+    return undefined;
+  }
 }
 
 // ── Utilities ─────────────────────────────────────────────
@@ -275,6 +646,48 @@ function trimSlash(value) {
   return value.replace(/\/+$/, "");
 }
 
+// Format a human-readable warmup timeout from the config value.
+// e.g. waitTimeoutMs=600000 → "10m"
+function formatWarmupTimeoutMs(ms) {
+  const min = Math.ceil(ms / 60000);
+  return `${min}m`;
+}
+
+// Extract the OpenCode session identifier from any event or hook input.
+// Handles both the camelCase `sessionID` (primary; confirmed against OpenCode's
+// Event schema and hook input types) and camelCase-lower `sessionId` fallbacks.
+function extractSessionID(event) {
+  return (
+    event?.sessionID ??
+    event?.sessionId ??
+    event?.properties?.sessionID ??
+    event?.properties?.sessionId ??
+    undefined
+  );
+}
+
+// Release every piece of per-session state for a given sessionID. Prevents the
+// sessionModels map (and any stale reservations/inflight entries) from leaking
+// across the lifetime of a long-running TUI that opens and closes many sessions.
+function scrubSession(sessionID, sessionModels) {
+  if (!sessionID) return;
+  const prefix = `${sessionID}::`;
+  for (const key of [...state.reservations.keys()])
+    if (key.startsWith(prefix)) state.reservations.delete(key);
+  for (const key of [...state.inflight.keys()])
+    if (key.startsWith(prefix)) state.inflight.delete(key);
+  for (const key of [...state.inflightTarget.keys()])
+    if (key.startsWith(prefix)) state.inflightTarget.delete(key);
+  for (const key of [...state.retryState.keys()])
+    if (key.startsWith(prefix)) state.retryState.delete(key);
+  for (const key of [...state.keepaliveTimers.keys()])
+    if (key.startsWith(prefix)) stopKeepaliveTimer(key);
+  // warmupLocks are keyed by targetId (not sessionID) so they survive session scrub;
+  // they self-clean via .finally() once the leader's warmup succeeds or fails.
+  sessionModels?.delete(sessionID);
+  transportFailures.delete(sessionID);
+}
+
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -283,42 +696,102 @@ function sleep(ms) {
 
 async function checkTargetHealthy(client, modelId) {
   try {
-    const status = await client.getStatus();
-    const { bareModelId } = splitProvider(modelId);
+    const status = await getCachedStatus(client);
+    const splitResult = splitProvider(modelId);
     const match = matchLiteLlmModel(
       status.capacityTargets ?? [],
       status.models ?? [],
-      bareModelId
+      splitResult.bareModelId,
+      splitResult.provider,
+      client.config.strictProviderMatch
     );
     if (!match) return "cold";
+    if (match.error) return "cold";
     const targetInfo = findTargetStatus(
       status.capacityTargets ?? [],
       match.targetIds[0]
     );
     return targetInfo?.observed ?? "cold";
   } catch (e) {
-    return "cold";
+    // API unreachable/unknown — distinguish from true cold so callers can fail open.
+    return "unreachable";
+  }
+}
+
+// Preflight variant with a hard timeout budget — used by tool.execute.before.
+async function checkTargetHealthyWithTimeout(client, modelId, timeoutMs) {
+  try {
+    const result = await Promise.race([
+      checkTargetHealthy(client, modelId),
+      new Promise((resolve) => setTimeout(() => resolve("unreachable"), timeoutMs))
+    ]);
+    return result;
+  } catch (e) {
+    return "unreachable";
   }
 }
 
 function backgroundReserve(client, modelId, sessionID, sessionModels, ctx) {
-  // Fire-and-forget reservation in background so it doesn't block the session
+  log(`background reserve start: model=${modelId} session=${sessionID}`);
   (async () => {
     try {
-      await ensureReservation(client, modelId);
-    } catch (e) {
-      // Notify user only once per session
+      await ensureReservation(client, modelId, sessionID);
+      log(`background reserve success: model=${modelId} session=${sessionID}`);
       const info = sessionModels.get(sessionID);
-      if (info && !info.warmupNotified) {
-        info.warmupNotified = true;
-        if (ctx.client?.tui?.showToast) {
+      if (info && ctx.client?.tui?.showToast) {
+        info.warmupNotified = false;
+        info.errorNotified = false;
+        ctx.client.tui.showToast({
+          body: {
+            message: `NeurOn: model ready`,
+            variant: "success"
+          }
+        });
+      }
+    } catch (e) {
+      log(`background reserve failure: model=${modelId} session=${sessionID} error=${e?.message ?? e}`);
+      // Notify user only once per session — classify the failure type
+      const info = sessionModels.get(sessionID);
+      if (!info || !ctx.client?.tui?.showToast) return;
+
+      if (e.message?.includes("NeurOn")) {
+        if (!info.errorNotified) {
+          info.errorNotified = true;
           ctx.client.tui.showToast({
-            body: {
-              message: `NeurOn: target cold, warming up… please retry in 2-3 min`,
-              variant: "warning"
-            }
+            body: { message: e.message, variant: "error" }
           });
         }
+        return;
+      }
+
+      if (e instanceof NeurOnApiError) {
+        if (e.status === 0) {
+          // Timeout/unreachable — fail open silently
+          return;
+        }
+        if (!info.errorNotified) {
+          info.errorNotified = true;
+          let msg = `NeurOn: reservation failed`;
+          if (e.status === 401 || e.status === 403) msg += ' (authentication error)';
+          else if (e.status === 429) msg += ' (rate limited — wait and retry)';
+          else if (e.status >= 500) msg += ' (server error)';
+          else msg += ` (HTTP ${e.status})`;
+          ctx.client.tui.showToast({
+            body: { message: msg, variant: "error" }
+          });
+        }
+        return;
+      }
+
+      // Generic cold/stopped warmup notification — only for truly cold states
+      if (!info.warmupNotified) {
+        info.warmupNotified = true;
+        ctx.client.tui.showToast({
+          body: {
+            message: `NeurOn: warming up… please retry once warmup completes, up to ${formatWarmupTimeoutMs(client.config.waitTimeoutMs)}`,
+            variant: "warning"
+          }
+        });
       }
     }
   })();
@@ -332,8 +805,10 @@ export const NeurOnPlugin = async function NeurOnPlugin(ctx) {
   try {
     client = new NeurOnClient(loadConfig());
     allowedProviders = client.config.allowedProviders;
+    log(`plugin init: allowedProviders=${allowedProviders.join(",")} strictProviderMatch=${client.config.strictProviderMatch} blockOnColdMessage=${client.config.blockOnColdMessage} baseUrl=${client.config.apiBaseUrl}`);
   } catch (e) {
-    return { event: () => {}, "tool.execute.before": () => {} };
+    log(`plugin init failure: error=${e?.message ?? e}`);
+    return { event: () => {}, "tool.execute.before": () => {}, dispose: async () => {} };
   }
 
   // Track session -> model mapping from session.created events
@@ -343,34 +818,70 @@ export const NeurOnPlugin = async function NeurOnPlugin(ctx) {
     event: async ({ event }) => {
       const type = event.type;
       const props = event?.properties || {};
-      const sessionID = props.sessionID;
+      // Prefer camelCase `sessionID`; fall back to `sessionId` defensively.
+      const sessionID = extractSessionID(event);
+      if (!sessionID) return;
 
       if (type === "plugin.added" || type === "message.part.delta") return;
+
+      // Release all per-session state only on true terminal events.
+      // session.compacted keeps the session alive (model/reservation state remains valid).
+      if (type === "session.deleted") {
+        scrubSession(sessionID, sessionModels);
+        return;
+      }
 
       // CAPTURE model from session.created
       if (type === "session.created" && props.info?.model) {
         const m = props.info.model;
+        const normalized = canonicalizeModel(m.providerID, m.id);
         sessionModels.set(sessionID, {
-          id: m.id,
-          provider: m.providerID
+          id: normalized.bareModelId,
+          provider: normalized.provider
         });
+        log(`session.created: session=${sessionID} model=${normalized.bareModelId} provider=${normalized.provider ?? "none"}`);
         return;
       }
 
       // Prefer model from current event (handles model switching within same session)
       const eventModel = props?.info?.model;
       const cachedModel = sessionModels.get(sessionID);
-      const model = eventModel?.id ?? cachedModel?.id ?? event?.model;
-      if (!model) return;
+      const rawModel = eventModel?.id ?? cachedModel?.id ?? event?.model;
+      if (!rawModel) return;
 
-      const provider = eventModel?.providerID ?? cachedModel?.provider;
-      const fullModel = provider
-        ? `${provider}/${model}`
-        : model;
+      const normalizedCurrent = canonicalizeModel(
+        eventModel?.providerID ?? cachedModel?.provider,
+        rawModel
+      );
+      const model = normalizedCurrent.bareModelId;
+      const provider = normalizedCurrent.provider;
+      const fullModel = normalizedCurrent.fullModel;
 
-      // Update cache if model changed mid-session (only when we have a real new model)
-      if (eventModel?.id && eventModel.id !== cachedModel?.id) {
-        sessionModels.set(sessionID, { id: eventModel.id, provider: eventModel.providerID });
+      // Guard: prevent NeurOn from reserving its own traffic (recursive routing)
+      if (provider) {
+        const p = provider.toLowerCase();
+        if (p === 'neuron' || p === 'neuron-bridge' || p === 'opencode-neuron') return;
+      }
+
+      if (eventModel?.id) {
+        const normalizedEvent = canonicalizeModel(eventModel.providerID, eventModel.id);
+        if (normalizedEvent.bareModelId !== cachedModel?.id || normalizedEvent.provider !== cachedModel?.provider) {
+          try {
+            const oldFullModel = cachedModel?.provider
+              ? `${cachedModel.provider}/${cachedModel.id}`
+              : cachedModel?.id;
+            if (oldFullModel) {
+              const oldTarget = await resolveTargetForModel(client, oldFullModel, sessionID);
+              stopKeepaliveTimer(oldTarget.resKey);
+              state.reservations.delete(oldTarget.resKey);
+            }
+          } catch (e) { /* ignore cleanup errors */ }
+
+          sessionModels.set(sessionID, {
+            id: normalizedEvent.bareModelId,
+            provider: normalizedEvent.provider
+          });
+        }
       }
 
       const role =
@@ -380,28 +891,37 @@ export const NeurOnPlugin = async function NeurOnPlugin(ctx) {
       if (type === "message.updated" && role === "user") {
         if (!matchesAllowedProvider(provider, fullModel, allowedProviders)) return;
 
-        const targetState = await checkTargetHealthy(client, fullModel);
+        const targetState = await checkTargetHealthyWithTimeout(
+          client, fullModel, client.config.preflightTimeoutMs
+        );
+        log(`message.updated user preflight: session=${sessionID} model=${fullModel} provider=${provider ?? "none"} targetState=${targetState}`);
 
         if (targetState === "healthy") {
-          // Target already running — refresh or create reservation
-          try {
-            const result = await resolveTargetForModel(client, fullModel);
-            if (!state.reservations.has(result.targetId)) {
-              await ensureReservation(client, fullModel);
-            } else {
-              await refreshExistingReservation(client, fullModel);
-            }
-          } catch (e) {
-            /* ignore */
-          }
+          // Target already running — background any reserve/refresh work entirely.
+          // Do NOT block the message path for network I/O.
+          const info = sessionModels.get(sessionID);
+          if (info) info.stoppingNotified = false;
+          (async () => {
+            try {
+              const result = await resolveTargetForModel(client, fullModel, sessionID);
+              if (!state.reservations.has(result.resKey)) {
+                await acquireWarmupLock(result.targetId, () =>
+                  ensureReservation(client, fullModel, sessionID)
+                );
+              } else {
+                await refreshExistingReservation(client, fullModel, sessionID);
+              }
+            } catch (e) { /* ignore */ }
+          })();
           return;
         }
 
         if (targetState === "stopping") {
           // Target is shutting down — clear stale reservation, notify user
           try {
-            const { targetId } = await resolveTargetForModel(client, fullModel);
-            state.reservations.delete(targetId);
+            const result = await resolveTargetForModel(client, fullModel, sessionID);
+            stopKeepaliveTimer(result.resKey);
+            state.reservations.delete(result.resKey);
           } catch (e) {
             /* ignore */
           }
@@ -410,46 +930,243 @@ export const NeurOnPlugin = async function NeurOnPlugin(ctx) {
             info.stoppingNotified = true;
             if (ctx.client?.tui?.showToast) {
               ctx.client.tui.showToast({
-                body: { message: "NeurOn: target stopping, restarting… please retry in 2-3 min", variant: "warning" }
+                body: { message: `NeurOn: target stopping, restarting… please retry once warmup completes, up to ${formatWarmupTimeoutMs(client.config.waitTimeoutMs)}`, variant: "warning" }
               });
             }
           }
           backgroundReserve(client, fullModel, sessionID, sessionModels, ctx);
+          if (client.config.blockOnColdMessage) {
+            throw new Error(`NeurOn: target is stopping, warming up - please retry once warmup completes, up to ${formatWarmupTimeoutMs(client.config.waitTimeoutMs)}`);
+          }
           return;
         }
 
-        // Target is cold/stopped — fire reservation background, don't block
+        // NeurOn API unreachable — fail open, no toast, no warmup trigger
+        if (targetState === "unreachable") {
+          // Still attempt a silent background reserve; if transport is truly down,
+          // backgroundReserve will fail open quietly for timeout/unreachable errors.
+          backgroundReserve(client, fullModel, sessionID, sessionModels, ctx);
+          return;
+        }
+
+        // Target is cold/stopped — check if caller wants to block immediately.
+        if (client.config.blockOnColdMessage) {
+          const info = sessionModels.get(sessionID);
+          if (info && !info.warmupNotified) {
+            info.warmupNotified = true;
+            if (ctx.client?.tui?.showToast) {
+              ctx.client.tui.showToast({
+                body: { message: `NeurOn: warming up… please retry once warmup completes, up to ${formatWarmupTimeoutMs(client.config.waitTimeoutMs)}`, variant: "warning" }
+              });
+            }
+          }
+          backgroundReserve(client, fullModel, sessionID, sessionModels, ctx);
+          throw new Error(`NeurOn: target is cold, warming up — please retry once warmup completes, up to ${formatWarmupTimeoutMs(client.config.waitTimeoutMs)}`);
+        }
+
+        // Default mode (blockOnColdMessage=false): acquire shared warmup lock
+        // and block until the target becomes healthy. This is the cooperative
+        // warmup behavior — multiple sessions queue behind a single leader.
+        // blockOnColdMessage=true was handled above (throws immediately).
         const info = sessionModels.get(sessionID);
         if (info && !info.warmupNotified) {
           info.warmupNotified = true;
           if (ctx.client?.tui?.showToast) {
             ctx.client.tui.showToast({
-              body: { message: "NeurOn: warming up… please retry in 2-3 min", variant: "warning" }
+              body: { message: `NeurOn: warming up… please retry once warmup completes, up to ${formatWarmupTimeoutMs(client.config.waitTimeoutMs)}`, variant: "warning" }
             });
           }
         }
+
+        // Resolve the targetId for the lock key — fetch status once and reuse.
+        const status = await getCachedStatus(client);
+        const splitResult = splitProvider(fullModel);
+        const match = matchLiteLlmModel(
+          status.capacityTargets ?? [],
+          status.models ?? [],
+          splitResult.bareModelId,
+          splitResult.provider,
+          client.config.strictProviderMatch
+        );
+        const lockTargetId = match?.targetIds?.[0];
+
+        if (lockTargetId) {
+          try {
+            await acquireWarmupLock(lockTargetId, () =>
+              ensureReservation(client, fullModel, sessionID)
+            );
+            log(`warmup lock released (healthy): targetId=${lockTargetId} session=${sessionID}`);
+            return;
+          } catch (e) {
+            log(`warmup lock failed: targetId=${lockTargetId} session=${sessionID} error=${e?.message ?? e}`);
+            // Lock already cleaned up by finally(). Caller can retry or fallback.
+          }
+        }
+
+        // Fallback: if we couldn't resolve a targetId, fire background reserve
+        // and let the orchestrator handle the failure normally.
         backgroundReserve(client, fullModel, sessionID, sessionModels, ctx);
         return;
       }
 
-      // Reactive fallback: fix on session error
       if (type === "session.error") {
         if (!matchesAllowedProvider(provider, fullModel, allowedProviders)) return;
-        try {
-          await ensureReservation(client, fullModel);
-        } catch (e) {
-          /* ignore */
-        }
+        // Background the reservation — do not block on potentially long
+        // waitForHealthy. Error toasts are handled inside backgroundReserve.
+        (async () => {
+          try {
+            const status = await getCachedStatus(client);
+            const splitResult = splitProvider(fullModel);
+            const match = matchLiteLlmModel(
+              status.capacityTargets ?? [],
+              status.models ?? [],
+              splitResult.bareModelId,
+              splitResult.provider,
+              client.config.strictProviderMatch
+            );
+            const lockTargetId = match?.targetIds?.[0];
+            if (lockTargetId) {
+              await acquireWarmupLock(lockTargetId, () =>
+                ensureReservation(client, fullModel, sessionID)
+              );
+              return;
+            }
+          } catch (e) { /* fall through */ }
+          backgroundReserve(client, fullModel, sessionID, sessionModels, ctx);
+        })();
       }
 
       // Refresh reservation on session idle (keepalive)
       if (type === "session.idle") {
         if (!matchesAllowedProvider(provider, fullModel, allowedProviders)) return;
-        refreshExistingReservation(client, fullModel).catch(() => {});
+        refreshExistingReservation(client, fullModel, sessionID).catch(() => {});
       }
     },
 
-    "tool.execute.before": async () => {}
+    "tool.execute.before": async ({ event }) => {
+      try {
+        const props = event?.properties || {};
+        // sessionID arrives at the top level of the hook input in OpenCode's
+        // documented signature; fall back to properties defensively.
+        const sessionID = extractSessionID(event);
+        if (!sessionID) return;
+
+        // A tool may execute before the session.created event is processed, so
+        // hydrate from the event's own model info when the cache is empty.
+        let cachedModel = sessionModels.get(sessionID);
+        if (!cachedModel && props?.info?.model) {
+          const normalized = canonicalizeModel(props.info.model.providerID, props.info.model.id);
+          cachedModel = {
+            id: normalized.bareModelId,
+            provider: normalized.provider
+          };
+          sessionModels.set(sessionID, cachedModel);
+        }
+        const model = cachedModel?.id;
+        if (!model) return;
+
+        const provider = cachedModel?.provider;
+        const fullModel = provider ? `${provider}/${model}` : model;
+        if (!matchesAllowedProvider(provider, fullModel, allowedProviders)) return;
+
+        // Fail-open cooldown: skip health check if recent transport failure.
+        const lastFailure = transportFailures.get(sessionID) ?? 0;
+        if (Date.now() - lastFailure < client.config.cooldownPeriodMs) {
+          log(`tool.execute.before fail-open: session=${sessionID} model=${fullModel} reason=transport_cooldown`);
+          return;
+        }
+
+        // Use fast preflight timeout for health check to avoid blocking tool execution.
+        const targetState = await checkTargetHealthyWithTimeout(
+          client, fullModel, client.config.preflightTimeoutMs
+        );
+        log(`tool.execute.before health: session=${sessionID} model=${fullModel} targetState=${targetState}`);
+        if (targetState === "unreachable") {
+          // API unreachable — set transport-failure timestamp so cooldown activates
+          transportFailures.set(sessionID, Date.now());
+          log(`tool.execute.before fail-open: session=${sessionID} model=${fullModel} reason=unreachable`);
+          return;
+        }
+        if (targetState !== "healthy") {
+          // Try shared warmup lock — if another session is already warming,
+          // await it instead of failing fast.
+          try {
+            const status = await getCachedStatus(client);
+            const splitResult = splitProvider(fullModel);
+            const match = matchLiteLlmModel(
+              status.capacityTargets ?? [],
+              status.models ?? [],
+              splitResult.bareModelId,
+              splitResult.provider,
+              client.config.strictProviderMatch
+            );
+            const lockTargetId = match?.targetIds?.[0];
+            if (lockTargetId) {
+              try {
+                await Promise.race([
+                  acquireWarmupLock(lockTargetId, () =>
+                    ensureReservation(client, fullModel, sessionID)
+                  ),
+                  new Promise((_, reject) =>
+                    setTimeout(() => reject(new Error('warmup_lock_timeout')), 60000)
+                  )
+                ]);
+                log(`warmup lock released (healthy): targetId=${lockTargetId} session=${sessionID}`);
+                return; // target is now healthy, allow tool execution
+              } catch (lockErr) {
+                log(`warmup lock timed out or failed: targetId=${lockTargetId} session=${sessionID} error=${lockErr?.message ?? lockErr}`);
+                // Fall through to background reserve + throw
+              }
+            }
+          } catch (e) {
+            log(`warmup lock failed in tool.execute.before: session=${sessionID} error=${e?.message ?? e}`);
+          }
+          // Fallback: throw and let the caller retry later
+          backgroundReserve(client, fullModel, sessionID, sessionModels, ctx);
+          log(`tool.execute.before block: session=${sessionID} model=${fullModel} targetState=${targetState}`);
+          throw new Error(`NeurOn: target is ${targetState}, warming up — please retry once warmup completes, up to ${formatWarmupTimeoutMs(client.config.waitTimeoutMs)}`);
+        }
+      } catch (e) {
+        if (e.message?.includes("NeurOn:")) throw e;
+        // API unreachable — fail open to avoid blocking tool execution
+        log(`tool.execute.before fail-open: error=${e?.message ?? e}`);
+      }
+    },
+
+    // Release all per-session state on plugin shutdown so nothing lingers
+    // between sessions in a long-running process.
+    dispose: async () => {
+      for (const timer of state.keepaliveTimers.values()) clearInterval(timer);
+      state.reservations.clear();
+      state.inflight.clear();
+      state.inflightTarget.clear();
+      state.retryState.clear();
+      state.keepaliveTimers.clear();
+      warmupLocks.clear();
+      sessionModels.clear();
+      _statusCache = null;
+      _statusCacheTime = 0;
+      _statusInflight = null;
+      transportFailures.clear();
+    }
   };
 };
 
+/* Test-only helper — conditionally exported so OpenCode's plugin loader doesn't see it.
+   In test environments, import via dynamic import and call if needed:
+     const { __testResetGlobals } = await import('../plugins/neuron.js');
+     if (typeof __testResetGlobals === 'function') __testResetGlobals();
+*/
+const _testResetGlobals = () => {
+  state.reservations.clear();
+  state.inflight.clear();
+  state.inflightTarget.clear();
+  state.retryState.clear();
+  for (const timer of state.keepaliveTimers.values()) clearInterval(timer);
+  state.keepaliveTimers.clear();
+  warmupLocks.clear();
+  _statusCache = null;
+  _statusCacheTime = 0;
+  _statusInflight = null;
+  transportFailures.clear();
+};

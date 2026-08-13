@@ -17,5 +17,8 @@
     "build": "node --check plugins/neuron.js",
     "pack:check": "npm pack --dry-run",
     "test": "node --test test/*.test.js"
+  },
+  "dependencies": {
+    "@opencode-ai/plugin": "1.18.18"
   }
 }
