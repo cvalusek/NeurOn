@@ -37,6 +37,7 @@ test.beforeEach(async () => {
   };
   const built = await buildApp(loaded.config, loaded.models);
   app = built.app;
+  app.log.level = "silent";
   reconcile = (now?: Date) => built.reconciler.reconcile(now);
   await app.listen({ port: 0, host: "127.0.0.1" });
   const address = app.server.address();
@@ -44,9 +45,20 @@ test.beforeEach(async () => {
   baseUrl = `http://127.0.0.1:${address.port}`;
 });
 
-test.afterEach(async () => {
-  await app?.close();
-  restoreEnv(previousEnv);
+test.afterEach(async ({ page }, testInfo) => {
+  // Keep the interaction timeout meaningful while giving browser/server teardown
+  // its own allowance on slower operator workstations.
+  testInfo.setTimeout(testInfo.timeout + 30_000);
+  try {
+    await page.close({ runBeforeUnload: false });
+    // The app pages poll status. Once the page is closed, terminate any HTTP
+    // keep-alive sockets left behind by Chromium before asking Fastify to close.
+    app?.server.closeIdleConnections();
+    app?.server.closeAllConnections();
+    await app?.close();
+  } finally {
+    restoreEnv(previousEnv);
+  }
 });
 
 test("requires sign-in before showing protected pages", async ({ page }) => {
@@ -119,7 +131,7 @@ test("guides users without profiles into profile creation", async ({ page }) => 
   await signIn(page, "validation-user");
   await expect(page.getByRole("heading", { name: "Shared model capacity without paying for idle time" })).toBeVisible();
   await page.getByRole("button", { name: "Create your first profile" }).click();
-  await expect(page).toHaveURL(/\/profiles\?create=1&onboarding=1$/);
+  await expect(page).toHaveURL(/\/profiles\/new\?onboarding=1$/);
   await expect(page.locator("#profile-modal")).toBeVisible();
 });
 
@@ -129,22 +141,47 @@ test("filters and recommends target-model deployments in the profile builder", a
   const modal = page.locator("#profile-modal");
 
   await expect(modal.locator(".target-price")).toContainText("$12.00/hr");
-  await expect(modal.locator("[data-deployment-key='prefer-smol::qwen-smol']")).toContainText("Intelligence 72");
+  await expect(modal.locator("[data-deployment-key='prefer-smol::qwen-smol']")).toContainText("Good 72");
   await expect(modal.locator("[data-deployment-key='prefer-smol::qwen-smol']")).toContainText("Decode 55 t/s");
   await expect(modal.getByRole("button", { name: /Best fit/ })).toBeVisible();
 
-  await modal.locator("#profile-min-context").selectOption("64000");
+  await modal.locator("#profile-max-cost").fill("10");
   await expect(modal.locator("#profile-filter-status")).toContainText("0 of 1");
   await expect(modal.locator("#profile-recommendations")).toContainText("No deployment satisfies");
 
-  await modal.locator("#profile-min-context").selectOption("8000");
-  await modal.locator("#profile-domain").selectOption("coding");
+  await modal.locator("#profile-max-cost").fill("");
+  await modal.locator('[data-profile-domain][value="coding"]').check();
   await expect(modal.locator("#profile-filter-status")).toContainText("1 of 1");
-  await modal.locator("#profile-weight-cost").fill("60");
-  await expect(modal.locator("#profile-weight-cost-output")).toHaveText("60%");
+  await modal.getByRole("img", { name: /Good, Fast, and Cheap ranking preference/ }).press("ArrowRight");
   await modal.getByRole("button", { name: /Best fit/ }).click();
   await expect(modal.locator("[data-profile-model]")).toBeChecked();
   await expect(modal.locator("[data-profile-target]")).toBeChecked();
+});
+
+test("keeps the assistant available across the app and sends structured current-screen state", async ({ page }) => {
+  await page.route("**/api/profile-advisor/status", async (route) => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ enabled: true, backend: { targetId: "prefer-smol", modelId: "qwen-smol" } }) }));
+  let requestBody: Record<string, unknown> | undefined;
+  await page.route("**/api/profile-advisor", async (route) => {
+    requestBody = route.request().postDataJSON() as Record<string, unknown>;
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ result: { type: "answer", message: "I can see the profile builder controls." } }) });
+  });
+  await signIn(page, "assistant-user");
+  await page.getByRole("button", { name: "Create your first profile" }).click();
+  await page.getByRole("button", { name: "Ask NeurOn" }).click();
+  await page.locator("[data-assistant-form] textarea").fill("What am I configuring on this screen?");
+  await page.locator("[data-assistant-form]").getByRole("button", { name: "Send" }).click();
+
+  await expect(page.locator("[data-assistant-messages]")).toContainText("I can see the profile builder controls.");
+  expect(requestBody).toMatchObject({
+    request: "What am I configuring on this screen?",
+    screen: { path: "/profiles/new", surface: "profile_create", profileRequirements: { domains: [], weights: { intelligence: 1 / 3, speed: 1 / 3, cost: 1 / 3 } } },
+    currentDraft: { selections: [{ targetId: "prefer-smol", modelIds: ["qwen-smol"] }] }
+  });
+  expect(JSON.stringify(requestBody)).not.toContain("<main");
+
+  await page.goto(`${baseUrl}/api-keys`);
+  await expect(page.locator("[data-assistant-toggle]")).toBeVisible();
+  await expect(page.locator("[data-assistant-toggle]")).toHaveText("Assistant open");
 });
 
 test("updates visible timing choices when selecting a profile", async ({ page }) => {

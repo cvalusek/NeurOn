@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { ModelSelectionCatalogConfig, ProfileAdvisorConfig } from "../domain/types.js";
+import type { ModelSelectionCatalogConfig } from "../domain/types.js";
 
 const provenanceSchema = z.object({
   source: z.string().min(1),
@@ -59,27 +59,4 @@ export const modelSelectionCatalogSchema = z.object({
 
 export function parseModelSelectionCatalog(value: unknown): ModelSelectionCatalogConfig {
   return modelSelectionCatalogSchema.parse(value) as ModelSelectionCatalogConfig;
-}
-
-export function loadProfileAdvisorFromEnvironment(): ProfileAdvisorConfig | undefined {
-  const apiBaseUrl = optionalEnv("PROFILE_ADVISOR_API_BASE_URL");
-  const model = optionalEnv("PROFILE_ADVISOR_MODEL");
-  const apiKey = optionalEnv("PROFILE_ADVISOR_API_KEY");
-  if (!apiBaseUrl && !model && !apiKey) return undefined;
-  if (!apiBaseUrl || !model) throw new Error("PROFILE_ADVISOR_API_BASE_URL and PROFILE_ADVISOR_MODEL are both required when profile guidance is configured");
-  const timeoutSeconds = Number(optionalEnv("PROFILE_ADVISOR_TIMEOUT_SECONDS") ?? "15");
-  if (!Number.isInteger(timeoutSeconds) || timeoutSeconds < 1 || timeoutSeconds > 120) throw new Error("PROFILE_ADVISOR_TIMEOUT_SECONDS must be an integer from 1 to 120");
-  const parsedUrl = new URL(apiBaseUrl);
-  if (parsedUrl.protocol !== "http:" && parsedUrl.protocol !== "https:") throw new Error("PROFILE_ADVISOR_API_BASE_URL must use HTTP or HTTPS");
-  return {
-    apiBaseUrl: z.string().url().parse(apiBaseUrl).replace(/\/$/u, ""),
-    apiKey,
-    model,
-    timeoutSeconds
-  };
-}
-
-function optionalEnv(name: string): string | undefined {
-  const value = process.env[name]?.trim();
-  return value ? value : undefined;
 }

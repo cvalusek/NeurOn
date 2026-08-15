@@ -470,19 +470,18 @@ an already-activated runtime; it is never an application-start side effect. See
 [Guided Model Selection](model-selection.md) for ranking, benchmarking,
 provenance, and quantization rules.
 
-An optional OpenAI-compatible advisor turns a user's workload description into
-validated selector controls:
+The optional profile assistant uses an existing NeurOn target/model deployment,
+selected at **Admin > Model data** after the target has been copied to durable
+storage. Its backend is not configured through environment variables. The
+stored selection includes the advisor reservation length, cold-start timeout,
+and model-response timeout; runtime credentials continue to use the selected
+target's existing secret reference.
 
-```env
-PROFILE_ADVISOR_API_BASE_URL=https://advisor.example.internal/v1
-PROFILE_ADVISOR_API_KEY=replace-with-a-private-secret
-PROFILE_ADVISOR_MODEL=profile-guide
-PROFILE_ADVISOR_TIMEOUT_SECONDS=15
-```
-
-The advisor is not a placement engine and never saves a profile or creates a
-reservation. If it is absent or unavailable, the local wizard, filters, and
-ranking remain fully usable.
+Asking the assistant creates or refreshes a synthetic system reservation for
+that deployment and waits for the normal reconciler and health path. The model
+may fill a browser draft immediately, but save, start-reservation, rediscovery,
+and other mutating or capacity-affecting tools require a separate confirmation
+in the UI. If no backend is selected, local filters and ranking still work.
 
 Model keys are nested under a target:
 

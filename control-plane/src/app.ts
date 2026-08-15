@@ -113,9 +113,6 @@ export async function buildApp(config: AppConfig, models: ModelDefinition[], opt
   runtimeModelDiscovery.setBenchmarkService(new ModelBenchmarkService(catalog, modelSelection));
   const modelFavorites = new ModelFavoriteService(reservationRepository.modelFavorites, catalog);
   const usageAnalytics = new UsageAnalyticsService(reservations, reservationRepository.reservationProfiles, reservationRepository.targetActivations, catalog);
-  const profileAdvisor = config.profileAdvisor
-    ? new ProfileAdvisorService(config.profileAdvisor, () => modelSelection.availableDomains())
-    : undefined;
   const modelWarmup = new ModelWarmupService(catalog);
   const costEstimation = new CostEstimationService(
     reservationRepository.targetActivations,
@@ -156,6 +153,22 @@ export async function buildApp(config: AppConfig, models: ModelDefinition[], opt
         },
     () => shutdownControl.current?.acceptingReservations() ?? true
   );
+  const profileAdvisor = new ProfileAdvisorService({
+    targetService,
+    catalog,
+    reservationService,
+    statuses,
+    capacityProvider,
+    availableDomains: () => modelSelection.availableDomains(),
+    availableDeployments: async () => {
+      const costs: Record<string, { hourlyUsd: number }> = {};
+      await Promise.all(catalog.listTargets().map(async (target) => {
+        const estimate = await costEstimation.resolveTargetCostEstimate(target);
+        if (estimate?.hourlyUsd !== undefined) costs[target.id] = { hourlyUsd: estimate.hourlyUsd };
+      }));
+      return modelSelection.listDeployments(costs);
+    }
+  });
   targetOperations.setDemandController({
     hasDemand: (targetId) => reconciler.hasDemand(targetId),
     reconcileTarget: (targetId) => reconciler.reconcileTarget(targetId)
@@ -209,7 +222,7 @@ export async function buildApp(config: AppConfig, models: ModelDefinition[], opt
   });
 
   app.addHook("preHandler", async (request, reply) => {
-    const mutationAllowedInMaintenance = request.url === "/login" || request.url === "/logout" || request.url === "/api/profile-advisor" || request.url.startsWith("/auth/");
+    const mutationAllowedInMaintenance = request.url === "/login" || request.url === "/logout" || request.url.startsWith("/auth/");
     if (
       config.maintenanceMode &&
       !["GET", "HEAD", "OPTIONS"].includes(request.method) &&
@@ -282,7 +295,6 @@ export async function buildApp(config: AppConfig, models: ModelDefinition[], opt
     capacityProvider,
     config.maintenanceMode ? undefined : hassleOffClient,
     modelSelection,
-    Boolean(profileAdvisor),
     modelFavorites,
     usageAnalytics
   );

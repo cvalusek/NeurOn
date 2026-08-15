@@ -89,8 +89,14 @@ referenced through NeurOn target configuration.
 - Keep copy interactions usable without making the whole card ambiguous.
 - Keep the API keys page on the same server-rendered UI pattern. Generated
   keys should be copyable once, and later lists must show metadata/prefix only.
-- Profile guidance may populate form controls but must not save a profile,
-  create a reservation, or start capacity without a separate user action.
+- Profile-assistant configuration tools may populate reversible browser
+  controls immediately. Save-profile, start-reservation, rediscovery, and any
+  other mutating or capacity-affecting tool must produce a UI confirmation and
+  must not invoke its domain service until the user confirms that exact action.
+- The profile assistant backend is an operator-selected existing target/model
+  deployment stored with the durable target definition. Asking for guidance may
+  create a visible synthetic system reservation through the normal reconciler;
+  do not add a separate environment-configured advisor endpoint.
 
 ## Reconciler Rules
 

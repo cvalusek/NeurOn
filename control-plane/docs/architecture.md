@@ -98,6 +98,8 @@ Important fields:
 - optional runtime model discovery config
 - optional HassleOff protection and activate-or-reprovision policy
 - optional `hostingMode` and numeric LiteLLM `aliasPriority`
+- optional durable `profileAdvisor` selection naming the exact model on this
+  target plus its reservation, startup, and response timeouts
 
 ### ModelDefinition
 
@@ -164,9 +166,12 @@ into AWS, Docker, LiteLLM, or a concrete repository from unrelated code.
 - `ModelFavoriteService`: stores user favorites for exact target-model pairs.
 - `UsageAnalyticsService`: derives deployment popularity and UTC daily/user/
   provider/target/model breakdowns from durable reservations and allocations.
-- `ProfileAdvisorService`: optionally converts a workload description into a
-  validated set of selector controls. It cannot select, save, reserve, or
-  start capacity.
+- `ProfileAdvisorService`: runs an operator-selected existing target/model
+  through a synthetic system reservation and normal reconciliation, then
+  converts a sanitized catalog and structured current-screen snapshot into a
+  validated allowlisted tool proposal. Reversible profile controls can be
+  filled immediately; profile saves, reservation starts, and capacity-affecting
+  admin proposals remain separate UI-confirmed actions.
 - `Reconciler`: computes desired target state from aggregate reservations and
   applies that state through a capacity provider.
 - `HassleOffCapacityProvider`: decorates provider lifecycle calls with the

@@ -299,6 +299,18 @@ export interface CapacityTarget {
   costEstimate?: TargetCostEstimateConfig;
   hassleOff?: HassleOffTargetPolicy;
   activationPolicy?: TargetActivationPolicy;
+  /** Durable, operator-selected deployment used by the profile assistant. */
+  profileAdvisor?: ProfileAdvisorTargetConfig;
+}
+
+export interface ProfileAdvisorTargetConfig {
+  modelId: string;
+  /** Length of the synthetic system reservation that keeps the advisor available. */
+  reservationMinutes?: number;
+  /** Maximum time a user request waits for a cold advisor target to become healthy. */
+  startupTimeoutSeconds?: number;
+  /** Maximum time allowed for the advisor model response after the target is ready. */
+  requestTimeoutSeconds?: number;
 }
 
 export interface TargetCostEstimateConfig {
@@ -401,13 +413,6 @@ export interface ModelFavorite {
   createdAt: Date;
 }
 
-export interface ProfileAdvisorConfig {
-  apiBaseUrl: string;
-  apiKey?: string;
-  model: string;
-  timeoutSeconds: number;
-}
-
 export interface ModelTag {
   label: string;
   title?: string;
@@ -487,7 +492,6 @@ export interface AppConfig {
   litellmTrafficPollSeconds: number;
   litellmTrafficLookbackSeconds: number;
   modelSelectionCatalog?: ModelSelectionCatalogConfig;
-  profileAdvisor?: ProfileAdvisorConfig;
   runtimeProfiles: RuntimeProfile[];
   capacityProviders: CapacityProviderDefinition[];
   capacityTargets: CapacityTarget[];

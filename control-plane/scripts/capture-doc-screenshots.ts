@@ -19,7 +19,8 @@ const demoTarget: CapacityTarget = {
   hostingMode: "dedicated",
   aliasPriority: 10,
   healthUrl: "http://docs.invalid/health",
-  costEstimate: { hourlyUsd: 1.25 }
+  costEstimate: { hourlyUsd: 1.25 },
+  profileAdvisor: { modelId: "qwen-smol", reservationMinutes: 15, startupTimeoutSeconds: 60, requestTimeoutSeconds: 60 }
 };
 const demoModels: ModelDefinition[] = [{
   id: "qwen-smol",
@@ -90,6 +91,9 @@ try {
   await modal.getByLabel("Description").evaluate((element) => (element as HTMLInputElement).blur());
   await page.evaluate(() => window.scrollTo(0, 0));
   await page.screenshot({ path: path.join(outputDirectory, "profile-create.png") });
+  await page.getByRole("button", { name: "Ask NeurOn" }).click();
+  await page.screenshot({ path: path.join(outputDirectory, "profile-assistant.png") });
+  await page.getByRole("button", { name: "Collapse assistant" }).click();
   await page.getByRole("img", { name: /Good, Fast, and Cheap ranking preference/ }).scrollIntoViewIfNeeded();
   await page.screenshot({ path: path.join(outputDirectory, "model-selection.png") });
 

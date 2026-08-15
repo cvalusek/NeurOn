@@ -69,6 +69,7 @@ describePostgres("PostgreSQL schema and repositories", () => {
         provider: "runpod",
         providerId: "provider-1",
         modelIds: ["model-1"],
+        profileAdvisor: { modelId: "model-1", reservationMinutes: 12, startupTimeoutSeconds: 300, requestTimeoutSeconds: 90 },
         runpod: { podId: "pod-1", runtimePort: 8080 }
       });
       await first.targetProvisioningJobs.create({
@@ -116,7 +117,7 @@ describePostgres("PostgreSQL schema and repositories", () => {
       expect(await second.apiKeys.get("key-1")).toMatchObject({ keyHash: "sha256-test-hash", lastUsedAt: endedAt });
       expect(await second.authMethods.get("github-1")).toMatchObject({ config: { github: { clientSecret: "opaque-secret" } } });
       expect(await second.capacityProviders.get("provider-1")).toMatchObject({ credentialId: "credential-1", provisioning: { enabled: true } });
-      expect(await second.capacityTargets.get("target-1")).toMatchObject({ runpod: { podId: "pod-1" } });
+      expect(await second.capacityTargets.get("target-1")).toMatchObject({ profileAdvisor: { modelId: "model-1", reservationMinutes: 12, startupTimeoutSeconds: 300, requestTimeoutSeconds: 90 }, runpod: { podId: "pod-1" } });
       expect(await second.targetProvisioningJobs.get("job-1")).toMatchObject({ status: "completed", createdAt, updatedAt: endedAt });
       expect(await second.targetModelDiscoveries.get("target-1")).toMatchObject({ discoveredAt: createdAt, models: [{ id: "model-1" }] });
       expect(await second.targetActivations.listReservationAllocations(reservation.id)).toMatchObject([

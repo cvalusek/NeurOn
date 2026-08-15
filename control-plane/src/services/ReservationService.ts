@@ -18,7 +18,7 @@ export class ReservationService {
     private readonly acceptingReservations: () => boolean = () => true
   ) {}
 
-  async createForUser(user: AuthenticatedUser, input: { modelIds?: string[]; targetIds?: string[]; profileId?: string; durationMinutes?: number; keepaliveMinutes?: number }): Promise<Reservation> {
+  async createForUser(user: AuthenticatedUser, input: { modelIds?: string[]; targetIds?: string[]; profileId?: string; durationMinutes?: number; keepaliveMinutes?: number; synthetic?: boolean }): Promise<Reservation> {
     const finishMutation = this.beginDemandMutation();
     try {
       const storedProfile = input.profileId ? await this.getOwnedProfile(input.profileId, user) : undefined;
@@ -45,7 +45,8 @@ export class ReservationService {
         createdAt: now,
         expiresAt: new Date(now.getTime() + expandedInput.durationMinutes * 60_000),
         keepaliveMinutes: expandedInput.keepaliveMinutes ?? DEFAULT_KEEPALIVE_MINUTES,
-        status: "active"
+        status: "active",
+        synthetic: input.synthetic
       });
       this.notifyReservationChanged();
       return reservation;
@@ -162,7 +163,7 @@ export class ReservationService {
   }
 }
 
-function inputWithResolvedDefaults(profile: ReservationProfile | undefined, input: { modelIds?: string[]; targetIds?: string[]; durationMinutes?: number; keepaliveMinutes?: number }) {
+function inputWithResolvedDefaults(profile: ReservationProfile | undefined, input: { modelIds?: string[]; targetIds?: string[]; durationMinutes?: number; keepaliveMinutes?: number; synthetic?: boolean }) {
   const expanded = profile
     ? {
         modelIds: unique(profile.selections.flatMap((selection) => selection.modelIds)),

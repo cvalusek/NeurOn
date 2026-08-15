@@ -134,9 +134,10 @@ during an approved capacity window.
 
 Ordinary LiteLLM traffic can still contribute a short-lived observational
 overlay when timing/token data is successful, uncached, and unambiguous. A
-restart clears that overlay but leaves durable measurements intact. Keep the
-optional advisor credential in the same secret-management boundary as other
-deployment configuration; never commit it or private/licensed model facts.
+restart clears that overlay but leaves durable measurements intact. The profile
+assistant reuses the selected target's existing runtime credential reference;
+there is no separate advisor secret. Never commit runtime credentials or
+private/licensed model facts.
 
 ## Control-Plane Shutdown
 

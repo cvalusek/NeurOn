@@ -65,7 +65,7 @@ describePostgres("SQLite to PostgreSQL migration", () => {
       expect(await migrated.apiKeys.get("key-migrate")).toMatchObject({ keyHash: "opaque-hash-value", lastUsedAt: undefined });
       expect(await migrated.authMethods.get("github-migrate")).toMatchObject({ config: { github: { clientSecret: "auth-secret-value" } } });
       expect(await migrated.capacityProviders.get("provider-migrate")).toMatchObject({ config: { privatePayload: { token: "provider-secret-value" } } });
-      expect(await migrated.capacityTargets.get("target-migrate")).toMatchObject({ runpod: { podId: "opaque-pod-id", create: { custom: [1, null, true] } } });
+      expect(await migrated.capacityTargets.get("target-migrate")).toMatchObject({ profileAdvisor: { modelId: "model-migrate", reservationMinutes: 12, startupTimeoutSeconds: 300, requestTimeoutSeconds: 90 }, runpod: { podId: "opaque-pod-id", create: { custom: [1, null, true] } } });
       expect(await migrated.targetProvisioningJobs.get("job-migrate")).toMatchObject({ status: "failed", errorMessage: "terminal provisioning record" });
       expect(await migrated.targetModelDiscoveries.get("target-migrate")).toMatchObject({ models: [{ id: "model-migrate", meta: { n_ctx: 202_752 } }] });
       expect(await migrated.targetActivations.listReservationAllocations(fixture.reservationId)).toMatchObject([
@@ -254,6 +254,7 @@ async function createPopulatedSqlite(): Promise<{ sqlitePath: string; reservatio
   });
   await handle.capacityTargets.create({
     id: "target-migrate", displayName: "Target", provider: "runpod", providerId: "provider-migrate", modelIds: ["model-migrate"],
+    profileAdvisor: { modelId: "model-migrate", reservationMinutes: 12, startupTimeoutSeconds: 300, requestTimeoutSeconds: 90 },
     runpod: { podId: "opaque-pod-id", runtimePort: 8080, create: { custom: [1, null, true] } }
   });
   await handle.targetProvisioningJobs.create({

@@ -84,10 +84,13 @@ reservation cards show the profile name with a review modal when a reservation
 came from one. A profile can span multiple targets, and its reservation stores a
 target-specific selection snapshot so each target warms only its own models.
 
-An optional AI advisor translates a workload description into the visible
-filters and weights. It does not see private target measurements and cannot
-save, reserve, or operate capacity. The builder remains complete without it or
-without a PreFer release manifest.
+The collapsible NeurOn assistant is available throughout authenticated pages.
+It receives structured page identity and profile state—not raw DOM contents—and
+can fill filters, defaults, and exact target/model choices. Drafts created away
+from the builder carry into it through session storage. Save-profile and
+start-reservation are separate tool proposals with separate UI confirmations;
+admin rediscovery proposals are confirmed as well. The builder remains complete
+without an assistant backend or PreFer release manifest.
 
 The reserve action is held in a bottom action bar alongside the current cost
 estimate so it remains visually connected to the form after profile review.

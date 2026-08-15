@@ -130,7 +130,7 @@ export function layout(title: string, user: AuthenticatedUser | undefined, body:
     .profile-target-selections { display: grid; gap: 12px; }
     .profile-target-selection:not(.selected) [data-profile-target-models] { opacity: 0.55; }
     .modal-dialog.profile-builder-dialog { width: min(1180px, 100%); }
-    .profile-builder-layout { display: grid; grid-template-columns: minmax(0, 1fr) minmax(270px, 340px); gap: 16px; align-items: start; }
+    .profile-builder-layout { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; align-items: start; }
     .profile-guide { border: 1px solid #c7d9d3; border-radius: 8px; background: #f5fbf9; padding: 14px; margin: 14px 0; }
     .profile-guide h3 { margin-top: 0; }
     .selection-filter-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 10px; }
@@ -150,9 +150,17 @@ export function layout(title: string, user: AuthenticatedUser | undefined, body:
     .recommendation-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 8px; margin-top: 12px; }
     .recommendation-card { display: grid; gap: 5px; text-align: left; border: 1px solid #86b8ad; background: white; color: #1f2933; }
     .recommendation-card strong { color: #0f766e; }
-    .profile-advisor { position: sticky; top: 12px; border: 1px solid #d8ddd7; border-radius: 8px; background: #fbfcfb; padding: 14px; }
-    .profile-advisor textarea { width: 100%; min-height: 130px; font-family: inherit; }
-    .profile-advisor-output { margin-top: 10px; border-top: 1px solid #e2e7e1; padding-top: 10px; }
+    .assistant-toggle { position: fixed; right: 18px; bottom: 18px; z-index: 25; border-radius: 999px; box-shadow: 0 8px 24px rgba(23, 32, 42, 0.24); }
+    .assistant-drawer { position: fixed; right: 18px; bottom: 70px; z-index: 25; width: min(390px, calc(100vw - 36px)); max-height: min(680px, calc(100vh - 100px)); display: grid; grid-template-rows: auto minmax(120px, 1fr) auto; border: 1px solid #aab4ad; border-radius: 12px; background: white; box-shadow: 0 18px 54px rgba(23, 32, 42, 0.28); overflow: hidden; }
+    .assistant-drawer[hidden] { display: none; }
+    .assistant-head { display: flex; align-items: start; justify-content: space-between; gap: 12px; padding: 13px 14px; background: #17202a; color: white; }
+    .assistant-head button { padding: 5px 9px; background: #334155; }
+    .assistant-messages { display: grid; align-content: start; gap: 9px; padding: 12px; overflow: auto; background: #f7f8f6; }
+    .assistant-message { border: 1px solid #d8ddd7; border-radius: 8px; padding: 9px 10px; background: white; white-space: pre-wrap; }
+    .assistant-message.user { margin-left: 34px; background: #e7f5f2; border-color: #86b8ad; }
+    .assistant-confirm { display: grid; gap: 8px; border: 1px solid #d6a742; border-radius: 8px; padding: 10px; background: #fff8df; }
+    .assistant-compose { display: grid; gap: 8px; padding: 12px; border-top: 1px solid #d8ddd7; background: white; }
+    .assistant-compose textarea { width: 100%; min-height: 72px; font-family: inherit; }
     .target-price { border-radius: 6px; padding: 5px 8px; background: #17202a; color: white; font-weight: 800; white-space: nowrap; }
     .model-metrics { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 7px; }
     .metric { border-radius: 5px; padding: 3px 6px; background: #eef2f0; color: #334155; font-size: 11px; font-weight: 750; }
@@ -222,7 +230,6 @@ export function layout(title: string, user: AuthenticatedUser | undefined, body:
       .topbar { grid-template-columns: auto 1fr; gap: 12px; }
       .topbar .user { display: none; }
       .profile-builder-layout, .preference-grid { grid-template-columns: 1fr; }
-      .profile-advisor { position: static; }
     }
     @media (prefers-reduced-motion: reduce) {
       body.nav-ready .drawer-scrim, body.nav-ready .nav-drawer, body.nav-ready main, body.nav-ready .system-banner { transition: none; }
@@ -281,6 +288,12 @@ export function layout(title: string, user: AuthenticatedUser | undefined, body:
     </nav>
   </aside>
   <main>${body}</main>
+  ${user ? `<button class="assistant-toggle" type="button" data-assistant-toggle aria-controls="profile-assistant" aria-expanded="false">Ask NeurOn</button>
+  <aside id="profile-assistant" class="assistant-drawer" hidden aria-label="NeurOn assistant">
+    <div class="assistant-head"><div><strong>NeurOn assistant</strong><div style="font-size:12px;color:#d8ddd7">Profiles, reservations, and guidance</div></div><button type="button" data-assistant-collapse aria-label="Collapse assistant">Collapse</button></div>
+    <div class="assistant-messages" data-assistant-messages><div class="assistant-message">I can fill a profile draft. Saving and starting are separate actions that always ask you to confirm.</div></div>
+    <form class="assistant-compose" data-assistant-form><textarea maxlength="2000" placeholder="Describe what you need, ask me to save the draft, or start a saved profile."></textarea><button type="submit">Send</button><span class="muted" data-assistant-status></span></form>
+  </aside>` : ""}
   <script>
     (() => {
       const drawer = document.querySelector('#nav-drawer');
@@ -324,9 +337,97 @@ export function layout(title: string, user: AuthenticatedUser | undefined, body:
       refresh();
       setInterval(refresh, 300000);
     })();` : ""}
+    ${user ? assistantClientScript() : ""}
   </script>
 </body>
 </html>`;
+}
+
+function assistantClientScript(): string {
+  return `(() => {
+      const drawer = document.querySelector('#profile-assistant');
+      const toggle = document.querySelector('[data-assistant-toggle]');
+      const collapse = document.querySelector('[data-assistant-collapse]');
+      const form = document.querySelector('[data-assistant-form]');
+      const messages = document.querySelector('[data-assistant-messages]');
+      const status = document.querySelector('[data-assistant-status]');
+      if (!drawer || !toggle || !form || !messages || !status) return;
+      const setOpen = open => { drawer.hidden = !open; toggle.setAttribute('aria-expanded', String(open)); toggle.textContent = open ? 'Assistant open' : 'Ask NeurOn'; localStorage.setItem('neuron-assistant-open', open ? '1' : '0'); };
+      setOpen(localStorage.getItem('neuron-assistant-open') === '1');
+      toggle.addEventListener('click', () => setOpen(drawer.hidden)); collapse.addEventListener('click', () => setOpen(false));
+      const addMessage = (text, kind = '') => { const node = document.createElement('div'); node.className = 'assistant-message' + (kind ? ' ' + kind : ''); node.textContent = text; messages.appendChild(node); messages.scrollTop = messages.scrollHeight; return node; };
+      const currentDraft = () => {
+        const profile = document.querySelector('#profile-form');
+        if (!profile) { try { return JSON.parse(sessionStorage.getItem('neuron-profile-assistant-guidance') || 'null')?.draft; } catch { return undefined; } }
+        const selections = [...profile.querySelectorAll('[data-profile-target]:checked')].map(target => ({ targetId: target.value, modelIds: [...target.closest('[data-profile-target-card]').querySelectorAll('[data-profile-model]:checked')].map(model => JSON.parse(model.value).modelId) }));
+        return { name: profile.elements.name?.value || undefined, description: profile.elements.description?.value || undefined, defaultDurationMinutes: Number(profile.elements.defaultDurationMinutes?.value) || undefined, defaultKeepaliveMinutes: Number(profile.elements.defaultKeepaliveMinutes?.value) || undefined, selections };
+      };
+      const screenSurface = path => {
+        if (path === '/') return 'home';
+        if (path === '/profiles' && document.querySelector('#profile-form')) return 'profile_create';
+        if (path === '/profiles') return 'profiles';
+        if (path === '/profiles/new') return 'profile_create';
+        if (path.startsWith('/profiles/') && path.endsWith('/edit')) return 'profile_edit';
+        if (path === '/help' || path === '/welcome') return 'guide';
+        if (path === '/client-setup') return 'client_setup';
+        if (path === '/api-keys') return 'api_keys';
+        if (path === '/admin/models') return 'admin_model_data';
+        if (path === '/admin/targets') return 'admin_targets';
+        if (path.startsWith('/admin/')) return 'admin_other';
+        return 'other';
+      };
+      const currentScreen = () => {
+        const path = location.pathname;
+        const screen = { path, title: document.title, surface: screenSurface(path) };
+        const start = document.querySelector('#start-form');
+        if (start) screen.startControls = {
+          selectedProfileId: start.elements.profileId?.value || undefined,
+          durationMinutes: Number(start.elements.durationMinutes?.value) || undefined,
+          keepaliveMinutes: Number(start.elements.keepaliveMinutes?.value) || undefined
+        };
+        const profileRoot = document.querySelector('#profile-modal');
+        if (profileRoot?.dataset.assistantRequirements) {
+          try { screen.profileRequirements = JSON.parse(profileRoot.dataset.assistantRequirements); } catch {}
+        }
+        const clientProfile = document.querySelector('#client-profile');
+        if (clientProfile?.value) screen.clientProfileId = clientProfile.value;
+        return screen;
+      };
+      const storeDraft = guidance => { sessionStorage.setItem('neuron-profile-assistant-guidance', JSON.stringify(guidance)); document.dispatchEvent(new CustomEvent('neuron:apply-profile-guidance', { detail: guidance })); };
+      const actionButton = (label, handler) => { const button = document.createElement('button'); button.type = 'button'; button.textContent = label; button.addEventListener('click', handler); return button; };
+      const confirmation = (message, label, handler) => { const card = document.createElement('div'); card.className = 'assistant-confirm'; const text = document.createElement('span'); text.textContent = message; card.append(text, actionButton(label, async event => { const button = event.currentTarget; button.disabled = true; try { await handler(); card.remove(); } catch (error) { addMessage(error instanceof Error ? error.message : 'The confirmed action failed.'); button.disabled = false; } })); messages.appendChild(card); messages.scrollTop = messages.scrollHeight; };
+      const jsonRequest = async (path, options) => { const response = await fetch(path, options); const body = await response.json().catch(() => ({})); if (!response.ok) throw new Error(body.error || 'NeurOn rejected the action'); return body; };
+      const handleResult = result => {
+        if (result.type === 'answer') { addMessage(result.message); return; }
+        if (result.type === 'configure_profile') {
+          storeDraft(result.guidance); addMessage('I filled a profile draft for ' + result.guidance.useCase + '. Review the target and model selections before saving.');
+          if (!document.querySelector('#profile-form')) { const node = addMessage('The draft is ready to open in the profile builder.'); node.append(document.createElement('br'), actionButton('Open profile builder', () => { location.href = '/profiles/new?assistant=1'; })); }
+          return;
+        }
+        if (result.type === 'save_profile') {
+          storeDraft({ useCase: result.message, responseLength: 'mixed', requirements: { domains: [], weights: { intelligence: 1/3, speed: 1/3, cost: 1/3 } }, draft: result.draft });
+          confirmation(result.message, 'Confirm save profile', async () => { const profile = await jsonRequest('/api/reservation-profiles', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(result.draft) }); addMessage('Saved profile ' + profile.name + '. Nothing was started.'); });
+          return;
+        }
+        if (result.type === 'start_reservation') {
+          confirmation(result.message, 'Confirm start reservation', async () => { await jsonRequest('/api/reservations', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ profileId: result.profileId, modelIds: [], targetIds: [], durationMinutes: result.durationMinutes, keepaliveMinutes: result.keepaliveMinutes }) }); addMessage('Reservation created. NeurOn is reconciling the selected capacity.'); });
+          return;
+        }
+        if (result.type === 'open_admin_page') { addMessage(result.message); location.href = result.path; return; }
+        if (result.type === 'rediscover_target') confirmation(result.message, 'Confirm rediscovery', async () => { await jsonRequest('/api/admin/targets/' + encodeURIComponent(result.targetId) + '/discover', { method: 'POST' }); addMessage('Rediscovery and benchmark completed for ' + result.targetId + '.'); });
+      };
+      form.addEventListener('submit', async event => {
+        event.preventDefault(); const textarea = form.querySelector('textarea'); const request = textarea.value.trim(); if (request.length < 3) return;
+        addMessage(request, 'user'); textarea.value = ''; form.querySelector('button').disabled = true; status.textContent = 'The configured advisor may start while I work…';
+        try {
+          const body = await jsonRequest('/api/profile-advisor', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ request, currentDraft: currentDraft(), screen: currentScreen() }) });
+          handleResult(body.result);
+        } catch (error) { addMessage(error instanceof Error ? error.message : 'The assistant failed.'); }
+        finally { form.querySelector('button').disabled = false; status.textContent = ''; }
+      });
+      fetch('/api/profile-advisor/status').then(response => response.json()).then(data => { if (!data.enabled) { form.querySelector('textarea').disabled = true; form.querySelector('button').disabled = true; status.textContent = data.reason === 'maintenance_mode' ? 'The assistant is paused while NeurOn is in maintenance mode.' : 'An administrator has not selected an advisor target and model.'; } }).catch(() => undefined);
+      const pending = sessionStorage.getItem('neuron-profile-assistant-guidance'); if (pending && document.querySelector('#profile-form')) { try { document.dispatchEvent(new CustomEvent('neuron:apply-profile-guidance', { detail: JSON.parse(pending) })); } catch {} }
+    })();`;
 }
 
 export function loginPage(error = "", methods: Array<Pick<AuthMethod, "id" | "displayName" | "type">> = [], sharedPasswordEnabled = true): string {
@@ -370,7 +471,7 @@ export function welcomePage(user: AuthenticatedUser, hasProfiles: boolean, helpM
   </section>`);
 }
 
-export function startPage(user: AuthenticatedUser, targets: Array<{ target: CapacityTarget; models: ModelDefinition[] }>, profiles: ReservationProfile[] = [], error = "", costEstimates: Record<string, { hourlyUsd: number }> = {}, statusPollSeconds = 5, selectionDeployments: ModelDeploymentSelectionView[] = [], profileAdvisorEnabled = false): string {
+export function startPage(user: AuthenticatedUser, targets: Array<{ target: CapacityTarget; models: ModelDefinition[] }>, profiles: ReservationProfile[] = [], error = "", costEstimates: Record<string, { hourlyUsd: number }> = {}, statusPollSeconds = 5, selectionDeployments: ModelDeploymentSelectionView[] = []): string {
   const initialTargetId = targets[0]?.target.id ?? "";
   return layout("NeurOn", user, `<div class="home-grid"><div><section class="panel">
     <h2>Your reservations</h2>
@@ -407,7 +508,7 @@ export function startPage(user: AuthenticatedUser, targets: Array<{ target: Capa
   </section>
   </aside></div>
   ${profileReviewModal(profiles, targets)}
-  ${profileCreateModal(targets, initialTargetId, "/", selectionDeployments, profileAdvisorEnabled, costEstimates)}
+  ${profileCreateModal(targets, initialTargetId, "/", selectionDeployments, costEstimates)}
   <script type="module">
     const modelLookup = ${safeJson(modelLookupForTargets(targets))};
     const targetLookup = ${safeJson(targetLookupForTargets(targets))};
@@ -896,7 +997,6 @@ export function profilesPage(
   targets: Array<{ target: CapacityTarget; models: ModelDefinition[] }>,
   options: { openCreate?: boolean; onboarding?: boolean; error?: string } = {},
   selectionDeployments: ModelDeploymentSelectionView[] = [],
-  profileAdvisorEnabled = false,
   selectionCosts: Record<string, { hourlyUsd: number }> = {}
 ): string {
   const initialTargetId = targets[0]?.target.id ?? "";
@@ -909,7 +1009,7 @@ export function profilesPage(
     <div class="target-status-head"><h1>Profiles</h1><a class="button" href="/profiles/new">New profile</a></div>
     <div class="summary-list">${rows}</div>
   </section>
-  ${profileCreateModal(targets, initialTargetId, options.onboarding ? "/" : "/profiles", selectionDeployments, profileAdvisorEnabled, selectionCosts)}
+  ${profileCreateModal(targets, initialTargetId, options.onboarding ? "/" : "/profiles", selectionDeployments, selectionCosts)}
   <script type="module">
     const form = document.querySelector('#profile-form');
     const targetInputs = [...form.querySelectorAll('[data-profile-target]')];
@@ -977,13 +1077,12 @@ export function profileEditorPage(
   user: AuthenticatedUser,
   targets: Array<{ target: CapacityTarget; models: ModelDefinition[] }>,
   deployments: ModelDeploymentSelectionView[],
-  advisorEnabled: boolean,
   costs: Record<string, { hourlyUsd: number }>,
   options: { profile?: ReservationProfile; onboarding?: boolean; error?: string } = {}
 ): string {
   const initialTargetId = options.profile?.selections[0]?.targetId ?? targets[0]?.target.id ?? "";
   const heading = options.profile ? `Edit ${options.profile.name}` : "New reservation profile";
-  return layout(heading, user, `${options.onboarding ? `<section class="panel"><p class="pill">Getting started</p><h1>Create your first profile</h1><p class="muted">Choose the target and model combinations used by this workflow. Nothing starts until you make a reservation.</p></section>` : ""}${options.error ? `<p class="status">${escapeHtml(options.error)}</p>` : ""}${profileCreateModal(targets, initialTargetId, options.onboarding ? "/" : "/profiles", deployments, advisorEnabled, costs, options.profile, true)}`);
+  return layout(heading, user, `${options.onboarding ? `<section class="panel"><p class="pill">Getting started</p><h1>Create your first profile</h1><p class="muted">Choose the target and model combinations used by this workflow. Nothing starts until you make a reservation.</p></section>` : ""}${options.error ? `<p class="status">${escapeHtml(options.error)}</p>` : ""}${profileCreateModal(targets, initialTargetId, options.onboarding ? "/" : "/profiles", deployments, costs, options.profile, true)}`);
 }
 
 function profileListCard(profile: ReservationProfile, targets: Array<{ target: CapacityTarget; models: ModelDefinition[] }>): string {
@@ -1087,7 +1186,7 @@ export function usagePage(user: AuthenticatedUser): string {
   </script>`);
 }
 
-export function modelMetadataPage(user: AuthenticatedUser, deployments: ModelDeploymentSelectionView[], stored: ModelSelectionCatalogConfig): string {
+export function modelMetadataPage(user: AuthenticatedUser, deployments: ModelDeploymentSelectionView[], stored: ModelSelectionCatalogConfig, targets: TargetView[] = []): string {
   const capabilityByModel = new Map(stored.models.map((value) => [value.modelId, value]));
   const deploymentByKey = new Map(stored.deployments.map((value) => [`${value.targetId}::${value.modelId}`, value]));
   const models = Array.from(new Map(deployments.map((deployment) => [deployment.modelId, deployment])).values());
@@ -1100,10 +1199,25 @@ export function modelMetadataPage(user: AuthenticatedUser, deployments: ModelDep
     const value = deploymentByKey.get(deployment.key);
     return `<details class="drilldown"><summary><div><strong>${escapeHtml(deployment.modelDisplayName)}</strong><div class="muted">${escapeHtml(deployment.targetDisplayName)} · <code>${escapeHtml(deployment.key)}</code></div></div><span class="pill">${value?.performance?.decodeTokensPerSecond ? `${formatMetric(value.performance.decodeTokensPerSecond)} decode t/s` : "Not benchmarked"}</span></summary><div class="drilldown-body"><form data-deployment-metadata data-target-id="${escapeHtml(deployment.targetId)}" data-model-id="${escapeHtml(deployment.modelId)}"><div class="field-grid"><label>LiteLLM aliases (comma-separated)<br><input name="aliases" value="${escapeHtml(deployment.aliases.join(", "))}"></label><label>Per-request context<br><input name="context" type="number" min="1" step="1" value="${value?.contextWindowTokens ?? ""}"></label><label>Quantization/artifact<br><input name="quantization" value="${escapeHtml(value?.quantization?.format ?? "")}"></label><label>Estimated quality retained (%)<br><input name="retention" type="number" min="0" max="100" step="0.1" value="${value?.quantization?.qualityRetentionPercent ?? ""}"></label><label>Reference artifact<br><input name="reference" value="${escapeHtml(value?.quantization?.reference ?? "")}"></label><label>Decode tokens/s<br><input name="decode" type="number" min="0" step="0.01" value="${value?.performance?.decodeTokensPerSecond ?? ""}"></label><label>Prefill tokens/s<br><input name="prefill" type="number" min="0" step="0.01" value="${value?.performance?.prefillTokensPerSecond ?? ""}"></label><label>Source<br><input name="source" value="${escapeHtml(value?.provenance?.source ?? value?.performance?.provenance?.source ?? "")}" placeholder="NeurOn benchmark"></label><label>Version<br><input name="version" value="${escapeHtml(value?.provenance?.version ?? value?.performance?.provenance?.version ?? "")}"></label></div><button type="submit">Save deployment data and aliases</button><span class="muted" data-save-status></span></form></div></details>`;
   }).join("");
-  return layout("Model data", user, `<section class="panel"><h1>Model data</h1><p>Store model quality and deployment measurements in NeurOn. These durable records—not environment variables—drive profile guidance.</p><p class="muted">Only enter benchmark values you are permitted to store. Every rating should name its source and version.</p></section><section class="panel"><h2>Model quality and capabilities</h2><div class="summary-list">${capabilityForms || `<p class="muted">No models are known.</p>`}</div></section><section class="panel"><h2>Target/model deployments</h2><div class="summary-list">${deploymentForms || `<p class="muted">No deployments are known.</p>`}</div></section>
+  const targetById = new Map(targets.map((target) => [target.id, target]));
+  const selectedAdvisor = targets.find((target) => target.profileAdvisor);
+  const advisorOptions = deployments.map((deployment) => {
+    const target = targetById.get(deployment.targetId);
+    const selected = selectedAdvisor?.id === deployment.targetId && selectedAdvisor.profileAdvisor?.modelId === deployment.modelId;
+    return `<option value="${escapeHtml(deployment.key)}" ${selected ? "selected" : ""} ${target?.editable ? "" : "disabled"}>${escapeHtml(deployment.targetDisplayName)} · ${escapeHtml(deployment.modelDisplayName)}${target?.editable ? "" : " (copy target to database first)"}</option>`;
+  }).join("");
+  return layout("Model data", user, `<section class="panel"><h1>Model data</h1><p>Store model quality and deployment measurements in NeurOn. These durable records—not environment variables—drive profile guidance.</p><p class="muted">Only enter benchmark values you are permitted to store. Every rating should name its source and version.</p></section><section class="panel"><h2>Profile assistant backend</h2><p>Select the existing NeurOn deployment that runs the assistant. Asking for guidance creates or refreshes a synthetic system reservation, waits for normal reconciliation and health, then calls this model directly.</p><p class="muted">The selected runtime must provide OpenAI-compatible chat completions and support function/tool calling for screen changes and action proposals.</p><form id="profile-advisor-backend-form"><div class="field-grid"><label>Target and model<br><select name="deployment"><option value="">Disabled</option>${advisorOptions}</select></label><label>Reservation / keep-alive minutes<br><input name="reservationMinutes" type="number" min="1" max="60" value="${selectedAdvisor?.profileAdvisor?.reservationMinutes ?? 15}"></label><label>Cold-start timeout seconds<br><input name="startupTimeoutSeconds" type="number" min="1" max="1800" value="${selectedAdvisor?.profileAdvisor?.startupTimeoutSeconds ?? 600}"></label><label>Model response timeout seconds<br><input name="requestTimeoutSeconds" type="number" min="1" max="300" value="${selectedAdvisor?.profileAdvisor?.requestTimeoutSeconds ?? 120}"></label></div><button type="submit">Save assistant backend</button><span class="muted" data-advisor-save-status></span></form></section><section class="panel"><h2>Model quality and capabilities</h2><div class="summary-list">${capabilityForms || `<p class="muted">No models are known.</p>`}</div></section><section class="panel"><h2>Target/model deployments</h2><div class="summary-list">${deploymentForms || `<p class="muted">No deployments are known.</p>`}</div></section>
   <script type="module">
     const number = (form, name) => form.elements[name].value === '' ? undefined : Number(form.elements[name].value);
     const provenance = form => form.elements.source.value.trim() ? { source: form.elements.source.value.trim(), ...(form.elements.version.value.trim() ? { version: form.elements.version.value.trim() } : {}) } : undefined;
+    document.querySelector('#profile-advisor-backend-form')?.addEventListener('submit', async event => {
+      event.preventDefault(); const form = event.currentTarget; const status = form.querySelector('[data-advisor-save-status]'); status.textContent = ' Saving…';
+      try {
+        const [targetId, modelId] = form.elements.deployment.value ? form.elements.deployment.value.split('::') : [null, null];
+        const response = await fetch('/api/admin/profile-advisor-backend', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ targetId, modelId, reservationMinutes: Number(form.elements.reservationMinutes.value), startupTimeoutSeconds: Number(form.elements.startupTimeoutSeconds.value), requestTimeoutSeconds: Number(form.elements.requestTimeoutSeconds.value) }) });
+        if (!response.ok) throw new Error((await response.json()).error || 'Save failed'); status.textContent = ' Saved';
+      } catch (error) { status.textContent = ' ' + (error instanceof Error ? error.message : 'Save failed'); }
+    });
     document.addEventListener('submit', async event => {
       const form = event.target.closest('[data-model-metadata], [data-deployment-metadata]'); if (!form) return;
       event.preventDefault(); const status = form.querySelector('[data-save-status]'); status.textContent = ' Saving…';
@@ -2496,7 +2610,6 @@ function profileCreateModal(
   initialTargetId: string,
   returnTo = "/",
   deployments: ModelDeploymentSelectionView[] = [],
-  advisorEnabled = false,
   costs: Record<string, { hourlyUsd: number }> = {},
   profile?: ReservationProfile,
   standalone = false
@@ -2530,12 +2643,11 @@ function profileCreateModal(
               return profileTargetSelection(target, models, selected, deploymentByKey, costs[target.id]?.hourlyUsd, existingModels ?? []);
             }).join("")}</div>
           </div>
-          ${profileAdvisorPanel(advisorEnabled)}
         </div>
         <div class="actions"><button type="submit">${profile ? "Save changes" : "Save profile"}</button></div>
       </form>
     </div>
-    ${profileSelectionClientScript(deployments, advisorEnabled)}
+    ${profileSelectionClientScript(deployments)}
     ${standalone ? profileEditorClientScript() : ""}
   </div>`;
 }
@@ -2582,21 +2694,11 @@ function profileSelectionGuide(deployments: ModelDeploymentSelectionView[]): str
   </section>`;
 }
 
-function profileAdvisorPanel(enabled: boolean): string {
-  return `<aside class="profile-advisor" aria-labelledby="profile-advisor-title">
-    <h3 id="profile-advisor-title">Ask the profile advisor</h3>
-    <p class="muted">Describe the work in plain language. Guidance only adjusts the requirements and preferences; it never saves a profile or starts capacity.</p>
-    ${enabled
-      ? `<textarea id="profile-advisor-request" maxlength="2000" placeholder="I need an interactive coding model for a repository with about 40K tokens of context. Quality matters most, but keep it under $5/hour."></textarea><button id="profile-advisor-submit" type="button">Ask advisor</button><div id="profile-advisor-output" class="profile-advisor-output muted" aria-live="polite">No guidance requested yet.</div>`
-      : `<p class="muted">AI guidance is not configured for this NeurOn deployment. The local wizard and filters remain fully available.</p>`}
-  </aside>`;
-}
-
 function domainLabel(value: string): string {
   return value.split(/[._-]/u).map((part) => part ? part[0].toUpperCase() + part.slice(1) : part).join(" ");
 }
 
-function profileSelectionClientScript(deployments: ModelDeploymentSelectionView[], advisorEnabled: boolean): string {
+function profileSelectionClientScript(deployments: ModelDeploymentSelectionView[]): string {
   return `<script type="module">
     (() => {
       const root = document.querySelector('#profile-modal');
@@ -2689,6 +2791,15 @@ function profileSelectionClientScript(deployments: ModelDeploymentSelectionView[
           : '<span class="muted">Not measured</span>');
       };
       const render = () => {
+        const contextIndex = Number(contextInput.value) || 0;
+        const normalizedWeights = currentWeights();
+        root.dataset.assistantRequirements = JSON.stringify({
+          ...(contextIndex ? { minimumContextTokens: contextValues[contextIndex - 1] } : {}),
+          ...(numberValue(maxCostInput) === undefined ? {} : { maximumHourlyUsd: numberValue(maxCostInput) }),
+          ...(hostingInput.value ? { hostingMode: hostingInput.value } : {}),
+          domains: selectedDomains(),
+          weights: normalizedWeights
+        });
         const ranked = rankedDeployments();
         const matchingKeys = new Set(ranked.map(deployment => deployment.key));
         root.querySelectorAll('[data-deployment-key]').forEach(option => {
@@ -2813,30 +2924,32 @@ function profileSelectionClientScript(deployments: ModelDeploymentSelectionView[
         contextInput.value = String(index >= 0 ? index + 1 : contextValues.length);
         updateContextOutput();
       };
-      ${advisorEnabled ? `
-      const advisorButton = root.querySelector('#profile-advisor-submit');
-      const advisorRequest = root.querySelector('#profile-advisor-request');
-      const advisorOutput = root.querySelector('#profile-advisor-output');
-      advisorButton.addEventListener('click', async () => {
-        const request = advisorRequest.value.trim();
-        if (request.length < 3) { advisorOutput.textContent = 'Describe the workload in a little more detail.'; return; }
-        advisorButton.disabled = true; advisorOutput.textContent = 'Interpreting your requirements…';
-        try {
-          const response = await fetch('/api/profile-advisor', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ request }) });
-          const body = await response.json();
-          if (!response.ok) throw new Error(body.error || 'Profile advisor failed');
-          const guidance = body.guidance;
-          setMinimumContext(guidance.requirements.minimumContextTokens);
-          maxCostInput.value = guidance.requirements.maximumHourlyUsd ?? '';
-          const advisedDomains = guidance.requirements.domains ?? (guidance.requirements.domain ? [guidance.requirements.domain] : []);
-          domainInputs.forEach(input => { input.checked = advisedDomains.includes(input.value); });
-          const advisedWeights = guidance.requirements.weights;
-          setWeights(advisedWeights.intelligence, advisedWeights.speed, advisedWeights.cost);
-          advisorOutput.textContent = 'Interpreted as: ' + guidance.useCase + '. ' + (guidance.requirements.minimumContextTokens ? 'Minimum context ' + Math.round(guidance.requirements.minimumContextTokens / 1000) + 'K. ' : '') + 'Review the highlighted best fits, then choose or adjust the profile.';
-        } catch (error) {
-          advisorOutput.textContent = error instanceof Error ? error.message : 'Profile advisor failed';
-        } finally { advisorButton.disabled = false; }
-      });` : ""}
+      const applyGuidance = guidance => {
+        if (!guidance?.requirements || !guidance?.draft) return;
+        setMinimumContext(guidance.requirements.minimumContextTokens);
+        maxCostInput.value = guidance.requirements.maximumHourlyUsd ?? '';
+        hostingInput.value = guidance.requirements.hostingMode ?? '';
+        const advisedDomains = guidance.requirements.domains ?? [];
+        domainInputs.forEach(input => { input.checked = advisedDomains.includes(input.value); });
+        const advisedWeights = guidance.requirements.weights ?? { intelligence: 1, speed: 1, cost: 1 };
+        setWeights(advisedWeights.intelligence, advisedWeights.speed, advisedWeights.cost);
+        if (guidance.draft.name) form.elements.name.value = guidance.draft.name;
+        if (guidance.draft.description !== undefined) form.elements.description.value = guidance.draft.description;
+        const chooseDefault = (kind, value) => {
+          if (!isNumber(value)) return;
+          const preset = form.querySelector('[data-profile-' + kind + '="' + value + '"]');
+          if (preset) { preset.click(); return; }
+          const custom = form.querySelector('#profile-custom-' + kind); const button = form.querySelector('[data-profile-custom-' + kind + ']');
+          if (custom && button) { custom.value = String(value); button.click(); custom.dispatchEvent(new Event('input', { bubbles: true })); }
+        };
+        chooseDefault('duration', guidance.draft.defaultDurationMinutes);
+        chooseDefault('keepalive', guidance.draft.defaultKeepaliveMinutes);
+        const selected = new Map((guidance.draft.selections ?? []).map(selection => [selection.targetId, new Set(selection.modelIds)]));
+        form.querySelectorAll('[data-profile-target]').forEach(input => { input.checked = selected.has(input.value); input.dispatchEvent(new Event('change', { bubbles: true })); });
+        form.querySelectorAll('[data-profile-model]').forEach(input => { const value = JSON.parse(input.value); input.checked = selected.get(value.targetId)?.has(value.modelId) ?? false; });
+        render(); sessionStorage.removeItem('neuron-profile-assistant-guidance');
+      };
+      document.addEventListener('neuron:apply-profile-guidance', event => applyGuidance(event.detail));
       updateContextOutput();
       setWeights(1, 1, 1);
     })();

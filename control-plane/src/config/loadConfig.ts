@@ -2,7 +2,6 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { z } from "zod";
 import type { AppConfig, AuthMethod, CapacityProviderDefinition, CapacityTarget, ModelDefinition, NeuronProviderConfig, RuntimeProfile, StorageConfig } from "../domain/types.js";
-import { loadProfileAdvisorFromEnvironment } from "./modelSelectionConfig.js";
 
 const targetSchema = z.object({
   id: z.string().min(1),
@@ -286,7 +285,6 @@ export async function loadConfig(): Promise<{ config: AppConfig; models: ModelDe
       litellmApiKey: process.env.LITELLM_API_KEY,
       litellmTrafficPollSeconds: intEnv("LITELLM_TRAFFIC_POLL_SECONDS", 60),
       litellmTrafficLookbackSeconds: intEnv("LITELLM_TRAFFIC_LOOKBACK_SECONDS", 300),
-      profileAdvisor: loadProfileAdvisorFromEnvironment(),
       runtimeProfiles,
       capacityProviders: configuredProviders,
       capacityTargets,

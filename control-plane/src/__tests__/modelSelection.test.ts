@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { loadProfileAdvisorFromEnvironment, parseModelSelectionCatalog } from "../config/modelSelectionConfig.js";
+import { parseModelSelectionCatalog } from "../config/modelSelectionConfig.js";
 import type { CapacityTarget, ModelDefinition } from "../domain/types.js";
 import { ModelCatalog } from "../services/ModelCatalog.js";
 import { ModelSelectionService, rankModelDeployments } from "../services/ModelSelectionService.js";
@@ -16,12 +16,6 @@ const models: ModelDefinition[] = [
 
 afterEach(() => {
   vi.unstubAllGlobals();
-  for (const key of [
-    "PROFILE_ADVISOR_API_BASE_URL",
-    "PROFILE_ADVISOR_API_KEY",
-    "PROFILE_ADVISOR_MODEL",
-    "PROFILE_ADVISOR_TIMEOUT_SECONDS"
-  ]) delete process.env[key];
 });
 
 describe("model selection metadata", () => {
@@ -105,44 +99,85 @@ describe("model selection metadata", () => {
 });
 
 describe("profile advisor", () => {
-  it("requires a complete HTTP(S) advisor configuration", () => {
-    process.env.PROFILE_ADVISOR_API_BASE_URL = "file:///private/advisor";
-    process.env.PROFILE_ADVISOR_MODEL = "guide";
-    expect(() => loadProfileAdvisorFromEnvironment()).toThrow(/HTTP or HTTPS/);
-    process.env.PROFILE_ADVISOR_API_BASE_URL = "https://advisor.example.test/v1/";
-    process.env.PROFILE_ADVISOR_TIMEOUT_SECONDS = "10";
-    expect(loadProfileAdvisorFromEnvironment()).toEqual({
-      apiBaseUrl: "https://advisor.example.test/v1",
-      model: "guide",
-      timeoutSeconds: 10,
-      apiKey: undefined
-    });
-  });
+  it("reserves the selected NeurOn deployment and validates a UI configuration tool", async () => {
+    const { advisor, createForUser, fetchMock } = profileAdvisorHarness([{
+      name: "configure_profile", value: {
+        useCase: "interactive coding", responseLength: "short",
+        profile: { name: "Coding", description: "Interactive coding", defaultDurationMinutes: 30, defaultKeepaliveMinutes: 5 },
+        requirements: { domains: ["coding"], minimumContextTokens: 32_000, maximumHourlyUsd: 5, hostingMode: null, weights: { intelligence: 60, speed: 30, cost: 10 } },
+        selections: [{ targetId: "small", modelIds: ["fast"] }]
+      }
+    }]);
 
-  it("sends only the workload and domain vocabulary, then validates structured requirements", async () => {
-    const fetchMock = vi.fn(async (_input: string | URL | Request, _init?: RequestInit) => new Response(JSON.stringify({
-      choices: [{ message: { content: "```json\n{\"useCase\":\"interactive coding\",\"domain\":\"coding\",\"minimumContextTokens\":64000,\"maximumHourlyUsd\":5,\"minimumQualityRetentionPercent\":null,\"responseLength\":\"short\",\"weights\":{\"intelligence\":60,\"speed\":30,\"cost\":10}}\n```" } }]
-    }), { status: 200, headers: { "content-type": "application/json" } }));
-    vi.stubGlobal("fetch", fetchMock);
-    const advisor = new ProfileAdvisorService({ apiBaseUrl: "https://advisor.example.test", apiKey: "private", model: "guide", timeoutSeconds: 5 }, () => ["coding"]);
-
-    await expect(advisor.interpret("I need a coding model with 64K context")).resolves.toEqual({
-      useCase: "interactive coding",
-      responseLength: "short",
-      requirements: {
+    await expect(advisor.interpret("I need a coding model with 32K context", {
+      currentDraft: { name: "Working draft", selections: [] },
+      screen: {
+        path: "/profiles/new", title: "New profile", surface: "profile_create",
+        profileRequirements: { minimumContextTokens: 32_000, domains: ["coding"], weights: { intelligence: 0.6, speed: 0.3, cost: 0.1 } }
+      }
+    })).resolves.toMatchObject({
+      type: "configure_profile",
+      guidance: { useCase: "interactive coding", responseLength: "short", requirements: {
         domains: ["coding"],
         hostingMode: undefined,
-        minimumContextTokens: 64_000,
+        minimumContextTokens: 32_000,
         maximumHourlyUsd: 5,
         weights: { intelligence: 0.6, speed: 0.3, cost: 0.1 }
-      }
+      }, draft: { name: "Coding", selections: [{ targetId: "small", modelIds: ["fast"] }] } }
     });
+    expect(createForUser).toHaveBeenCalledWith(expect.objectContaining({ username: "profile-advisor" }), expect.objectContaining({ targetIds: ["small"], modelIds: ["fast"], synthetic: true }));
     const [, init] = fetchMock.mock.calls[0];
     expect(init?.headers).toMatchObject({ authorization: "Bearer private" });
-    expect(String(init?.body)).toContain("I need a coding model with 64K context");
-    expect(String(init?.body)).not.toContain("62");
+    expect(String(init?.body)).toContain("I need a coding model with 32K context");
+    expect(String(init?.body)).toContain("shared self-hosted LLM capacity");
+    expect(String(init?.body)).toContain("synthetic traffic reservation");
+    expect(String(init?.body)).toContain('\\"surface\\":\\"profile_create\\"');
+    expect(String(init?.body)).toContain('\\"minimumContextTokens\\":32000');
+    expect(String(init?.body)).not.toContain("<main");
+    expect(String(init?.body)).not.toContain("https://advisor.example.test");
+  });
+
+  it("returns separate confirmation-gated save and start proposals without performing either action", async () => {
+    const { advisor, createForUser, fetchMock } = profileAdvisorHarness([
+      { name: "save_profile", value: { message: "Save this coding setup?", profile: { name: "Coding", description: "Daily coding", defaultDurationMinutes: 30, defaultKeepaliveMinutes: 5, selections: [{ targetId: "small", modelIds: ["fast"] }] } } },
+      { name: "start_reservation", value: { message: "Start Coding for 30 minutes?", profileId: "profile-1", durationMinutes: 30, keepaliveMinutes: 5 } }
+    ]);
+    const context = { savedProfiles: [{ id: "profile-1", name: "Coding" }], screen: { path: "/", title: "NeurOn", surface: "home" as const, startControls: { selectedProfileId: "profile-1", durationMinutes: 30, keepaliveMinutes: 5 } } };
+
+    await expect(advisor.interpret("Save this profile", context)).resolves.toMatchObject({ type: "save_profile", requiresConfirmation: true, draft: { name: "Coding" } });
+    await expect(advisor.interpret("Start it", context)).resolves.toMatchObject({ type: "start_reservation", requiresConfirmation: true, profileId: "profile-1", durationMinutes: 30 });
+    expect(createForUser).toHaveBeenCalledTimes(2);
+    expect(createForUser.mock.calls.every(([user, input]) => user.username === "profile-advisor" && input.synthetic === true)).toBe(true);
+    const tools = JSON.parse(String(fetchMock.mock.calls[0][1]?.body)).tools.map((entry: { function: { name: string } }) => entry.function.name);
+    expect(tools).toContain("save_profile");
+    expect(tools).toContain("start_reservation");
+    expect(tools).not.toContain("rediscover_target");
   });
 });
+
+function profileAdvisorHarness(results: Array<{ name: string; value: unknown }>) {
+  const target: CapacityTarget = { ...targets[0], apiUrl: "https://advisor.example.test/v1", modelWarmup: { apiKey: "private" }, profileAdvisor: { modelId: "fast", reservationMinutes: 10, startupTimeoutSeconds: 5, requestTimeoutSeconds: 5 } };
+  const catalog = new ModelCatalog([models[0]], [target]);
+  const createForUser = vi.fn(async (_user: { username: string }, _input: { synthetic?: boolean }) => ({ id: "advisor-reservation" }));
+  const queue = [...results];
+  const fetchMock = vi.fn(async (_input: string | URL | Request, _init?: RequestInit) => {
+    const result = queue.shift();
+    if (!result) throw new Error("No mocked profile-advisor result remains");
+    return new Response(JSON.stringify({ choices: [{ message: { tool_calls: [{ function: { name: result.name, arguments: JSON.stringify(result.value) } }] } }] }), { status: 200, headers: { "content-type": "application/json" } });
+  });
+  const advisor = new ProfileAdvisorService({
+    targetService: { profileAdvisorBackend: () => ({ target, config: target.profileAdvisor! }) },
+    catalog,
+    reservationService: { listActiveOwned: async () => [], createForUser, markDone: vi.fn(), extend: vi.fn() } as never,
+    statuses: { get: () => ({ targetId: "small", desired: "on", observed: "healthy", message: "Ready" }), set: vi.fn(), list: () => [] },
+    capacityProvider: { getTargetStatus: async () => ({ observed: "healthy", message: "Ready" }), provisionTarget: vi.fn(), ensureTargetOn: vi.fn(), ensureTargetOff: vi.fn(), forceStopTarget: vi.fn() },
+    availableDomains: () => ["coding"],
+    availableDeployments: () => [selectionService().listDeployments({ small: { hourlyUsd: 1.25 } }).find((deployment) => deployment.key === "small::fast")!],
+    fetchImpl: fetchMock as typeof fetch,
+    sleep: async () => undefined
+  });
+  return { advisor, createForUser, fetchMock };
+}
 
 function selectionService(): ModelSelectionService {
   return new ModelSelectionService(new ModelCatalog(models, targets), {

@@ -86,20 +86,28 @@ GET /api/model-selection
 
 The response includes explicit unknowns, target hourly estimates, measurement
 provenance, available domain keys, favorites, popularity/profile counts, and
-whether the optional workload advisor is enabled. It is read-only and does not
-start a target to collect facts.
+whether the profile assistant is enabled. It is read-only and does not start a
+target to collect facts.
 
 Authenticated users may add or remove an exact target-model favorite through
 `/api/model-favorites`. Admins manage durable capability/deployment facts under
 `/api/admin/model-metadata`; **Admin > Model data** is the normal human
 interface.
 
-When configured, the advisor accepts `{ "request": "..." }` at
-`POST /api/profile-advisor` and returns validated selector requirements and
-weights. It receives no private deployment measurements and cannot create a
-profile or reservation. Clients should still present the resulting controls
-and final target-model selection for user confirmation. See
-[Guided Model Selection](model-selection.md).
+`GET /api/profile-advisor/status` reports whether an administrator selected an
+existing target/model backend. `POST /api/profile-advisor` accepts the request,
+structured current-page identity, and optional editable draft. Asking may
+create or refresh the backend's synthetic system reservation. The response is
+one validated assistant tool result: configure controls, answer, propose a
+confirmed save/start, or—only for admins—navigate or propose confirmed
+rediscovery. The browser must not execute confirmation-required tools merely
+because the model requested them. See [Guided Model
+Selection](model-selection.md).
+
+These assistant tools reuse NeurOn services and validation but are distinct
+from the external MCP transport. MCP remains appropriate for API-key clients;
+the browser assistant needs session identity, current-screen context, and
+explicit confirmation semantics.
 
 ## OpenCode Plugin
 

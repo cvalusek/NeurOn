@@ -36,11 +36,14 @@ Use the selector when the model list is unfamiliar:
 - Move the **Good**, **Fast**, and **Cheap** point to express preferences among
   the choices that remain. The center means maximum, equal preference for all
   three. Useful balanced positions and category corners snap into place.
-- The quick wizard sets requirements and internal preferences. If the optional
-  workload advisor is available, it also fills only the controls; it does not
-  choose or save for you.
+- The quick wizard sets requirements and internal preferences. The collapsible
+  NeurOn assistant can also fill the complete draft, including exact
+  target/model choices. Its save and start tools always present separate
+  confirmation cards before anything is persisted or capacity demand begins.
 - Review the ranked cards and category leaders, then select the exact
   target-model choices the profile needs.
+
+![The collapsible NeurOn assistant alongside the profile builder](images/profile-assistant.png)
 
 Speed is target-specific: decode throughput carries 75% of its score and
 prefill throughput carries 25%. Time to first token is diagnostic only and does

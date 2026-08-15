@@ -42,7 +42,7 @@ export function registerApiRoutes(
   targetOperations: TargetOperationCoordinator,
   healthInfo: { storageDriver: string; maintenanceMode: boolean },
   modelSelection: ModelSelectionService,
-  profileAdvisor: ProfileAdvisorService | undefined,
+  profileAdvisor: ProfileAdvisorService,
   modelFavorites: ModelFavoriteService,
   usageAnalytics: UsageAnalyticsService
 ) {
@@ -79,7 +79,7 @@ export function registerApiRoutes(
       return {
         domains: modelSelection.availableDomains(),
         deployments: modelSelection.listDeployments(costs).map((deployment) => ({ ...deployment, ...usageByKey.get(deployment.key), favorite: favoriteKeys.has(deployment.key) })),
-        advisorEnabled: Boolean(profileAdvisor)
+        advisorEnabled: profileAdvisor.isConfigured()
       };
     }
   );
@@ -105,6 +105,19 @@ export function registerApiRoutes(
       }),
       profiles: profiles.map((profile) => ({ id: profile.id, name: profile.name }))
     };
+  });
+
+  app.get("/api/profile-advisor/status", async () => {
+    try {
+      const backend = targetService.profileAdvisorBackend();
+      return {
+        enabled: Boolean(backend) && !healthInfo.maintenanceMode,
+        reason: healthInfo.maintenanceMode ? "maintenance_mode" : backend ? undefined : "not_configured",
+        backend: backend ? { targetId: backend.target.id, targetDisplayName: backend.target.displayName, modelId: backend.config.modelId } : null
+      };
+    } catch (error) {
+      return { enabled: false, error: error instanceof Error ? error.message : "Profile advisor configuration is invalid" };
+    }
   });
 
   app.post("/api/model-favorites", async (request, reply) => {
@@ -152,6 +165,32 @@ export function registerApiRoutes(
       return { ok: true, targetId: target.id, modelId: params.modelId, aliases };
     } catch (error) { return sendError(reply, error); }
   });
+  app.get("/api/admin/profile-advisor-backend", async (_request, reply) => {
+    try {
+      const backend = targetService.profileAdvisorBackend();
+      return { backend: backend ? { targetId: backend.target.id, targetDisplayName: backend.target.displayName, ...backend.config } : null };
+    } catch (error) { return sendError(reply, error); }
+  });
+  app.put("/api/admin/profile-advisor-backend", async (request, reply) => {
+    try {
+      const body = z.object({
+        targetId: z.string().min(1).nullable(),
+        modelId: z.string().min(1).nullable(),
+        reservationMinutes: z.number().int().min(1).max(60).optional(),
+        startupTimeoutSeconds: z.number().int().min(1).max(1800).optional(),
+        requestTimeoutSeconds: z.number().int().min(1).max(300).optional()
+      }).strict().parse(request.body);
+      if ((body.targetId === null) !== (body.modelId === null)) throw new Error("Target and model must both be selected or both be cleared");
+      await targetService.setProfileAdvisorBackend(body.targetId && body.modelId ? {
+        targetId: body.targetId,
+        modelId: body.modelId,
+        reservationMinutes: body.reservationMinutes,
+        startupTimeoutSeconds: body.startupTimeoutSeconds,
+        requestTimeoutSeconds: body.requestTimeoutSeconds
+      } : undefined);
+      return { ok: true, backend: targetService.profileAdvisorBackend() ? { targetId: body.targetId, modelId: body.modelId } : null };
+    } catch (error) { return sendError(reply, error); }
+  });
   app.get("/api/admin/usage", async (request) => {
     const { days } = z.object({ days: z.coerce.number().int().min(1).max(366).default(30) }).parse(request.query);
     return usageAnalytics.report(days);
@@ -162,21 +201,84 @@ export function registerApiRoutes(
     {
       schema: {
         tags: ["models"],
-        summary: "Translate a workload description into model selection controls",
+        summary: "Ask the NeurOn assistant for a validated UI or confirmation-gated action proposal",
         security: authSecurity(),
         body: {
           type: "object",
-          properties: { request: { type: "string", minLength: 3, maxLength: 2_000 } },
+          properties: {
+            request: { type: "string", minLength: 3, maxLength: 2_000 },
+            currentDraft: {
+              type: "object",
+              additionalProperties: false,
+              properties: {
+                name: { type: "string", maxLength: 120 },
+                description: { type: "string", maxLength: 500 },
+                defaultDurationMinutes: { type: "integer", minimum: 1, maximum: 720 },
+                defaultKeepaliveMinutes: { type: "integer", minimum: 1, maximum: 60 },
+                selections: { type: "array", maxItems: 20, items: { type: "object", additionalProperties: false, required: ["targetId", "modelIds"], properties: { targetId: { type: "string" }, modelIds: { type: "array", maxItems: 20, items: { type: "string" } } } } }
+              }
+            },
+            screen: {
+              type: "object",
+              additionalProperties: false,
+              required: ["path", "surface"],
+              properties: {
+                path: { type: "string", maxLength: 500 },
+                title: { type: "string", maxLength: 200 },
+                surface: { type: "string", enum: ["home", "profiles", "profile_create", "profile_edit", "guide", "client_setup", "api_keys", "admin_model_data", "admin_targets", "admin_other", "other"] },
+                startControls: { type: "object" },
+                profileRequirements: { type: "object" },
+                clientProfileId: { type: "string", maxLength: 200 }
+              }
+            }
+          },
           required: ["request"]
         },
         response: { 400: errorSchema, 502: errorSchema, 503: errorSchema }
       }
     },
     async (request, reply) => {
-      if (!profileAdvisor) return reply.code(503).send({ error: "AI profile guidance is not configured" });
+      if (!profileAdvisor.isConfigured()) return reply.code(503).send({ error: "AI profile guidance is not configured" });
       try {
-        const body = z.object({ request: z.string().trim().min(3).max(2_000) }).parse(request.body);
-        return { guidance: await profileAdvisor.interpret(body.request) };
+        const body = z.object({
+          request: z.string().trim().min(3).max(2_000),
+          currentDraft: z.object({
+            name: z.string().max(120).optional(),
+            description: z.string().max(500).optional(),
+            defaultDurationMinutes: z.number().int().min(1).max(720).optional(),
+            defaultKeepaliveMinutes: z.number().int().min(1).max(60).optional(),
+            selections: z.array(z.object({ targetId: z.string().min(1), modelIds: z.array(z.string().min(1)).max(20) })).max(20)
+          }).strict().optional(),
+          screen: z.object({
+            path: z.string().min(1).max(500),
+            title: z.string().max(200).optional(),
+            surface: z.enum(["home", "profiles", "profile_create", "profile_edit", "guide", "client_setup", "api_keys", "admin_model_data", "admin_targets", "admin_other", "other"]),
+            startControls: z.object({
+              selectedProfileId: z.string().max(200).optional(),
+              durationMinutes: z.number().int().min(1).max(720).optional(),
+              keepaliveMinutes: z.number().int().min(1).max(60).optional()
+            }).strict().optional(),
+            profileRequirements: z.object({
+              minimumContextTokens: z.number().int().min(0).max(10_000_000).optional(),
+              maximumHourlyUsd: z.number().min(0).max(1_000_000).optional(),
+              hostingMode: z.enum(["dedicated", "multi-model"]).optional(),
+              domains: z.array(z.string().min(1).max(80)).max(20).optional(),
+              weights: z.object({ intelligence: z.number().min(0).max(1), speed: z.number().min(0).max(1), cost: z.number().min(0).max(1) }).strict().optional()
+            }).strict().optional(),
+            clientProfileId: z.string().max(200).optional()
+          }).strict().optional()
+        }).strict().parse(request.body);
+        const user = requireUser(request);
+        const savedProfiles = (await reservationProfileService.listForUser(user)).map((profile) => ({ id: profile.id, name: profile.name }));
+        const activeReservations = (await reservationService.listActiveOwned(user)).map((reservation) => ({
+          id: reservation.id,
+          profileId: reservation.profileId,
+          profileName: reservation.profileName,
+          targetIds: reservation.targetIds,
+          modelIds: reservation.modelIds,
+          expiresAt: reservation.expiresAt.toISOString()
+        }));
+        return { result: await profileAdvisor.interpret(body.request, { currentDraft: body.currentDraft, savedProfiles, screen: body.screen, activeReservations }, user.isAdmin) };
       } catch (error) {
         const invalidRequest = error instanceof z.ZodError;
         const message = invalidRequest

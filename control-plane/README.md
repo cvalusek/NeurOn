@@ -149,10 +149,6 @@ Environment variables:
 | `LITELLM_API_KEY` | unset | LiteLLM admin API key |
 | `LITELLM_TRAFFIC_POLL_SECONDS` | `60` | Poll `/spend/logs/v2`; set `0` to disable |
 | `LITELLM_TRAFFIC_LOOKBACK_SECONDS` | `300` | Recent traffic window |
-| `PROFILE_ADVISOR_API_BASE_URL` | unset | Optional OpenAI-compatible workload advisor base URL |
-| `PROFILE_ADVISOR_API_KEY` | unset | Optional advisor credential; keep private |
-| `PROFILE_ADVISOR_MODEL` | unset | Advisor model name; required with an advisor URL |
-| `PROFILE_ADVISOR_TIMEOUT_SECONDS` | `15` | Advisor request timeout |
 | `USE_FAKE_PROVIDER` | `false` | Local fake provider for app development |
 | `HASSLEOFF_URL` | unset | HassleOff base URL for protected targets |
 | `HASSLEOFF_CONTROLLER_TOKEN` | unset | Authenticates controller lease calls |

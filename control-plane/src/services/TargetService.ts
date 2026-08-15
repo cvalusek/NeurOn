@@ -1,5 +1,5 @@
 import type { CapacityTargetRepository, TargetModelDiscoveryRepository } from "../domain/interfaces.js";
-import type { CapacityTarget } from "../domain/types.js";
+import type { CapacityTarget, ProfileAdvisorTargetConfig } from "../domain/types.js";
 import { cloneTarget } from "../repository/targetRepositoryUtils.js";
 import { ModelCatalog } from "./ModelCatalog.js";
 
@@ -132,6 +132,44 @@ export class TargetService {
     if (existingIndex >= 0) currentModels.splice(existingIndex, 1, { ...currentModels[existingIndex], ...configuredModel });
     else currentModels.push(configuredModel);
     return this.update(targetId, { ...target, models: currentModels });
+  }
+
+  profileAdvisorBackend(): { target: CapacityTarget; config: ProfileAdvisorTargetConfig } | undefined {
+    const configured = this.runtimeTargets.filter((target) => target.profileAdvisor);
+    if (configured.length > 1) throw new Error("More than one profile advisor backend is configured");
+    const target = configured[0];
+    if (!target?.profileAdvisor) return undefined;
+    const model = this.catalog.getModel(target.profileAdvisor.modelId);
+    if (!model || !model.targetIds.includes(target.id)) throw new Error(`Profile advisor model ${target.profileAdvisor.modelId} is not available on target ${target.id}`);
+    return { target: cloneTarget(target), config: { ...target.profileAdvisor, modelId: model.id } };
+  }
+
+  async setProfileAdvisorBackend(input?: { targetId: string; modelId: string; reservationMinutes?: number; startupTimeoutSeconds?: number; requestTimeoutSeconds?: number }): Promise<void> {
+    const persisted = await this.repository.list();
+    const selected = input ? this.runtimeTargets.find((target) => target.id === input.targetId) : undefined;
+    if (input) {
+      const model = this.catalog.getModel(input.modelId);
+      if (!selected || !model?.targetIds.includes(input.targetId)) throw new Error("Profile advisor target/model deployment not found");
+      if (!persisted.some((target) => target.id === input.targetId)) {
+        throw new Error(`Target ${input.targetId} must be copied to the database before it can host the profile advisor`);
+      }
+    }
+    for (const target of persisted) {
+      const shouldSelect = Boolean(input && target.id === input.targetId);
+      if (!target.profileAdvisor && !shouldSelect) continue;
+      const updated = cloneTarget(target);
+      if (shouldSelect && input) {
+        updated.profileAdvisor = {
+          modelId: this.catalog.canonicalModelIds([input.modelId])[0],
+          reservationMinutes: input.reservationMinutes,
+          startupTimeoutSeconds: input.startupTimeoutSeconds,
+          requestTimeoutSeconds: input.requestTimeoutSeconds
+        };
+      } else {
+        delete updated.profileAdvisor;
+      }
+      await this.update(target.id, updated);
+    }
   }
 
   async canPersistReplacementPatch(id: string): Promise<boolean> {

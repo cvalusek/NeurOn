@@ -43,7 +43,6 @@ export function registerUiRoutes(
   capacityProvider: CapacityProvider,
   hassleOffClient: HassleOffClient | undefined,
   modelSelection: ModelSelectionService,
-  profileAdvisorEnabled: boolean,
   modelFavorites: ModelFavoriteService,
   usageAnalytics: UsageAnalyticsService
 ) {
@@ -150,7 +149,7 @@ export function registerUiRoutes(
     if (profiles.length === 0 && (await reservationService.listActiveOwned(user)).length === 0) return reply.redirect("/welcome");
     const targets = catalog.listTargets().map((target) => ({ target, models: catalog.listModelsForTarget(target.id) }));
     const costEstimates = await startCostEstimates(targets.map(({ target }) => target), costEstimation);
-    return reply.type("text/html").send(startPage(user, targets, profiles, query.error, costEstimates, config.adminStatusPollSeconds, await selectionDeploymentsForUser(user, costEstimates), profileAdvisorEnabled));
+    return reply.type("text/html").send(startPage(user, targets, profiles, query.error, costEstimates, config.adminStatusPollSeconds, await selectionDeploymentsForUser(user, costEstimates)));
   });
   app.get("/welcome", async (request, reply) => {
     const user = requireUser(request);
@@ -172,7 +171,7 @@ export function registerUiRoutes(
     const user = requireUser(request);
     const targets = catalog.listTargets().map((target) => ({ target, models: catalog.listModelsForTarget(target.id) }));
     const costEstimates = await startCostEstimates(targets.map(({ target }) => target), costEstimation);
-    return reply.type("text/html").send(profilesPage(user, await reservationProfileService.listForUser(user), targets, { openCreate: query.create === "1", onboarding: query.onboarding === "1", error: query.error }, await selectionDeploymentsForUser(user, costEstimates), profileAdvisorEnabled, costEstimates));
+    return reply.type("text/html").send(profilesPage(user, await reservationProfileService.listForUser(user), targets, { openCreate: query.create === "1", onboarding: query.onboarding === "1", error: query.error }, await selectionDeploymentsForUser(user, costEstimates), costEstimates));
   });
   app.get("/client-setup", async (request, reply) => {
     const user = requireUser(request);
@@ -189,7 +188,7 @@ export function registerUiRoutes(
     const user = requireUser(request);
     const targets = catalog.listTargets().map((target) => ({ target, models: catalog.listModelsForTarget(target.id) }));
     const costEstimates = await startCostEstimates(targets.map(({ target }) => target), costEstimation);
-    return reply.type("text/html").send(profileEditorPage(user, targets, await selectionDeploymentsForUser(user, costEstimates), profileAdvisorEnabled, costEstimates, { onboarding: query.onboarding === "1", error: query.error }));
+    return reply.type("text/html").send(profileEditorPage(user, targets, await selectionDeploymentsForUser(user, costEstimates), costEstimates, { onboarding: query.onboarding === "1", error: query.error }));
   });
   app.get("/profiles/:id/edit", async (request, reply) => {
     const { id } = z.object({ id: z.string() }).parse(request.params);
@@ -198,7 +197,7 @@ export function registerUiRoutes(
     const profile = await reservationProfileService.getOwned(id, user);
     const targets = catalog.listTargets().map((target) => ({ target, models: catalog.listModelsForTarget(target.id) }));
     const costEstimates = await startCostEstimates(targets.map(({ target }) => target), costEstimation);
-    return reply.type("text/html").send(profileEditorPage(user, targets, await selectionDeploymentsForUser(user, costEstimates), profileAdvisorEnabled, costEstimates, { profile, error: query.error }));
+    return reply.type("text/html").send(profileEditorPage(user, targets, await selectionDeploymentsForUser(user, costEstimates), costEstimates, { profile, error: query.error }));
   });
   app.post("/api-keys", async (request, reply) => {
     const user = requireUser(request);
@@ -309,7 +308,7 @@ export function registerUiRoutes(
   app.get("/admin/models", async (request, reply) => {
     const targets = catalog.listTargets();
     const costs = await startCostEstimates(targets, costEstimation);
-    return reply.type("text/html").send(modelMetadataPage(requireUser(request), modelSelection.listDeployments(costs), modelSelection.catalogConfig()));
+    return reply.type("text/html").send(modelMetadataPage(requireUser(request), modelSelection.listDeployments(costs), modelSelection.catalogConfig(), await targetService.list()));
   });
   app.get("/admin/hassleoff", async (request, reply) => {
     const query = z.object({ error: z.string().optional(), success: z.string().optional() }).parse(request.query);
@@ -602,7 +601,10 @@ export function registerUiRoutes(
       const { id } = z.object({ id: z.string() }).parse(request.params);
       const body = targetFormSchema.parse(request.body ?? {});
       const provider = await providerFromForm(body.providerId, providerService);
-      await targetService.update(id, targetFromForm(body, provider, config));
+      const existing = (await targetService.list()).find((target) => target.id === id);
+      const updated = targetFromForm(body, provider, config);
+      if (existing?.profileAdvisor) updated.profileAdvisor = { ...existing.profileAdvisor };
+      await targetService.update(id, updated);
       return reply.redirect("/admin/targets");
     } catch (error) {
       const message = error instanceof Error ? error.message : "Could not update target";

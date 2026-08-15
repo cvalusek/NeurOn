@@ -119,32 +119,56 @@ repeatable baseline after restart.
 No prompts, responses, user identities, API keys, or token contents are stored
 by this feature.
 
-## Optional AI advisor
+## NeurOn-backed profile assistant
 
-Configure an OpenAI-compatible endpoint with:
+An administrator selects one existing target/model deployment at **Admin >
+Model data**. The selection is stored on the durable target definition; it is
+not an environment-configured external endpoint. Asking for help creates or
+refreshes a synthetic `profile-advisor` reservation, waits for the ordinary
+reconciler and health checks, and calls that target's OpenAI-compatible API.
+This means the first request may cold-start the configured target. The admin
+setting controls reservation/keep-alive length, startup timeout, and response
+timeout. The selected runtime must expose OpenAI-compatible chat completions;
+function/tool-call support is required for screen updates and action proposals.
 
-```env
-PROFILE_ADVISOR_API_BASE_URL=https://advisor.example.internal/v1
-PROFILE_ADVISOR_API_KEY=replace-with-a-private-secret
-PROFILE_ADVISOR_MODEL=profile-guide
-PROFILE_ADVISOR_TIMEOUT_SECONDS=15
-```
+The assistant receives a sanitized deployment catalog (IDs, display names,
+aliases, selection measurements, context, and cost), saved-profile IDs/names,
+and the user's active reservation summary. It also receives an application-
+constructed current-screen snapshot: a named surface such as Home, Profile
+create/edit, Client setup, or an admin area; the route and title; and only the
+relevant typed controls such as the current profile draft, requirement filters,
+ranking shares, selected Home profile/timing, or Client setup profile. This lets
+it answer “what am I looking at?” and update the right controls without sending
+HTML or scraping visible text. It never receives target endpoints, provider or
+model credentials, raw DOM contents, prompt logs, hidden fields outside the
+explicit snapshot, unrelated private state, or another user's reservations.
+Requests and model responses are not persisted by NeurOn.
 
-The advisor receives only the user's workload description and the configured
-domain vocabulary. It converts natural language into validated context, cost,
-domain, hosting-shape, response-length, and preference-weight fields. It never
-receives target endpoints, benchmark values, provider credentials, or model
-descriptions, and it never recommends or mutates a deployment directly.
-NeurOn's deterministic selector computes the result.
+The system prompt explains the target/model/profile/reservation relationships,
+reconciler ownership of provider lifecycle, health and model preparation,
+duration, keep-alive and synthetic traffic demand, hard requirements, ranking
+preferences, alias routing, screen-context trust boundaries, and confirmation
+rules. The model must use an allowlisted tool:
 
-Use an endpoint that is available before the user has a NeurOn profile. Pointing
-the advisor at capacity that itself requires a new NeurOn reservation creates a
-first-use dependency. When the advisor is not configured or unavailable, every
-filter, recommendation, and wizard function remains local.
+- `configure_profile` fills reversible browser controls and exact target/model
+  selections.
+- `save_profile` creates a confirmation card. Only the user's confirmation
+  invokes the normal profile service.
+- `start_reservation` is separate and requires another confirmation before it
+  creates demand.
+- Admins additionally receive safe navigation and confirmed target rediscovery
+  tools. Destructive target/provider/update controls are not exposed.
 
-`GET /api/model-selection` exposes authenticated selection facts and advisor
-availability. `POST /api/profile-advisor` accepts a workload description and
-returns validated requirements. Neither endpoint mutates control-plane state.
+The assistant drawer is available throughout authenticated pages and collapses
+to a small launcher. A draft created outside the profile builder is held in
+session storage and applied when the user opens the builder. If the backend is
+unconfigured or unavailable, every local filter, recommendation, and wizard
+function remains usable.
+
+`GET /api/profile-advisor/status` reports availability. `POST
+/api/profile-advisor` accepts the workload plus structured screen context and
+returns a validated tool proposal. Assistant tool calls do not bypass normal
+authorization, maintenance mode, validation, or user confirmation.
 
 ## PreFer boundary
 

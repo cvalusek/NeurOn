@@ -66,37 +66,52 @@ describe("model selection guidance", () => {
     }
   });
 
-  it("uses an optional advisor only to return validated profile requirements, including during maintenance", async () => {
+  it("does not let profile guidance create advisor demand during maintenance", async () => {
     process.env.USE_FAKE_PROVIDER = "true";
-    const fetchMock = vi.fn(async () => jsonResponse({ choices: [{ message: { content: JSON.stringify({
-      useCase: "long coding sessions",
-          domains: ["coding"],
-      minimumContextTokens: 128_000,
-      maximumHourlyUsd: null,
-      minimumQualityRetentionPercent: null,
-      responseLength: "long",
-      weights: { intelligence: 50, speed: 40, cost: 10 }
-    }) } }] }));
+    const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
     const { app } = await buildApp({
       ...config,
       maintenanceMode: true,
-      modelSelectionCatalog: { schemaVersion: 1, models: [{ modelId: "m1", domains: { coding: 90 } }], deployments: [] },
-      profileAdvisor: { apiBaseUrl: "https://advisor.example.test", apiKey: "private", model: "guide", timeoutSeconds: 5 }
+      modelSelectionCatalog: { schemaVersion: 1, models: [{ modelId: "m1", domains: { coding: 90 } }], deployments: [] }
     }, models);
     const auth = { authorization: `Basic ${Buffer.from("actual:secret").toString("base64")}` };
     try {
+      expect((await app.inject({ method: "GET", url: "/api/profile-advisor/status", headers: auth })).json()).toMatchObject({ enabled: false, reason: "maintenance_mode" });
       const response = await app.inject({ method: "POST", url: "/api/profile-advisor", headers: auth, payload: { request: "Long coding sessions with 128K context" } });
-      expect(response.statusCode).toBe(200);
-      expect(response.json().guidance).toMatchObject({
-        useCase: "long coding sessions",
-        responseLength: "long",
-        requirements: { domains: ["coding"], minimumContextTokens: 128_000, weights: { intelligence: 0.5, speed: 0.4, cost: 0.1 } }
-      });
-      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(response.statusCode).toBe(503);
+      expect(response.json().error).toMatch(/maintenance mode/);
+      expect(fetchMock).not.toHaveBeenCalled();
     } finally {
       await app.close();
       vi.unstubAllGlobals();
+    }
+  });
+
+  it("stores the profile assistant backend on a persisted target and exposes the global drawer", async () => {
+    process.env.USE_FAKE_PROVIDER = "true";
+    const { app } = await buildApp({ ...config, adminUsers: ["actual"] }, models);
+    const auth = { authorization: `Basic ${Buffer.from("actual:secret").toString("base64")}` };
+    try {
+      expect((await app.inject({ method: "GET", url: "/api/profile-advisor/status", headers: auth })).json()).toMatchObject({ enabled: false, backend: null });
+      const premature = await app.inject({ method: "PUT", url: "/api/admin/profile-advisor-backend", headers: auth, payload: { targetId: "t1", modelId: "m1", reservationMinutes: 15 } });
+      expect(premature.statusCode).toBe(400);
+      expect(premature.json().error).toMatch(/copied to the database/);
+
+      expect((await app.inject({ method: "POST", url: "/admin/targets/t1/copy-to-db", headers: auth })).statusCode).toBe(302);
+      const saved = await app.inject({ method: "PUT", url: "/api/admin/profile-advisor-backend", headers: auth, payload: { targetId: "t1", modelId: "m1", reservationMinutes: 12, startupTimeoutSeconds: 300, requestTimeoutSeconds: 90 } });
+      expect(saved.statusCode).toBe(200);
+      expect((await app.inject({ method: "GET", url: "/api/profile-advisor/status", headers: auth })).json()).toMatchObject({ enabled: true, backend: { targetId: "t1", modelId: "m1" } });
+      const modelPage = await app.inject({ method: "GET", url: "/admin/models", headers: auth });
+      expect(modelPage.body).toContain("Profile assistant backend");
+      expect(modelPage.body).toContain("NeurOn assistant");
+      expect(modelPage.body).toContain("Confirm save profile");
+      expect(modelPage.body).toContain("Confirm start reservation");
+
+      expect((await app.inject({ method: "PUT", url: "/api/admin/profile-advisor-backend", headers: auth, payload: { targetId: null, modelId: null } })).statusCode).toBe(200);
+      expect((await app.inject({ method: "GET", url: "/api/profile-advisor/status", headers: auth })).json().enabled).toBe(false);
+    } finally {
+      await app.close();
     }
   });
 

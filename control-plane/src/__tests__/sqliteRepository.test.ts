@@ -133,6 +133,7 @@ describe("SqliteCapacityTargetRepository", () => {
       provider: "runpod",
       providerId: "runpod-main",
       modelIds: ["qwen"],
+      profileAdvisor: { modelId: "qwen", reservationMinutes: 12, startupTimeoutSeconds: 300, requestTimeoutSeconds: 90 },
       runpod: { podId: "pod-qwen", runtimePort: 8080 }
     });
     first.close();
@@ -148,6 +149,7 @@ describe("SqliteCapacityTargetRepository", () => {
         provider: "runpod",
         providerId: "runpod-main",
         modelIds: ["qwen"],
+        profileAdvisor: { modelId: "qwen", reservationMinutes: 12, startupTimeoutSeconds: 300, requestTimeoutSeconds: 90 },
         runpod: { podId: "pod-qwen", runtimePort: 8080 }
       }
     ]);
