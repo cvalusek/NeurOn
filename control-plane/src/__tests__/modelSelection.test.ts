@@ -4,13 +4,14 @@ import type { CapacityTarget, ModelDefinition } from "../domain/types.js";
 import { ModelCatalog } from "../services/ModelCatalog.js";
 import { ModelSelectionService, rankModelDeployments } from "../services/ModelSelectionService.js";
 import { ProfileAdvisorService } from "../services/ProfileAdvisorService.js";
+import { InMemoryAssistantConfigRepository } from "../repository/InMemoryAssistantConfigRepository.js";
 
 const targets: CapacityTarget[] = [
   { id: "small", displayName: "Small", provider: "docker", modelIds: ["fast"] },
   { id: "large", displayName: "Large", provider: "docker", modelIds: ["smart"] }
 ];
 const models: ModelDefinition[] = [
-  { id: "fast", displayName: "Fast", aliases: ["fast"], targetIds: ["small"], contextWindowTokens: 32_000 },
+  { id: "fast", displayName: "Fast", aliases: ["fast"], targetIds: ["small"], contextWindowTokens: 64_000, technicalCapabilities: [{ label: "tools" }] },
   { id: "smart", displayName: "Smart", aliases: ["smart"], targetIds: ["large"], contextWindowTokens: 128_000 }
 ];
 
@@ -28,6 +29,7 @@ describe("model selection metadata", () => {
   it("combines capability, deployment, context, cost, and provenance without inferring missing values", () => {
     const service = selectionService();
     expect(service.availableDomains()).toEqual(["coding"]);
+    expect(service.availableTechnicalCapabilities()).toEqual(["tools"]);
     expect(service.listDeployments({ small: { hourlyUsd: 1.25 }, large: { hourlyUsd: 4 } })).toEqual(expect.arrayContaining([
       expect.objectContaining({
         key: "small::fast",
@@ -65,12 +67,13 @@ describe("model selection metadata", () => {
     });
   });
 
-  it("applies hard context/domain/cost requirements and reports preference-data coverage", () => {
+  it("applies hard context, technical-capability, and cost requirements while strengths only refine ranking", () => {
     const deployments = selectionService().listDeployments({ small: { hourlyUsd: 1.25 }, large: { hourlyUsd: 4 } });
     const ranked = rankModelDeployments(deployments, {
       minimumContextTokens: 64_000,
       maximumHourlyUsd: 2,
       domains: ["coding"],
+      technicalCapabilities: ["tools"],
       weights: { intelligence: 0.5, speed: 0.3, cost: 0.2 }
     });
     expect(ranked.map((deployment) => deployment.key)).toEqual(["small::fast"]);
@@ -104,7 +107,7 @@ describe("profile advisor", () => {
       name: "configure_profile", value: {
         useCase: "interactive coding", responseLength: "short",
         profile: { name: "Coding", description: "Interactive coding", defaultDurationMinutes: 30, defaultKeepaliveMinutes: 5 },
-        requirements: { domains: ["coding"], minimumContextTokens: 32_000, maximumHourlyUsd: 5, hostingMode: null, weights: { intelligence: 60, speed: 30, cost: 10 } },
+        requirements: { domains: ["coding"], technicalCapabilities: ["tools"], minimumContextTokens: 32_000, maximumHourlyUsd: 5, hostingMode: null, weights: { intelligence: 60, speed: 30, cost: 10 } },
         selections: [{ targetId: "small", modelIds: ["fast"] }]
       }
     }]);
@@ -119,6 +122,7 @@ describe("profile advisor", () => {
       type: "configure_profile",
       guidance: { useCase: "interactive coding", responseLength: "short", requirements: {
         domains: ["coding"],
+        technicalCapabilities: ["tools"],
         hostingMode: undefined,
         minimumContextTokens: 32_000,
         maximumHourlyUsd: 5,
@@ -156,8 +160,10 @@ describe("profile advisor", () => {
 });
 
 function profileAdvisorHarness(results: Array<{ name: string; value: unknown }>) {
-  const target: CapacityTarget = { ...targets[0], apiUrl: "https://advisor.example.test/v1", modelWarmup: { apiKey: "private" }, profileAdvisor: { modelId: "fast", reservationMinutes: 10, startupTimeoutSeconds: 5, requestTimeoutSeconds: 5 } };
+  const target: CapacityTarget = { ...targets[0], apiUrl: "https://advisor.example.test/v1", modelWarmup: { apiKey: "private" } };
   const catalog = new ModelCatalog([models[0]], [target]);
+  const assistantConfig = new InMemoryAssistantConfigRepository();
+  void assistantConfig.save({ targetId: "small", modelId: "fast", reservationMinutes: 10, keepaliveMinutes: 5, requestTimeoutSeconds: 5 });
   const createForUser = vi.fn(async (_user: { username: string }, _input: { synthetic?: boolean }) => ({ id: "advisor-reservation" }));
   const queue = [...results];
   const fetchMock = vi.fn(async (_input: string | URL | Request, _init?: RequestInit) => {
@@ -166,7 +172,7 @@ function profileAdvisorHarness(results: Array<{ name: string; value: unknown }>)
     return new Response(JSON.stringify({ choices: [{ message: { tool_calls: [{ function: { name: result.name, arguments: JSON.stringify(result.value) } }] } }] }), { status: 200, headers: { "content-type": "application/json" } });
   });
   const advisor = new ProfileAdvisorService({
-    targetService: { profileAdvisorBackend: () => ({ target, config: target.profileAdvisor! }) },
+    assistantConfig,
     catalog,
     reservationService: { listActiveOwned: async () => [], createForUser, markDone: vi.fn(), extend: vi.fn() } as never,
     statuses: { get: () => ({ targetId: "small", desired: "on", observed: "healthy", message: "Ready" }), set: vi.fn(), list: () => [] },
@@ -183,14 +189,13 @@ function selectionService(): ModelSelectionService {
   return new ModelSelectionService(new ModelCatalog(models, targets), {
     schemaVersion: 1,
     models: [
-      { modelId: "fast", intelligence: 62, domains: { coding: 77 }, provenance: { source: "private benchmark", version: "1" } },
+      { modelId: "fast", intelligence: 62, domains: { coding: 77 }, quantization: { format: "Q4_K_M", qualityRetentionPercent: 97, reference: "BF16" }, provenance: { source: "private benchmark", version: "1" } },
       { modelId: "smart", intelligence: 90, domains: { coding: 96 }, provenance: { source: "private benchmark", version: "1" } }
     ],
     deployments: [{
       targetId: "small",
       modelId: "fast",
-      contextWindowTokens: 64_000,
-      quantization: { format: "Q4_K_M", qualityRetentionPercent: 97, reference: "BF16" },
+      contextWindowTokens: 32_000,
       performance: { decodeTokensPerSecond: 80, timeToFirstTokenSeconds: 0.5, sampleCount: 10 },
       provenance: { source: "operator measurement" }
     }]

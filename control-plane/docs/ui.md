@@ -73,9 +73,11 @@ and the selector has enough room. The builder shows target hourly cost,
 effective per-request context, durable capability metadata, target-specific
 performance, estimated quantization retention, favorites, usage, and LiteLLM
 aliases. Hard filters remove deployments with missing or insufficient facts.
-The Good/Fast/Cheap triangle ranks the remainder and shows category leaders;
-the short wizard updates the same deterministic requirements/preferences.
-Applying guidance only fills controls; saving remains explicit.
+The Good/Fast/Cheap triangle is the profile wizard. It ranks the remainder,
+shows Intelligence/Speed/Cost leaders, updates each card's fit score, and
+reorders both models and targets. Binary technical capabilities are hard
+filters; scored strengths refine Intelligence without filtering. Applying
+guidance only fills controls; saving remains explicit.
 Selecting a profile immediately updates the visible duration and keepalive
 buttons to its stored defaults. Single-model targets select their only model
 automatically; multi-model targets require an explicit model choice.

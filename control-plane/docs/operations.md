@@ -125,10 +125,11 @@ Production defaults are intentionally moderate:
 
 Set `LITELLM_TRAFFIC_POLL_SECONDS=0` to disable request-log polling.
 
-Explicit admin discovery can run a versioned direct speed benchmark after a
-target is activated. It discards one warm-up, measures three cache-disabled
-requests, and stores median prefill/decode throughput with provenance. Responses
-are not stored. **Rediscover all** processes targets sequentially. Startup cache
+Explicit admin discovery can run the versioned `neuron-speed-v2-50k` benchmark
+after a target is activated. It discards one 50K-class warm-up, measures three
+50K-class cache-disabled requests, verifies that the runtime reports processing
+at least 40K prompt tokens, and stores median prefill/decode throughput with
+provenance. **Rediscover all** processes targets sequentially. Startup cache
 hydration does not benchmark or contact a model. Run explicit benchmarking only
 during an approved capacity window.
 
@@ -136,8 +137,9 @@ Ordinary LiteLLM traffic can still contribute a short-lived observational
 overlay when timing/token data is successful, uncached, and unambiguous. A
 restart clears that overlay but leaves durable measurements intact. The profile
 assistant reuses the selected target's existing runtime credential reference;
-there is no separate advisor secret. Never commit runtime credentials or
-private/licensed model facts.
+there is no separate advisor secret. Its target/model and timing controls live
+in the independent **Admin > Assistant** screen and `assistant_config` record.
+Never commit runtime credentials or private/licensed model facts.
 
 ## Control-Plane Shutdown
 

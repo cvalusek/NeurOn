@@ -36,7 +36,7 @@ const config: AppConfig = {
   authMethods: []
 };
 
-const models: ModelDefinition[] = [{ id: "m1", displayName: "M1", aliases: ["m1"], targetIds: ["t1"] }];
+const models: ModelDefinition[] = [{ id: "m1", displayName: "M1", aliases: ["m1"], targetIds: ["t1"], contextWindowTokens: 64_000, technicalCapabilities: [{ label: "tools" }] }];
 
 describe("model selection guidance", () => {
   it("returns authenticated deployment facts with target cost and explicit unknowns", async () => {
@@ -57,6 +57,7 @@ describe("model selection guidance", () => {
       expect(unauthenticated.statusCode).toBe(401);
       expect(response.json()).toMatchObject({
         domains: ["coding"],
+        technicalCapabilities: ["tools"],
         advisorEnabled: false,
         deployments: [{ key: "t1::m1", hourlyUsd: 2.5, contextWindowTokens: 64_000, intelligence: 80, domains: { coding: 91 } }]
       });
@@ -88,27 +89,25 @@ describe("model selection guidance", () => {
     }
   });
 
-  it("stores the profile assistant backend on a persisted target and exposes the global drawer", async () => {
+  it("stores independent assistant configuration and exposes its own screen plus the global drawer", async () => {
     process.env.USE_FAKE_PROVIDER = "true";
     const { app } = await buildApp({ ...config, adminUsers: ["actual"] }, models);
     const auth = { authorization: `Basic ${Buffer.from("actual:secret").toString("base64")}` };
     try {
       expect((await app.inject({ method: "GET", url: "/api/profile-advisor/status", headers: auth })).json()).toMatchObject({ enabled: false, backend: null });
-      const premature = await app.inject({ method: "PUT", url: "/api/admin/profile-advisor-backend", headers: auth, payload: { targetId: "t1", modelId: "m1", reservationMinutes: 15 } });
-      expect(premature.statusCode).toBe(400);
-      expect(premature.json().error).toMatch(/copied to the database/);
-
-      expect((await app.inject({ method: "POST", url: "/admin/targets/t1/copy-to-db", headers: auth })).statusCode).toBe(302);
-      const saved = await app.inject({ method: "PUT", url: "/api/admin/profile-advisor-backend", headers: auth, payload: { targetId: "t1", modelId: "m1", reservationMinutes: 12, startupTimeoutSeconds: 300, requestTimeoutSeconds: 90 } });
+      const saved = await app.inject({ method: "PUT", url: "/api/admin/assistant-config", headers: auth, payload: { targetId: "t1", modelId: "m1", reservationMinutes: 12, keepaliveMinutes: 5, requestTimeoutSeconds: 90 } });
       expect(saved.statusCode).toBe(200);
       expect((await app.inject({ method: "GET", url: "/api/profile-advisor/status", headers: auth })).json()).toMatchObject({ enabled: true, backend: { targetId: "t1", modelId: "m1" } });
       const modelPage = await app.inject({ method: "GET", url: "/admin/models", headers: auth });
-      expect(modelPage.body).toContain("Profile assistant backend");
-      expect(modelPage.body).toContain("NeurOn assistant");
+      expect(modelPage.body).not.toContain("Profile assistant backend");
+      const assistantPage = await app.inject({ method: "GET", url: "/admin/assistant", headers: auth });
+      expect(assistantPage.body).toContain("Save assistant settings");
+      expect(assistantPage.body).toContain("Reservation duration");
+      expect(assistantPage.body).toContain("Keepalive");
       expect(modelPage.body).toContain("Confirm save profile");
       expect(modelPage.body).toContain("Confirm start reservation");
 
-      expect((await app.inject({ method: "PUT", url: "/api/admin/profile-advisor-backend", headers: auth, payload: { targetId: null, modelId: null } })).statusCode).toBe(200);
+      expect((await app.inject({ method: "PUT", url: "/api/admin/assistant-config", headers: auth, payload: { targetId: null, modelId: null, reservationMinutes: 12, keepaliveMinutes: 5, requestTimeoutSeconds: 90 } })).statusCode).toBe(200);
       expect((await app.inject({ method: "GET", url: "/api/profile-advisor/status", headers: auth })).json().enabled).toBe(false);
     } finally {
       await app.close();
@@ -122,7 +121,7 @@ describe("model selection guidance", () => {
       capacityTargets: [{
         ...config.capacityTargets[0],
         aliasPriority: 10,
-        models: [{ id: "m1", displayName: "M1", aliases: ["fast"] }]
+        models: [{ id: "m1", displayName: "M1", aliases: ["fast"], contextWindowTokens: 65_536 }]
       }]
     }, models);
     const auth = { authorization: `Basic ${Buffer.from("actual:secret").toString("base64")}` };
@@ -139,13 +138,13 @@ describe("model selection guidance", () => {
         method: "PUT",
         url: "/api/admin/model-metadata/models/m1",
         headers: auth,
-        payload: { intelligence: 82, domains: { coding: 91 }, provenance: { source: "test fixture", version: "2026-08" } }
+        payload: { intelligence: 82, domains: { coding: 91 }, quantization: { format: "Q6_K", qualityRetentionPercent: 99 }, provenance: { source: "test fixture", version: "2026-08" } }
       })).statusCode).toBe(200);
       expect((await app.inject({
         method: "PUT",
         url: "/api/admin/model-metadata/deployments/t1/m1",
         headers: auth,
-        payload: { contextWindowTokens: 65_536, quantization: { format: "Q6_K", qualityRetentionPercent: 99 }, provenance: { source: "test fixture", version: "2026-08" } }
+        payload: { performance: { decodeTokensPerSecond: 42 }, provenance: { source: "test fixture", version: "2026-08" } }
       })).statusCode).toBe(200);
       expect((await app.inject({
         method: "POST",

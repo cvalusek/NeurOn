@@ -23,14 +23,17 @@ test.beforeEach(async () => {
 
   const loaded = await loadConfig();
   loaded.config.capacityTargets[0].costEstimate = { hourlyUsd: 12 };
+  loaded.config.capacityTargets[0].hostingMode = "dedicated";
+  loaded.config.capacityTargets[0].models![0].contextWindowTokens = 32_000;
+  loaded.config.capacityTargets[0].models![0].technicalCapabilities = [{ label: "tools", title: "Tool calling" }];
+  loaded.models[0].contextWindowTokens = 32_000;
+  loaded.models[0].technicalCapabilities = [{ label: "tools", title: "Tool calling" }];
   loaded.config.modelSelectionCatalog = {
     schemaVersion: 1,
-    models: [{ modelId: "qwen-smol", intelligence: 72, domains: { coding: 84 }, provenance: { source: "synthetic browser fixture" } }],
+    models: [{ modelId: "qwen-smol", intelligence: 72, domains: { coding: 84 }, quantization: { format: "Q4_K_M", qualityRetentionPercent: 97, reference: "BF16" }, provenance: { source: "synthetic browser fixture" } }],
     deployments: [{
       targetId: "prefer-smol",
       modelId: "qwen-smol",
-      contextWindowTokens: 32_000,
-      quantization: { format: "Q4_K_M", qualityRetentionPercent: 97, reference: "BF16" },
       performance: { decodeTokensPerSecond: 55, timeToFirstTokenSeconds: 0.8, sampleCount: 20 },
       provenance: { source: "synthetic browser fixture" }
     }]
@@ -141,18 +144,23 @@ test("filters and recommends target-model deployments in the profile builder", a
   const modal = page.locator("#profile-modal");
 
   await expect(modal.locator(".target-price")).toContainText("$12.00/hr");
-  await expect(modal.locator("[data-deployment-key='prefer-smol::qwen-smol']")).toContainText("Good 72");
+  await expect(modal.locator("[data-deployment-key='prefer-smol::qwen-smol']")).toContainText("Intelligence 72");
   await expect(modal.locator("[data-deployment-key='prefer-smol::qwen-smol']")).toContainText("Decode 55 t/s");
+  await expect(modal.locator("[data-deployment-key='prefer-smol::qwen-smol']")).toContainText("Tools");
+  await expect(modal.locator("[data-profile-fit-score]")).toContainText("Fit 91");
   await expect(modal.getByRole("button", { name: /Best fit/ })).toBeVisible();
 
-  await modal.locator("#profile-max-cost").fill("10");
+  await modal.locator("#profile-hosting-mode").selectOption("multi-model");
   await expect(modal.locator("#profile-filter-status")).toContainText("0 of 1");
   await expect(modal.locator("#profile-recommendations")).toContainText("No deployment satisfies");
 
-  await modal.locator("#profile-max-cost").fill("");
+  await modal.locator("#profile-hosting-mode").selectOption("dedicated");
+  await modal.locator("#profile-max-cost").fill("1");
+  await expect(modal.locator("#profile-max-cost-output")).toHaveText("$12.00/hr maximum");
   await modal.locator('[data-profile-domain][value="coding"]').check();
   await expect(modal.locator("#profile-filter-status")).toContainText("1 of 1");
   await modal.getByRole("img", { name: /Good, Fast, and Cheap ranking preference/ }).press("ArrowRight");
+  await expect(modal.locator("[data-profile-fit-score]")).not.toContainText("Fit 100");
   await modal.getByRole("button", { name: /Best fit/ }).click();
   await expect(modal.locator("[data-profile-model]")).toBeChecked();
   await expect(modal.locator("[data-profile-target]")).toBeChecked();
@@ -174,7 +182,7 @@ test("keeps the assistant available across the app and sends structured current-
   await expect(page.locator("[data-assistant-messages]")).toContainText("I can see the profile builder controls.");
   expect(requestBody).toMatchObject({
     request: "What am I configuring on this screen?",
-    screen: { path: "/profiles/new", surface: "profile_create", profileRequirements: { domains: [], weights: { intelligence: 1 / 3, speed: 1 / 3, cost: 1 / 3 } } },
+    screen: { path: "/profiles/new", surface: "profile_create", profileRequirements: { domains: [], technicalCapabilities: [], weights: { intelligence: 1 / 3, speed: 1 / 3, cost: 1 / 3 } } },
     currentDraft: { selections: [{ targetId: "prefer-smol", modelIds: ["qwen-smol"] }] }
   });
   expect(JSON.stringify(requestBody)).not.toContain("<main");

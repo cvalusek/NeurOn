@@ -176,7 +176,7 @@ stored; it does not wait for provider startup.
 
 ## Storage
 
-All eleven durable repository families use the same configured driver. Storage
+All twelve durable repository families use the same configured driver. Storage
 defaults to memory for direct local runs:
 
 ```env
@@ -203,7 +203,8 @@ repository `./data` directory into `/app/data`. SQLite and Postgres persist
 active reservations, reservation profiles, `sk-neuron-...` API keys, configured
 providers, persisted targets, target provisioning jobs, target model discovery
 results, model capability/deployment metadata, user model favorites, target
-activations, and reservation cost allocation records across NeurOn restarts.
+activations, reservation cost allocation records, and the singleton Assistant
+configuration across NeurOn restarts.
 Target status and startup estimates remain in memory because they are
 observational and rebuilt by reconciliation.
 
@@ -458,11 +459,13 @@ The override still takes precedence and requires no pricing permissions.
 ## Guided Model Selection
 
 The profile builder always works from the configured NeurOn target/model
-catalog. Capability scores and exact target-model context, quantization,
-quality-retention, and speed measurements are durable application data managed
-at **Admin > Model data**. They are not environment configuration. Keep source,
-version, and retrieval provenance with every licensed or deployment-private
-value and never put those values in tracked examples or release notes.
+catalog. Intelligence, scored strengths, model-artifact quantization and
+quality-retention, and exact target-model speed measurements are durable
+application data managed at **Admin > Model data**. Serving context remains on
+the target's model configuration or runtime discovery. These values are not
+environment configuration. Keep source, version, and retrieval provenance with
+every licensed or deployment-private value and never put those values in
+tracked examples or release notes.
 
 Unknown values stay unknown and cannot satisfy a corresponding hard filter.
 Explicit discovery can measure target-specific prefill and decode speed against
@@ -471,10 +474,11 @@ an already-activated runtime; it is never an application-start side effect. See
 provenance, and quantization rules.
 
 The optional profile assistant uses an existing NeurOn target/model deployment,
-selected at **Admin > Model data** after the target has been copied to durable
-storage. Its backend is not configured through environment variables. The
-stored selection includes the advisor reservation length, cold-start timeout,
-and model-response timeout; runtime credentials continue to use the selected
+selected at **Admin > Assistant**. Its singleton selection is durable and
+independent of target definitions and Model data; it is not configured through
+environment variables. The stored selection includes reservation duration,
+keep-alive, and model-response timeout. Reservation duration is also the
+maximum cold-start wait. Runtime credentials continue to use the selected
 target's existing secret reference.
 
 Asking the assistant creates or refreshes a synthetic system reservation for

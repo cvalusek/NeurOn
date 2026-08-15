@@ -154,7 +154,7 @@ export async function buildApp(config: AppConfig, models: ModelDefinition[], opt
     () => shutdownControl.current?.acceptingReservations() ?? true
   );
   const profileAdvisor = new ProfileAdvisorService({
-    targetService,
+    assistantConfig: reservationRepository.assistantConfig,
     catalog,
     reservationService,
     statuses,
@@ -295,6 +295,7 @@ export async function buildApp(config: AppConfig, models: ModelDefinition[], opt
     capacityProvider,
     config.maintenanceMode ? undefined : hassleOffClient,
     modelSelection,
+    profileAdvisor,
     modelFavorites,
     usageAnalytics
   );

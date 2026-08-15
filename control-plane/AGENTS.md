@@ -34,8 +34,8 @@ configuration or in the external runtime project.
 - The selected storage driver supplies reservations, reservation profiles, API
   keys, auth methods, provider and target definitions, provisioning jobs,
   runtime discovery records, model capability/deployment metadata, user model
-  favorites, and target activation/cost history. SQLite and Postgres are
-  durable; memory storage is process-local.
+  favorites, independent assistant configuration, and target activation/cost
+  history. SQLite and Postgres are durable; memory storage is process-local.
 - Keep target status and startup estimates observational and in-memory unless a
   task is explicitly about persisting them.
 - PostgreSQL schema changes belong in the centralized versioned migration
@@ -57,12 +57,14 @@ configuration or in the external runtime project.
 - Reservation profiles may contain multiple target/model selections. Preserve
   the per-target mapping when storing a reservation; aggregate target/model
   arrays remain a compatibility surface for legacy records and clients.
-- Model-selection scores must retain source/version provenance. Capability,
-  performance, context, and quantization facts are durable model or exact
-  target-model records managed through the application, not environment
-  configuration. Never put licensed/private values in tracked examples or
-  release notes. Missing performance or quality data must remain unknown rather
-  than inferred from model names or quant formats.
+- Model-selection scores must retain source/version provenance. Intelligence,
+  scored strengths, and quantization facts belong to the canonical model;
+  performance belongs to the exact target-model deployment; serving context
+  belongs to target/model configuration or runtime discovery. These are managed
+  through the application, not environment configuration. Never put
+  licensed/private values in tracked examples or release notes. Missing
+  performance or quality data must remain unknown rather than inferred from
+  model names or quant formats.
 
 ## Integration Rules
 
@@ -94,9 +96,10 @@ configuration or in the external runtime project.
   other mutating or capacity-affecting tool must produce a UI confirmation and
   must not invoke its domain service until the user confirms that exact action.
 - The profile assistant backend is an operator-selected existing target/model
-  deployment stored with the durable target definition. Asking for guidance may
-  create a visible synthetic system reservation through the normal reconciler;
-  do not add a separate environment-configured advisor endpoint.
+  deployment stored in its own singleton durable assistant configuration, not
+  inside target or model data. Asking for guidance may create a visible
+  synthetic system reservation through the normal reconciler; do not add a
+  separate environment-configured advisor endpoint.
 
 ## Reconciler Rules
 

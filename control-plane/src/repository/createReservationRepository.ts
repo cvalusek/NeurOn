@@ -1,4 +1,4 @@
-import type { ApiKeyRepository, AuthMethodRepository, CapacityProviderRepository, CapacityTargetRepository, ModelFavoriteRepository, ModelMetadataRepository, ReservationProfileRepository, ReservationRepository, TargetModelDiscoveryRepository, TargetProvisioningJobRepository, TargetActivationRepository } from "../domain/interfaces.js";
+import type { ApiKeyRepository, AssistantConfigRepository, AuthMethodRepository, CapacityProviderRepository, CapacityTargetRepository, ModelFavoriteRepository, ModelMetadataRepository, ReservationProfileRepository, ReservationRepository, TargetModelDiscoveryRepository, TargetProvisioningJobRepository, TargetActivationRepository } from "../domain/interfaces.js";
 import type { StorageConfig } from "../domain/types.js";
 import pg from "pg";
 import { InMemoryApiKeyRepository } from "./InMemoryApiKeyRepository.js";
@@ -11,6 +11,7 @@ import { InMemoryTargetProvisioningJobRepository } from "./InMemoryTargetProvisi
 import { InMemoryTargetActivationRepository } from "./InMemoryTargetActivationRepository.js";
 import { InMemoryModelMetadataRepository } from "./InMemoryModelMetadataRepository.js";
 import { InMemoryModelFavoriteRepository } from "./InMemoryModelFavoriteRepository.js";
+import { InMemoryAssistantConfigRepository } from "./InMemoryAssistantConfigRepository.js";
 import { migratePostgresSchema } from "./postgresSchema.js";
 
 export interface ReservationRepositoryHandle {
@@ -25,6 +26,7 @@ export interface ReservationRepositoryHandle {
   targetActivations: TargetActivationRepository;
   modelMetadata: ModelMetadataRepository;
   modelFavorites: ModelFavoriteRepository;
+  assistantConfig: AssistantConfigRepository;
   close(): Promise<void>;
 }
 
@@ -41,6 +43,7 @@ export async function createReservationRepository(config: StorageConfig): Promis
     const { SqliteTargetActivationRepository } = await import("./SqliteTargetActivationRepository.js");
     const { SqliteModelMetadataRepository } = await import("./SqliteModelMetadataRepository.js");
     const { SqliteModelFavoriteRepository } = await import("./SqliteModelFavoriteRepository.js");
+    const { SqliteAssistantConfigRepository } = await import("./SqliteAssistantConfigRepository.js");
     const repository = new SqliteReservationRepository(config.path);
     const reservationProfiles = new SqliteReservationProfileRepository(config.path);
     const apiKeys = new SqliteApiKeyRepository(config.path);
@@ -52,6 +55,7 @@ export async function createReservationRepository(config: StorageConfig): Promis
     const targetActivations = new SqliteTargetActivationRepository(config.path);
     const modelMetadata = new SqliteModelMetadataRepository(config.path);
     const modelFavorites = new SqliteModelFavoriteRepository(config.path);
+    const assistantConfig = new SqliteAssistantConfigRepository(config.path);
     return {
       repository,
       reservationProfiles,
@@ -64,6 +68,7 @@ export async function createReservationRepository(config: StorageConfig): Promis
       targetActivations,
       modelMetadata,
       modelFavorites,
+      assistantConfig,
       close: async () => {
         repository.close();
         reservationProfiles.close();
@@ -76,6 +81,7 @@ export async function createReservationRepository(config: StorageConfig): Promis
         targetActivations.close();
         modelMetadata.close();
         modelFavorites.close();
+        assistantConfig.close();
       }
     };
   }
@@ -91,6 +97,7 @@ export async function createReservationRepository(config: StorageConfig): Promis
     const { PostgresTargetActivationRepository } = await import("./PostgresTargetActivationRepository.js");
     const { PostgresModelMetadataRepository } = await import("./PostgresModelMetadataRepository.js");
     const { PostgresModelFavoriteRepository } = await import("./PostgresModelFavoriteRepository.js");
+    const { PostgresAssistantConfigRepository } = await import("./PostgresAssistantConfigRepository.js");
     const pool = new pg.Pool({ connectionString: config.connectionString, max: config.maxConnections });
     try {
       await migratePostgresSchema(pool);
@@ -109,6 +116,7 @@ export async function createReservationRepository(config: StorageConfig): Promis
     const targetActivations = new PostgresTargetActivationRepository(pool);
     const modelMetadata = new PostgresModelMetadataRepository(pool);
     const modelFavorites = new PostgresModelFavoriteRepository(pool);
+    const assistantConfig = new PostgresAssistantConfigRepository(pool);
     return {
       repository,
       reservationProfiles,
@@ -121,6 +129,7 @@ export async function createReservationRepository(config: StorageConfig): Promis
       targetActivations,
       modelMetadata,
       modelFavorites,
+      assistantConfig,
       close: async () => pool.end()
     };
   }
@@ -137,5 +146,6 @@ export async function createReservationRepository(config: StorageConfig): Promis
   const targetActivations = new InMemoryTargetActivationRepository();
   const modelMetadata = new InMemoryModelMetadataRepository();
   const modelFavorites = new InMemoryModelFavoriteRepository();
-  return { repository, reservationProfiles, apiKeys, authMethods, capacityProviders, capacityTargets, targetProvisioningJobs, targetModelDiscoveries, targetActivations, modelMetadata, modelFavorites, close: async () => undefined };
+  const assistantConfig = new InMemoryAssistantConfigRepository();
+  return { repository, reservationProfiles, apiKeys, authMethods, capacityProviders, capacityTargets, targetProvisioningJobs, targetModelDiscoveries, targetActivations, modelMetadata, modelFavorites, assistantConfig, close: async () => undefined };
 }

@@ -17,6 +17,7 @@ const targetSchema = z.object({
         modelFamily: z.string().optional(),
         aliases: z.array(z.string()).optional(),
         tags: z.array(z.object({ label: z.string(), title: z.string().optional() })).optional(),
+        technicalCapabilities: z.array(z.object({ label: z.string(), title: z.string().optional() })).optional(),
         description: z.string().optional(),
         backendModelIds: z.array(z.string()).optional(),
         contextWindowTokens: z.number().int().positive().optional(),
@@ -245,6 +246,7 @@ export async function loadConfig(): Promise<{ config: AppConfig; models: ModelDe
       modelFamily: model.modelFamily ?? inferModelFamily(model.displayName ?? model.id),
       aliases: Array.from(new Set([model.id, ...(model.aliases ?? [])])),
       tags: model.tags,
+      technicalCapabilities: model.technicalCapabilities,
       description: model.description,
       backendModelIds: model.backendModelIds,
       contextWindowTokens: model.contextWindowTokens,
@@ -259,6 +261,7 @@ export async function loadConfig(): Promise<{ config: AppConfig; models: ModelDe
         existing.targetIds = Array.from(new Set([...existing.targetIds, target.id]));
         existing.aliases = mergeRequired(existing.aliases, model.aliases);
         existing.tags = mergeTags(existing.tags, model.tags);
+        existing.technicalCapabilities = mergeTags(existing.technicalCapabilities, model.technicalCapabilities);
         existing.runtimeModelIds = mergeOptional(existing.runtimeModelIds, model.runtimeModelIds);
         existing.backendModelIds = mergeOptional(existing.backendModelIds, model.backendModelIds);
       } else {
@@ -764,6 +767,7 @@ async function fetchNeuronTargets(provider: CapacityProviderDefinition, config: 
           displayName: model.displayName,
           modelFamily: model.modelFamily,
           aliases: model.aliases,
+          technicalCapabilities: model.technicalCapabilities,
           description: model.description,
           backendModelIds: model.backendModelIds,
           contextWindowTokens: model.contextWindowTokens,
@@ -816,6 +820,7 @@ interface NeuronModelsResponse {
     displayName?: string;
     modelFamily?: string;
     aliases?: string[];
+    technicalCapabilities?: Array<{ label: string; title?: string }>;
     targetIds: string[];
     description?: string;
     backendModelIds?: string[];

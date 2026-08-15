@@ -54,7 +54,8 @@ describePostgres("SQLite to PostgreSQL migration", () => {
         targetActivationReservations: 1,
         modelCapabilities: 1,
         modelDeployments: 1,
-        modelFavorites: 1
+        modelFavorites: 1,
+        assistantConfig: 1
       });
       const migrated = await createReservationRepository({ driver: "postgres", connectionString: database.connectionString, maxConnections: 3 });
       expect(await migrated.repository.get(fixture.reservationId)).toMatchObject({
@@ -65,15 +66,16 @@ describePostgres("SQLite to PostgreSQL migration", () => {
       expect(await migrated.apiKeys.get("key-migrate")).toMatchObject({ keyHash: "opaque-hash-value", lastUsedAt: undefined });
       expect(await migrated.authMethods.get("github-migrate")).toMatchObject({ config: { github: { clientSecret: "auth-secret-value" } } });
       expect(await migrated.capacityProviders.get("provider-migrate")).toMatchObject({ config: { privatePayload: { token: "provider-secret-value" } } });
-      expect(await migrated.capacityTargets.get("target-migrate")).toMatchObject({ profileAdvisor: { modelId: "model-migrate", reservationMinutes: 12, startupTimeoutSeconds: 300, requestTimeoutSeconds: 90 }, runpod: { podId: "opaque-pod-id", create: { custom: [1, null, true] } } });
+      expect(await migrated.capacityTargets.get("target-migrate")).toMatchObject({ runpod: { podId: "opaque-pod-id", create: { custom: [1, null, true] } } });
       expect(await migrated.targetProvisioningJobs.get("job-migrate")).toMatchObject({ status: "failed", errorMessage: "terminal provisioning record" });
       expect(await migrated.targetModelDiscoveries.get("target-migrate")).toMatchObject({ models: [{ id: "model-migrate", meta: { n_ctx: 202_752 } }] });
       expect(await migrated.targetActivations.listReservationAllocations(fixture.reservationId)).toMatchObject([
         { targetActivationId: "activation-migrate", estimatedCostUsd: 0.123456, endedAt: fixture.endedAt }
       ]);
-      expect(await migrated.modelMetadata.listCapabilities()).toMatchObject([{ modelId: "model-migrate", intelligence: 89, domains: { coding: 94 } }]);
-      expect(await migrated.modelMetadata.listDeployments()).toMatchObject([{ targetId: "target-migrate", modelId: "model-migrate", contextWindowTokens: 202_752, quantization: { format: "Q6", qualityRetentionPercent: 98.4 } }]);
+      expect(await migrated.modelMetadata.listCapabilities()).toMatchObject([{ modelId: "model-migrate", intelligence: 89, domains: { coding: 94 }, quantization: { format: "Q6", qualityRetentionPercent: 98.4 } }]);
+      expect(await migrated.modelMetadata.listDeployments()).toMatchObject([{ targetId: "target-migrate", modelId: "model-migrate", performance: { decodeTokensPerSecond: 33 } }]);
       expect(await migrated.modelFavorites.listForUser("clint")).toMatchObject([{ targetId: "target-migrate", modelId: "model-migrate" }]);
+      expect(await migrated.assistantConfig.get()).toMatchObject({ targetId: "target-migrate", modelId: "model-migrate", reservationMinutes: 12, keepaliveMinutes: 5, requestTimeoutSeconds: 90 });
       await migrated.close();
 
       const rerun = await migrateSqliteToPostgres({ sqlitePath: fixture.sqlitePath, pool: database.pool });
@@ -254,7 +256,6 @@ async function createPopulatedSqlite(): Promise<{ sqlitePath: string; reservatio
   });
   await handle.capacityTargets.create({
     id: "target-migrate", displayName: "Target", provider: "runpod", providerId: "provider-migrate", modelIds: ["model-migrate"],
-    profileAdvisor: { modelId: "model-migrate", reservationMinutes: 12, startupTimeoutSeconds: 300, requestTimeoutSeconds: 90 },
     runpod: { podId: "opaque-pod-id", runtimePort: 8080, create: { custom: [1, null, true] } }
   });
   await handle.targetProvisioningJobs.create({
@@ -269,9 +270,10 @@ async function createPopulatedSqlite(): Promise<{ sqlitePath: string; reservatio
   });
   await handle.targetActivations.addReservationCost({ targetActivationId: "activation-migrate", reservationId: reservation.id, at: createdAt, estimatedCostUsd: 0.123456 });
   await handle.targetActivations.closeReservationsForActivation("activation-migrate", endedAt);
-  await handle.modelMetadata.upsertCapability({ modelId: "model-migrate", intelligence: 89, domains: { coding: 94 }, provenance: { source: "manual", version: "fixture-v1" } }, createdAt);
-  await handle.modelMetadata.upsertDeployment({ targetId: "target-migrate", modelId: "model-migrate", contextWindowTokens: 202_752, quantization: { format: "Q6", qualityRetentionPercent: 98.4 }, performance: { decodeTokensPerSecond: 33, prefillTokensPerSecond: 700, sampleCount: 3 }, provenance: { source: "NeurOn direct benchmark", version: "neuron-speed-v1" } }, endedAt);
+  await handle.modelMetadata.upsertCapability({ modelId: "model-migrate", intelligence: 89, domains: { coding: 94 }, quantization: { format: "Q6", qualityRetentionPercent: 98.4 }, provenance: { source: "manual", version: "fixture-v1" } }, createdAt);
+  await handle.modelMetadata.upsertDeployment({ targetId: "target-migrate", modelId: "model-migrate", performance: { decodeTokensPerSecond: 33, prefillTokensPerSecond: 700, sampleCount: 3 }, provenance: { source: "NeurOn direct benchmark", version: "neuron-speed-v2-50k" } }, endedAt);
   await handle.modelFavorites.add({ username: "clint", targetId: "target-migrate", modelId: "model-migrate", createdAt });
+  await handle.assistantConfig.save({ targetId: "target-migrate", modelId: "model-migrate", reservationMinutes: 12, keepaliveMinutes: 5, requestTimeoutSeconds: 90, updatedAt: endedAt });
   await handle.close();
   return { sqlitePath, reservationId: reservation.id, endedAt };
 }

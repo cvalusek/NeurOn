@@ -85,9 +85,10 @@ GET /api/model-selection
 ```
 
 The response includes explicit unknowns, target hourly estimates, measurement
-provenance, available domain keys, favorites, popularity/profile counts, and
-whether the profile assistant is enabled. It is read-only and does not start a
-target to collect facts.
+provenance, available scored-strength keys, runtime-advertised technical
+capabilities, favorites, popularity/profile counts, and whether the profile
+assistant is enabled. It is read-only and does not start a target to collect
+facts.
 
 Authenticated users may add or remove an exact target-model favorite through
 `/api/model-favorites`. Admins manage durable capability/deployment facts under
@@ -103,6 +104,9 @@ confirmed save/start, or—only for admins—navigate or propose confirmed
 rediscovery. The browser must not execute confirmation-required tools merely
 because the model requested them. See [Guided Model
 Selection](model-selection.md).
+
+Admins configure that backend independently from target and Model data through
+`GET/PUT /api/admin/assistant-config` or **Admin > Assistant**.
 
 These assistant tools reuse NeurOn services and validation but are distinct
 from the external MCP transport. MCP remains appropriate for API-key clients;

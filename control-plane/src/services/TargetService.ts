@@ -1,5 +1,5 @@
 import type { CapacityTargetRepository, TargetModelDiscoveryRepository } from "../domain/interfaces.js";
-import type { CapacityTarget, ProfileAdvisorTargetConfig } from "../domain/types.js";
+import type { CapacityTarget } from "../domain/types.js";
 import { cloneTarget } from "../repository/targetRepositoryUtils.js";
 import { ModelCatalog } from "./ModelCatalog.js";
 
@@ -19,11 +19,7 @@ export class TargetService {
 
   async initialize(): Promise<void> {
     for (const target of await this.repository.list()) {
-      const index = this.runtimeTargets.findIndex((candidate) => candidate.id === target.id);
-      if (index >= 0) this.runtimeTargets.splice(index, 1, cloneTarget(target));
-      else this.runtimeTargets.push(cloneTarget(target));
-      this.catalog.removeTarget(target.id);
-      this.catalog.upsertTarget(target);
+      await this.replaceRuntimeTarget(target.id, target);
     }
   }
 
@@ -57,11 +53,7 @@ export class TargetService {
     }
     const updated = await this.repository.update(id, target);
     if (id !== updated.id) await this.modelDiscoveries?.delete(id);
-    const index = this.runtimeTargets.findIndex((candidate) => candidate.id === id);
-    if (index >= 0) this.runtimeTargets.splice(index, 1, cloneTarget(updated));
-    else this.runtimeTargets.push(cloneTarget(updated));
-    this.catalog.removeTarget(id);
-    this.catalog.upsertTarget(updated);
+    await this.replaceRuntimeTarget(id, updated);
     return updated;
   }
 
@@ -89,11 +81,7 @@ export class TargetService {
     if (!target) throw new Error(`Config target not found: ${id}`);
     if (await this.repository.get(id)) throw new Error(`Target already exists in storage: ${id}`);
     const created = await this.repository.create(cloneTarget(target));
-    const index = this.runtimeTargets.findIndex((candidate) => candidate.id === created.id);
-    if (index >= 0) this.runtimeTargets.splice(index, 1, cloneTarget(created));
-    else this.runtimeTargets.push(cloneTarget(created));
-    this.catalog.removeTarget(created.id);
-    this.catalog.upsertTarget(created);
+    await this.replaceRuntimeTarget(created.id, created);
     return created;
   }
 
@@ -124,6 +112,7 @@ export class TargetService {
       modelFamily: model.modelFamily,
       aliases: normalized,
       tags: model.tags,
+      technicalCapabilities: model.technicalCapabilities,
       description: model.description,
       backendModelIds: Array.from(new Set([...(model.backendModelIds ?? []), ...(model.runtimeModelIds ?? [])])),
       contextWindowTokens: model.contextWindowTokens,
@@ -132,44 +121,6 @@ export class TargetService {
     if (existingIndex >= 0) currentModels.splice(existingIndex, 1, { ...currentModels[existingIndex], ...configuredModel });
     else currentModels.push(configuredModel);
     return this.update(targetId, { ...target, models: currentModels });
-  }
-
-  profileAdvisorBackend(): { target: CapacityTarget; config: ProfileAdvisorTargetConfig } | undefined {
-    const configured = this.runtimeTargets.filter((target) => target.profileAdvisor);
-    if (configured.length > 1) throw new Error("More than one profile advisor backend is configured");
-    const target = configured[0];
-    if (!target?.profileAdvisor) return undefined;
-    const model = this.catalog.getModel(target.profileAdvisor.modelId);
-    if (!model || !model.targetIds.includes(target.id)) throw new Error(`Profile advisor model ${target.profileAdvisor.modelId} is not available on target ${target.id}`);
-    return { target: cloneTarget(target), config: { ...target.profileAdvisor, modelId: model.id } };
-  }
-
-  async setProfileAdvisorBackend(input?: { targetId: string; modelId: string; reservationMinutes?: number; startupTimeoutSeconds?: number; requestTimeoutSeconds?: number }): Promise<void> {
-    const persisted = await this.repository.list();
-    const selected = input ? this.runtimeTargets.find((target) => target.id === input.targetId) : undefined;
-    if (input) {
-      const model = this.catalog.getModel(input.modelId);
-      if (!selected || !model?.targetIds.includes(input.targetId)) throw new Error("Profile advisor target/model deployment not found");
-      if (!persisted.some((target) => target.id === input.targetId)) {
-        throw new Error(`Target ${input.targetId} must be copied to the database before it can host the profile advisor`);
-      }
-    }
-    for (const target of persisted) {
-      const shouldSelect = Boolean(input && target.id === input.targetId);
-      if (!target.profileAdvisor && !shouldSelect) continue;
-      const updated = cloneTarget(target);
-      if (shouldSelect && input) {
-        updated.profileAdvisor = {
-          modelId: this.catalog.canonicalModelIds([input.modelId])[0],
-          reservationMinutes: input.reservationMinutes,
-          startupTimeoutSeconds: input.startupTimeoutSeconds,
-          requestTimeoutSeconds: input.requestTimeoutSeconds
-        };
-      } else {
-        delete updated.profileAdvisor;
-      }
-      await this.update(target.id, updated);
-    }
   }
 
   async canPersistReplacementPatch(id: string): Promise<boolean> {
@@ -181,6 +132,16 @@ export class TargetService {
       throw new Error(`Target ${id} must be persisted before replacement provisioning can update its provider binding`);
     }
     return this.applyProvisioningPatch(id, patch);
+  }
+
+  private async replaceRuntimeTarget(previousId: string, target: CapacityTarget): Promise<void> {
+    const index = this.runtimeTargets.findIndex((candidate) => candidate.id === previousId);
+    if (index >= 0) this.runtimeTargets.splice(index, 1, cloneTarget(target));
+    else this.runtimeTargets.push(cloneTarget(target));
+    this.catalog.removeTarget(previousId);
+    this.catalog.upsertTarget(target);
+    const discovery = await this.modelDiscoveries?.get(target.id);
+    if (discovery) this.catalog.recordRuntimeModels(target.id, discovery.models);
   }
 }
 

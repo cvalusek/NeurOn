@@ -98,8 +98,6 @@ Important fields:
 - optional runtime model discovery config
 - optional HassleOff protection and activate-or-reprovision policy
 - optional `hostingMode` and numeric LiteLLM `aliasPriority`
-- optional durable `profileAdvisor` selection naming the exact model on this
-  target plus its reservation, startup, and response timeouts
 
 ### ModelDefinition
 
@@ -120,10 +118,13 @@ Important fields:
 - `runtimeModelIds`
 - `runtimeMeta`
 
-Capability facts attach to the canonical model. Context, performance,
-quantization, and estimated quality retained attach to the exact target-model
-deployment. Both retain provenance and use the selected durable storage driver.
-User favorites also identify an exact target-model pair.
+Intelligence, scored strengths, quantization format, and estimated quality
+retained attach to the canonical model artifact. Serving context comes from the
+target's model configuration or runtime discovery. Performance attaches to the
+exact target-model deployment. Measurements retain provenance and use the
+selected durable storage driver. User favorites identify an exact target-model
+pair. Binary technical capabilities such as vision and tool use come from
+explicit configuration or runtime-advertised discovery fields.
 
 ## Interfaces
 
@@ -137,6 +138,7 @@ The core interfaces keep replaceable parts isolated:
 - `TargetActivationRepository`
 - `ModelMetadataRepository`
 - `ModelFavoriteRepository`
+- `AssistantConfigRepository`
 - `AuthProvider`
 - `TrafficSource`
 - `TargetStatusRepository`
@@ -262,11 +264,12 @@ estimates remain in-memory observational state. Provider state is still
 observed on the next reconciliation loop, and startup estimates are not used
 for scheduling decisions.
 
-The durable driver is one control-plane ownership boundary covering eleven
+The durable driver is one control-plane ownership boundary covering twelve
 repository families: reservations, profiles, hashed API keys, auth methods,
 provider definitions, target definitions, provisioning jobs, model-discovery
-records, model capability/deployment metadata, model favorites, and target
-activation/cost allocation history. PostgreSQL uses one bounded shared pool.
+records, model capability/deployment metadata, model favorites, the singleton
+assistant configuration, and target activation/cost allocation history.
+PostgreSQL uses one bounded shared pool.
 Ordered transactional schema changes are recorded in
 `neuron_schema_migrations`; the data-transfer ledger is separate so an exact
 SQLite import can be verified without confusing it with schema upgrades.

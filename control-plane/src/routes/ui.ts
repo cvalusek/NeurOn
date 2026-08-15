@@ -13,6 +13,7 @@ import { ModelCatalog } from "../services/ModelCatalog.js";
 import type { ModelSelectionService } from "../services/ModelSelectionService.js";
 import type { ModelFavoriteService } from "../services/ModelFavoriteService.js";
 import type { UsageAnalyticsService } from "../services/UsageAnalyticsService.js";
+import type { ProfileAdvisorService } from "../services/ProfileAdvisorService.js";
 import { ProviderService } from "../services/ProviderService.js";
 import { ReservationService } from "../services/ReservationService.js";
 import { ReservationProfileService } from "../services/ReservationProfileService.js";
@@ -20,7 +21,7 @@ import { CostEstimationService } from "../services/CostEstimationService.js";
 import { TargetService } from "../services/TargetService.js";
 import { TargetProvisioningService } from "../services/TargetProvisioningService.js";
 import type { HassleOffSafetyView } from "../ui/html.js";
-import { activationPage, adminAuthPage, apiKeysPage, clientSetupPage, hassleOffSafetyPage, loginPage, modelMetadataPage, profileEditorPage, profilesPage, providerAdminPage, reservationHistoryPage, reservationPage, startPage, targetAdminPage, updatesPage, usagePage, welcomePage } from "../ui/html.js";
+import { activationPage, adminAuthPage, apiKeysPage, assistantConfigPage, clientSetupPage, hassleOffSafetyPage, loginPage, modelMetadataPage, profileEditorPage, profilesPage, providerAdminPage, reservationHistoryPage, reservationPage, startPage, targetAdminPage, updatesPage, usagePage, welcomePage } from "../ui/html.js";
 import { requireUser } from "../utils/http.js";
 import type { HassleOffClient } from "../safety/HassleOffClient.js";
 
@@ -43,6 +44,7 @@ export function registerUiRoutes(
   capacityProvider: CapacityProvider,
   hassleOffClient: HassleOffClient | undefined,
   modelSelection: ModelSelectionService,
+  profileAdvisor: ProfileAdvisorService,
   modelFavorites: ModelFavoriteService,
   usageAnalytics: UsageAnalyticsService
 ) {
@@ -308,7 +310,16 @@ export function registerUiRoutes(
   app.get("/admin/models", async (request, reply) => {
     const targets = catalog.listTargets();
     const costs = await startCostEstimates(targets, costEstimation);
-    return reply.type("text/html").send(modelMetadataPage(requireUser(request), modelSelection.listDeployments(costs), modelSelection.catalogConfig(), await targetService.list()));
+    return reply.type("text/html").send(modelMetadataPage(requireUser(request), modelSelection.listDeployments(costs), modelSelection.catalogConfig()));
+  });
+  app.get("/admin/assistant", async (request, reply) => {
+    const targets = catalog.listTargets();
+    const costs = await startCostEstimates(targets, costEstimation);
+    let current: Awaited<ReturnType<ProfileAdvisorService["configuration"]>> = undefined;
+    let error: string | undefined;
+    try { current = await profileAdvisor.configuration(); }
+    catch (caught) { error = caught instanceof Error ? caught.message : "Assistant configuration is invalid"; }
+    return reply.type("text/html").send(assistantConfigPage(requireUser(request), modelSelection.listDeployments(costs), current?.config, error));
   });
   app.get("/admin/hassleoff", async (request, reply) => {
     const query = z.object({ error: z.string().optional(), success: z.string().optional() }).parse(request.query);
@@ -601,10 +612,7 @@ export function registerUiRoutes(
       const { id } = z.object({ id: z.string() }).parse(request.params);
       const body = targetFormSchema.parse(request.body ?? {});
       const provider = await providerFromForm(body.providerId, providerService);
-      const existing = (await targetService.list()).find((target) => target.id === id);
-      const updated = targetFromForm(body, provider, config);
-      if (existing?.profileAdvisor) updated.profileAdvisor = { ...existing.profileAdvisor };
-      await targetService.update(id, updated);
+      await targetService.update(id, targetFromForm(body, provider, config));
       return reply.redirect("/admin/targets");
     } catch (error) {
       const message = error instanceof Error ? error.message : "Could not update target";

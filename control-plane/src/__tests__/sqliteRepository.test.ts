@@ -14,6 +14,7 @@ import { SqliteTargetProvisioningJobRepository } from "../repository/SqliteTarge
 import { SqliteTargetActivationRepository } from "../repository/SqliteTargetActivationRepository.js";
 import { SqliteModelMetadataRepository } from "../repository/SqliteModelMetadataRepository.js";
 import { SqliteModelFavoriteRepository } from "../repository/SqliteModelFavoriteRepository.js";
+import { SqliteAssistantConfigRepository } from "../repository/SqliteAssistantConfigRepository.js";
 
 let tempDir: string | undefined;
 
@@ -133,7 +134,6 @@ describe("SqliteCapacityTargetRepository", () => {
       provider: "runpod",
       providerId: "runpod-main",
       modelIds: ["qwen"],
-      profileAdvisor: { modelId: "qwen", reservationMinutes: 12, startupTimeoutSeconds: 300, requestTimeoutSeconds: 90 },
       runpod: { podId: "pod-qwen", runtimePort: 8080 }
     });
     first.close();
@@ -149,7 +149,6 @@ describe("SqliteCapacityTargetRepository", () => {
         provider: "runpod",
         providerId: "runpod-main",
         modelIds: ["qwen"],
-        profileAdvisor: { modelId: "qwen", reservationMinutes: 12, startupTimeoutSeconds: 300, requestTimeoutSeconds: 90 },
         runpod: { podId: "pod-qwen", runtimePort: 8080 }
       }
     ]);
@@ -272,6 +271,43 @@ describe("SqliteTargetModelDiscoveryRepository", () => {
   });
 });
 
+describe("SqliteAssistantConfigRepository", () => {
+  it("persists one independent assistant deployment", async () => {
+    tempDir = await mkdtemp(path.join(os.tmpdir(), "neuron-sqlite-"));
+    const databasePath = path.join(tempDir, "neuron.db");
+    const targets = new SqliteCapacityTargetRepository(databasePath);
+    await targets.create({ id: "advisor-target", displayName: "Advisor", provider: "docker", modelIds: ["advisor-model"] });
+    targets.close();
+    const updatedAt = new Date("2026-08-15T12:00:00.000Z");
+    const first = new SqliteAssistantConfigRepository(databasePath);
+    await first.save({ targetId: "advisor-target", modelId: "advisor-model", reservationMinutes: 15, keepaliveMinutes: 5, requestTimeoutSeconds: 120, updatedAt });
+    first.close();
+    const second = new SqliteAssistantConfigRepository(databasePath);
+    expect(await second.get()).toEqual({ id: "default", targetId: "advisor-target", modelId: "advisor-model", reservationMinutes: 15, keepaliveMinutes: 5, requestTimeoutSeconds: 120, updatedAt });
+    second.close();
+  });
+
+  it("moves legacy target JSON into the independent record and strips the embedded copy", async () => {
+    tempDir = await mkdtemp(path.join(os.tmpdir(), "neuron-sqlite-"));
+    const databasePath = path.join(tempDir, "neuron.db");
+    const targets = new SqliteCapacityTargetRepository(databasePath);
+    await targets.create({ id: "legacy-target", displayName: "Legacy", provider: "docker", modelIds: ["legacy-model"] });
+    targets.close();
+    const db = new Database(databasePath);
+    const row = db.prepare("select target_json from capacity_targets where id = ?").get("legacy-target") as { target_json: string };
+    const target = { ...(JSON.parse(row.target_json) as Record<string, unknown>), profileAdvisor: { modelId: "legacy-model", reservationMinutes: 12, startupTimeoutSeconds: 300, requestTimeoutSeconds: 90 } };
+    db.prepare("update capacity_targets set target_json = ? where id = ?").run(JSON.stringify(target), "legacy-target");
+    db.close();
+
+    const assistant = new SqliteAssistantConfigRepository(databasePath);
+    expect(await assistant.get()).toMatchObject({ targetId: "legacy-target", modelId: "legacy-model", reservationMinutes: 12, keepaliveMinutes: 12, requestTimeoutSeconds: 90 });
+    assistant.close();
+    const reopenedTargets = new SqliteCapacityTargetRepository(databasePath);
+    expect(await reopenedTargets.get("legacy-target")).not.toHaveProperty("profileAdvisor");
+    reopenedTargets.close();
+  });
+});
+
 describe("SQLite model-selection repositories", () => {
   it("persists model facts and user favorites across repository restarts", async () => {
     tempDir = await mkdtemp(path.join(os.tmpdir(), "neuron-sqlite-"));
@@ -279,15 +315,15 @@ describe("SQLite model-selection repositories", () => {
     const updatedAt = new Date("2026-08-10T14:30:00.000Z");
     const metadata = new SqliteModelMetadataRepository(databasePath);
     const favorites = new SqliteModelFavoriteRepository(databasePath);
-    await metadata.upsertCapability({ modelId: "model-1", intelligence: 87, domains: { coding: 92 }, provenance: { source: "manual", version: "2026-08" } }, updatedAt);
-    await metadata.upsertDeployment({ targetId: "target-1", modelId: "model-1", contextWindowTokens: 131_072, quantization: { format: "Q6", qualityRetentionPercent: 98.5 }, performance: { decodeTokensPerSecond: 42, prefillTokensPerSecond: 800, sampleCount: 3 } }, updatedAt);
+    await metadata.upsertCapability({ modelId: "model-1", intelligence: 87, domains: { coding: 92 }, quantization: { format: "Q6", qualityRetentionPercent: 98.5 }, provenance: { source: "manual", version: "2026-08" } }, updatedAt);
+    await metadata.upsertDeployment({ targetId: "target-1", modelId: "model-1", performance: { decodeTokensPerSecond: 42, prefillTokensPerSecond: 800, sampleCount: 3 } }, updatedAt);
     await favorites.add({ username: "clint", targetId: "target-1", modelId: "model-1", createdAt: updatedAt });
     metadata.close(); favorites.close();
 
     const reopenedMetadata = new SqliteModelMetadataRepository(databasePath);
     const reopenedFavorites = new SqliteModelFavoriteRepository(databasePath);
-    expect(await reopenedMetadata.listCapabilities()).toMatchObject([{ modelId: "model-1", intelligence: 87, domains: { coding: 92 }, updatedAt }]);
-    expect(await reopenedMetadata.listDeployments()).toMatchObject([{ targetId: "target-1", modelId: "model-1", contextWindowTokens: 131_072, performance: { decodeTokensPerSecond: 42 }, updatedAt }]);
+    expect(await reopenedMetadata.listCapabilities()).toMatchObject([{ modelId: "model-1", intelligence: 87, domains: { coding: 92 }, quantization: { format: "Q6", qualityRetentionPercent: 98.5 }, updatedAt }]);
+    expect(await reopenedMetadata.listDeployments()).toMatchObject([{ targetId: "target-1", modelId: "model-1", performance: { decodeTokensPerSecond: 42 }, updatedAt }]);
     expect(await reopenedFavorites.listForUser("clint")).toEqual([{ username: "clint", targetId: "target-1", modelId: "model-1", createdAt: updatedAt }]);
     reopenedMetadata.close(); reopenedFavorites.close();
   });

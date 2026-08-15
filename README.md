@@ -10,9 +10,10 @@ lets the expensive capacity turn off.
 ![NeurOn home page with an active reservation and capacity status](control-plane/docs/images/home-reservation.png)
 
 The dedicated profile builder filters exact target/model deployments by hard
-requirements, ranks the rest with Good/Fast/Cheap preferences, and exposes the
-context, measured speed, quality, cost, popularity, favorites, and LiteLLM
-aliases behind each choice.
+requirements, ranks and reorders the rest with the Good/Fast/Cheap triangle,
+and exposes context, technical flags, measured speed, intelligence, scored
+strengths, quality retention, cost, popularity, favorites, and LiteLLM aliases
+behind each choice.
 
 ![NeurOn model selection with requirements and Good/Fast/Cheap ranking](control-plane/docs/images/model-selection.png)
 

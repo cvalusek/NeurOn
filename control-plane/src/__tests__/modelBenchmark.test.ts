@@ -30,12 +30,11 @@ describe("ModelBenchmarkService", () => {
     ];
     const fetchMock = vi.fn(async (_input: string | URL | Request, init?: RequestInit) => {
       bodies.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
-      return Response.json({ usage: { prompt_tokens: 200, completion_tokens: 64 }, timings: samples[bodies.length - 1] });
+      return Response.json({ usage: { prompt_tokens: 50_021, completion_tokens: 128 }, timings: samples[bodies.length - 1] });
     });
     const catalog = new ModelCatalog(models, [target]);
     const selection = new ModelSelectionService(catalog);
-    await selection.upsertDeployment({
-      targetId: target.id,
+    await selection.upsertCapability({
       modelId: "model-a",
       quantization: { format: "Q6", qualityRetentionPercent: 98.5 },
       provenance: { source: "Artifact evaluation", version: "quality-v1" }
@@ -44,9 +43,10 @@ describe("ModelBenchmarkService", () => {
 
     expect(fetchMock).toHaveBeenCalledTimes(4);
     expect(bodies[0]).toMatchObject({ model: "runtime-a", max_tokens: 8, cache_prompt: false, stream: false });
-    expect(bodies.slice(1).every((body) => body.max_tokens === 64 && body.cache_prompt === false)).toBe(true);
+    expect(bodies.slice(1).every((body) => body.max_tokens === 128 && body.cache_prompt === false)).toBe(true);
+    expect(bodies.every((body) => JSON.stringify(body.messages).length > 200_000)).toBe(true);
     expect(new Set(bodies.map((body) => JSON.stringify(body.messages))).size).toBe(4);
-    expect(result[0]).toMatchObject({ decodeTokensPerSecond: 30, prefillTokensPerSecond: 200, sampleCount: 3, suiteVersion: "neuron-speed-v1" });
+    expect(result[0]).toMatchObject({ decodeTokensPerSecond: 30, prefillTokensPerSecond: 200, sampleCount: 3, suiteVersion: "neuron-speed-v2-50k" });
     expect(selection.catalogConfig().deployments[0]).toMatchObject({
       targetId: target.id,
       modelId: "model-a",
@@ -54,10 +54,10 @@ describe("ModelBenchmarkService", () => {
         decodeTokensPerSecond: 30,
         prefillTokensPerSecond: 200,
         sampleCount: 3,
-        provenance: { source: "NeurOn direct benchmark", version: "neuron-speed-v1" }
-      },
-      provenance: { source: "Artifact evaluation", version: "quality-v1" }
+        provenance: { source: "NeurOn direct benchmark", version: "neuron-speed-v2-50k" }
+      }
     });
+    expect(selection.catalogConfig().models[0]).toMatchObject({ quantization: { format: "Q6", qualityRetentionPercent: 98.5 }, provenance: { source: "Artifact evaluation" } });
   });
 
   it("classifies a benchmark failure so discovery does not repeatedly benchmark a healthy runtime", async () => {

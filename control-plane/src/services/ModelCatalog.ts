@@ -97,6 +97,7 @@ export class ModelCatalog {
         modelFamily: inferModelFamily(runtimeId),
         aliases: aliasesForRuntimeModel(runtimeInfo),
         tags: tagsForRuntimeModel(runtimeInfo),
+        technicalCapabilities: technicalCapabilitiesForRuntimeModel(runtimeInfo),
         runtimeModelIds: [runtimeId],
         runtimeMeta: runtimeInfo.meta ?? undefined,
         targetIds: [targetId],
@@ -124,6 +125,7 @@ export class ModelCatalog {
   private updateModelFromRuntimeInfo(model: ModelDefinition, targetId: string, runtimeInfo: RuntimeModelInfo & { id: string }): void {
     model.aliases = mergeStrings(model.aliases, aliasesForRuntimeModel(runtimeInfo));
     model.tags = mergeTags(model.tags, tagsForRuntimeModel(runtimeInfo));
+    model.technicalCapabilities = mergeTags(model.technicalCapabilities, technicalCapabilitiesForRuntimeModel(runtimeInfo));
     model.runtimeModelIds = mergeStrings(model.runtimeModelIds ?? [], [runtimeInfo.id]);
     model.targetIds = mergeStrings(model.targetIds, [targetId]);
     if (runtimeInfo.meta) model.runtimeMeta = { ...(model.runtimeMeta ?? {}), ...runtimeInfo.meta };
@@ -220,6 +222,35 @@ function tagsForRuntimeModel(model: RuntimeModelInfo & { id: string }): ModelTag
   const quantization = model.id.match(/:([^:/]+)$/)?.[1];
   if (quantization) tags.set(quantization.toUpperCase(), "Runtime quantization");
   return Array.from(tags.entries()).map(([label, title]) => ({ label, title }));
+}
+
+function technicalCapabilitiesForRuntimeModel(model: RuntimeModelInfo & { id: string }): ModelTag[] {
+  const capabilities = new Map<string, ModelTag>();
+  const add = (value: unknown) => {
+    if (typeof value !== "string") return;
+    const normalized = value.trim().toLowerCase().replace(/[\s_]+/g, "-");
+    if (!normalized || normalized === "text") return;
+    const canonical = /^(?:image|images|vision|multimodal)$/.test(normalized) ? "vision"
+      : /^(?:tool|tools|tool-calling|function-calling|functions)$/.test(normalized) ? "tools"
+        : /^(?:embedding|embeddings)$/.test(normalized) ? "embeddings"
+          : normalized;
+    capabilities.set(canonical, { label: canonical, title: `Runtime-advertised ${canonical} support` });
+  };
+  const addCollection = (value: unknown) => {
+    if (Array.isArray(value)) for (const entry of value) add(entry);
+    else if (value && typeof value === "object") for (const [name, enabled] of Object.entries(value as Record<string, unknown>)) if (enabled === true) add(name);
+  };
+  addCollection(model.capabilities);
+  addCollection(model.modalities);
+  addCollection(model.input_modalities);
+  addCollection(model.output_modalities);
+  if (model.supports_vision === true) add("vision");
+  if (model.supports_tools === true || model.supports_tool_calls === true) add("tools");
+  for (const tag of model.tags ?? []) {
+    const label = typeof tag === "string" ? tag : tag.label;
+    if (label && /^(?:vision|image|images|multimodal|tools?|tool[_-]calling|function[_-]calling|audio|video|embeddings?)$/i.test(label)) add(label);
+  }
+  return Array.from(capabilities.values()).sort((left, right) => left.label.localeCompare(right.label));
 }
 
 function contextWindowTokensForRuntimeModel(model: RuntimeModelInfo): number | undefined {

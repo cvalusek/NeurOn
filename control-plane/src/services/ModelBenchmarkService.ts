@@ -3,9 +3,12 @@ import type { CapacityTarget, ModelDeploymentMetadata, ModelDefinition } from ".
 import type { ModelCatalog } from "./ModelCatalog.js";
 import type { ModelSelectionService } from "./ModelSelectionService.js";
 
-export const MODEL_BENCHMARK_SUITE_VERSION = "neuron-speed-v1";
+export const MODEL_BENCHMARK_SUITE_VERSION = "neuron-speed-v2-50k";
 const MEASURED_SAMPLES = 3;
-const PREFILL_TEXT = "NeurOn benchmark input: " + "Summarize the relationship between shared infrastructure capacity, user demand, predictable operations, and cost efficiency. ".repeat(24);
+const MINIMUM_REPORTED_PROMPT_TOKENS = 40_000;
+// A leading unique marker prevents prefix-cache reuse; the repeated token is
+// intentionally tokenizer-friendly and produces approximately 50K tokens.
+const PREFILL_TEXT = " data".repeat(50_000);
 
 export interface ModelBenchmarkResult {
   targetId: string;
@@ -79,9 +82,9 @@ export class ModelBenchmarkService {
       headers: { "content-type": "application/json", ...authorizationHeaders(target) },
       body: JSON.stringify({
         model: runtimeModelId,
-        messages: [{ role: "user", content: `${PREFILL_TEXT}\nRun marker ${index}-${randomUUID()}. Respond with a concise operational checklist.` }],
+        messages: [{ role: "user", content: `NeurOn benchmark run ${index}-${randomUUID()}. Read the full payload before answering.${PREFILL_TEXT}\nRespond with a concise operational checklist.` }],
         temperature: 0,
-        max_tokens: warmup ? 8 : 64,
+        max_tokens: warmup ? 8 : 128,
         stream: false,
         cache_prompt: false
       }),
@@ -94,6 +97,9 @@ export class ModelBenchmarkService {
     const completionTokens = positive(body.usage?.completion_tokens) ?? positive(body.timings?.predicted_n);
     const prefillTokensPerSecond = positive(body.timings?.prompt_per_second) ?? rate(body.timings?.prompt_n, body.timings?.prompt_ms);
     const decodeTokensPerSecond = positive(body.timings?.predicted_per_second) ?? rate(body.timings?.predicted_n, body.timings?.predicted_ms) ?? (completionTokens ? completionTokens / elapsedSeconds : undefined);
+    if (promptTokens === undefined || promptTokens < MINIMUM_REPORTED_PROMPT_TOKENS) {
+      throw new Error(`Target ${target.id} benchmark did not process the required 50K-class prompt`);
+    }
     return { promptTokens, completionTokens, prefillTokensPerSecond, decodeTokensPerSecond };
   }
 }

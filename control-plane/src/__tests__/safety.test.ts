@@ -399,6 +399,29 @@ describe("provider-neutral activate-or-reprovision boundary", () => {
     expect((await repository.get(configured.id))?.runpod?.podId).toBe("replacement-pod");
     expect(runtimeTargets[0].runpod?.podId).toBe("replacement-pod");
   });
+
+  it("reapplies each durable discovery snapshot after a target edit without removing other targets' models", async () => {
+    const repository = new InMemoryCapacityTargetRepository();
+    const discoveries = new InMemoryTargetModelDiscoveryRepository();
+    const first: CapacityTarget = { id: "first", displayName: "First", provider: "docker", modelIds: [] };
+    const second: CapacityTarget = { id: "second", displayName: "Second", provider: "docker", modelIds: [] };
+    await repository.create(first);
+    await repository.create(second);
+    await discoveries.record({ targetId: "first", discoveredAt: new Date("2026-08-15T10:00:00Z"), models: [{ id: "model-first", aliases: ["first-alias"] }] });
+    await discoveries.record({ targetId: "second", discoveredAt: new Date("2026-08-15T10:01:00Z"), models: [{ id: "model-second", aliases: ["second-alias"] }] });
+    const runtimeTargets: CapacityTarget[] = [];
+    const catalog = new ModelCatalog([], runtimeTargets);
+    const service = new TargetService([], repository, catalog, runtimeTargets, discoveries);
+    await service.initialize();
+
+    await service.update("first", { ...first, displayName: "First renamed" });
+    await service.updateModelAliases("first", "model-first", ["preferred-first"]);
+
+    expect(catalog.listModelsForTarget("first").map((model) => model.id)).toEqual(["model-first"]);
+    expect(catalog.listModelsForTarget("second").map((model) => model.id)).toEqual(["model-second"]);
+    expect(catalog.deploymentAliases("first", "model-first")).toEqual(["preferred-first"]);
+    expect(catalog.deploymentAliases("second", "model-second")).toContain("second-alias");
+  });
 });
 
 describe("safety configuration", () => {

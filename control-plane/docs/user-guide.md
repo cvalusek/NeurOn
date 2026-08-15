@@ -31,13 +31,15 @@ Use the selector when the model list is unfamiliar:
 
 - Set minimum context first when it is a real workload requirement. An unknown
   context does not pass the filter.
-- Add every required capability tag, a budget ceiling, or a dedicated versus
-  multi-model host requirement only when it is truly mandatory.
+- Add required technical flags such as vision or tool use, a cost ceiling, or
+  a dedicated versus multi-model host requirement only when it is mandatory.
+- Add any scored strengths you care about, such as coding or reasoning. They
+  refine Intelligence ranking but do not filter models out.
 - Move the **Good**, **Fast**, and **Cheap** point to express preferences among
   the choices that remain. The center means maximum, equal preference for all
   three. Useful balanced positions and category corners snap into place.
-- The quick wizard sets requirements and internal preferences. The collapsible
-  NeurOn assistant can also fill the complete draft, including exact
+- The triangle is the profile wizard. The collapsible NeurOn assistant can also
+  fill the complete draft, including exact
   target/model choices. Its save and start tools always present separate
   confirmation cards before anything is persisted or capacity demand begins.
 - Review the ranked cards and category leaders, then select the exact
@@ -45,8 +47,8 @@ Use the selector when the model list is unfamiliar:
 
 ![The collapsible NeurOn assistant alongside the profile builder](images/profile-assistant.png)
 
-Speed is target-specific: decode throughput carries 75% of its score and
-prefill throughput carries 25%. Time to first token is diagnostic only and does
+Speed is target-specific: decode throughput carries 80% of its score and
+prefill throughput carries 20%. Time to first token is diagnostic only and does
 not affect ranking. Missing measurements reduce displayed data coverage rather
 than counting as a poor score. **Estimated quality retained** appears only when
 an operator supplied a measured result for the exact artifact and is not a
@@ -55,8 +57,9 @@ filter.
 The context slider uses effective per-request context. If a runtime shares one
 context across concurrent sequences, the card identifies that concurrency and
 does not advertise the entire shared context to every request. Model cards also
-show favorites, profile use, recent reservation use, intelligence, speed, cost,
-and LiteLLM aliases when those facts are known.
+show favorites, profile use, recent reservation use, intelligence, scored
+strengths, advertised technical flags, speed, cost, and LiteLLM aliases when
+those facts are known. Their fit scores and order update with the triangle.
 
 - If a target exposes one model, NeurOn selects it automatically.
 - If a target exposes several models, choose at least one. This prevents a

@@ -29,7 +29,7 @@ discovery:
    URL, or the `/v1` origin derived from `healthUrl`.
 5. Records discovered models and the discovery time in the configured storage
    layer.
-6. For an explicit admin discovery, runs the small direct speed benchmark for
+6. For an explicit admin discovery, runs the 50K-class direct speed benchmark for
    the discovered target-model deployments and stores its versioned medians.
 7. Releases the operation lease and, when discovery started the capacity,
    immediately reconciles the target against current reservation and traffic

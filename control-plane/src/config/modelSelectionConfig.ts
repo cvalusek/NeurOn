@@ -19,12 +19,18 @@ export const modelSelectionCatalogSchema = z.object({
     modelId: z.string().min(1),
     intelligence: scoreSchema.optional(),
     domains: z.record(scoreSchema).optional(),
+    quantization: z.object({
+      format: z.string().min(1),
+      qualityRetentionPercent: scoreSchema.optional(),
+      reference: z.string().min(1).optional()
+    }).strict().optional(),
     provenance: provenanceSchema.optional()
   }).strict()).default([]),
   deployments: z.array(z.object({
     targetId: z.string().min(1),
     modelId: z.string().min(1),
     contextWindowTokens: z.number().int().positive().optional(),
+    // Deprecated compatibility input. New writes store artifact facts on the model.
     quantization: z.object({
       format: z.string().min(1),
       qualityRetentionPercent: scoreSchema.optional(),

@@ -1,4 +1,4 @@
-import type { ApiKey, AppConfig, AuthMethod, AuthenticatedUser, CapacityTarget, ModelDefinition, ModelSelectionCatalogConfig, Reservation, ReservationProfile, RuntimeProfile, TargetStatus } from "../domain/types.js";
+import type { ApiKey, AppConfig, AssistantConfig, AuthMethod, AuthenticatedUser, CapacityTarget, ModelDefinition, ModelSelectionCatalogConfig, Reservation, ReservationProfile, RuntimeProfile, TargetStatus } from "../domain/types.js";
 import { DEFAULT_AWS_EC2_INSTANCE_NAME_PATTERN } from "../capacity/AwsEc2CapacityProvider.js";
 import type { AuthMethodView } from "../services/AuthMethodService.js";
 import type { ProviderView } from "../services/ProviderService.js";
@@ -151,7 +151,7 @@ export function layout(title: string, user: AuthenticatedUser | undefined, body:
     .recommendation-card { display: grid; gap: 5px; text-align: left; border: 1px solid #86b8ad; background: white; color: #1f2933; }
     .recommendation-card strong { color: #0f766e; }
     .assistant-toggle { position: fixed; right: 18px; bottom: 18px; z-index: 25; border-radius: 999px; box-shadow: 0 8px 24px rgba(23, 32, 42, 0.24); }
-    .assistant-drawer { position: fixed; right: 18px; bottom: 70px; z-index: 25; width: min(390px, calc(100vw - 36px)); max-height: min(680px, calc(100vh - 100px)); display: grid; grid-template-rows: auto minmax(120px, 1fr) auto; border: 1px solid #aab4ad; border-radius: 12px; background: white; box-shadow: 0 18px 54px rgba(23, 32, 42, 0.28); overflow: hidden; }
+    .assistant-drawer { position: fixed; right: 18px; bottom: 70px; z-index: 25; width: min(560px, calc(100vw - 36px)); height: min(760px, calc(100vh - 100px)); display: grid; grid-template-rows: auto minmax(280px, 1fr) auto; border: 1px solid #aab4ad; border-radius: 12px; background: white; box-shadow: 0 18px 54px rgba(23, 32, 42, 0.28); overflow: hidden; }
     .assistant-drawer[hidden] { display: none; }
     .assistant-head { display: flex; align-items: start; justify-content: space-between; gap: 12px; padding: 13px 14px; background: #17202a; color: white; }
     .assistant-head button { padding: 5px 9px; background: #334155; }
@@ -160,7 +160,7 @@ export function layout(title: string, user: AuthenticatedUser | undefined, body:
     .assistant-message.user { margin-left: 34px; background: #e7f5f2; border-color: #86b8ad; }
     .assistant-confirm { display: grid; gap: 8px; border: 1px solid #d6a742; border-radius: 8px; padding: 10px; background: #fff8df; }
     .assistant-compose { display: grid; gap: 8px; padding: 12px; border-top: 1px solid #d8ddd7; background: white; }
-    .assistant-compose textarea { width: 100%; min-height: 72px; font-family: inherit; }
+    .assistant-compose textarea { width: 100%; min-height: 104px; font-family: inherit; }
     .target-price { border-radius: 6px; padding: 5px 8px; background: #17202a; color: white; font-weight: 800; white-space: nowrap; }
     .model-metrics { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 7px; }
     .metric { border-radius: 5px; padding: 3px 6px; background: #eef2f0; color: #334155; font-size: 11px; font-weight: 750; }
@@ -275,6 +275,7 @@ export function layout(title: string, user: AuthenticatedUser | undefined, body:
           <a href="/admin/providers">Providers</a>
           <a href="/admin/targets">Targets</a>
           <a href="/admin/models">Model data</a>
+          <a href="/admin/assistant">Assistant</a>
         </div>
       </details>
       <details class="drawer-tree">
@@ -290,9 +291,9 @@ export function layout(title: string, user: AuthenticatedUser | undefined, body:
   <main>${body}</main>
   ${user ? `<button class="assistant-toggle" type="button" data-assistant-toggle aria-controls="profile-assistant" aria-expanded="false">Ask NeurOn</button>
   <aside id="profile-assistant" class="assistant-drawer" hidden aria-label="NeurOn assistant">
-    <div class="assistant-head"><div><strong>NeurOn assistant</strong><div style="font-size:12px;color:#d8ddd7">Profiles, reservations, and guidance</div></div><button type="button" data-assistant-collapse aria-label="Collapse assistant">Collapse</button></div>
-    <div class="assistant-messages" data-assistant-messages><div class="assistant-message">I can fill a profile draft. Saving and starting are separate actions that always ask you to confirm.</div></div>
-    <form class="assistant-compose" data-assistant-form><textarea maxlength="2000" placeholder="Describe what you need, ask me to save the draft, or start a saved profile."></textarea><button type="submit">Send</button><span class="muted" data-assistant-status></span></form>
+    <div class="assistant-head"><strong>NeurOn assistant</strong><button type="button" data-assistant-collapse aria-label="Collapse assistant">Collapse</button></div>
+    <div class="assistant-messages" data-assistant-messages></div>
+    <form class="assistant-compose" data-assistant-form><textarea maxlength="2000" placeholder="Ask about this screen, configure a profile, or manage a reservation."></textarea><button type="submit">Send</button><span class="muted" data-assistant-status></span></form>
   </aside>` : ""}
   <script>
     (() => {
@@ -372,6 +373,7 @@ function assistantClientScript(): string {
         if (path === '/client-setup') return 'client_setup';
         if (path === '/api-keys') return 'api_keys';
         if (path === '/admin/models') return 'admin_model_data';
+        if (path === '/admin/assistant') return 'admin_assistant';
         if (path === '/admin/targets') return 'admin_targets';
         if (path.startsWith('/admin/')) return 'admin_other';
         return 'other';
@@ -418,14 +420,14 @@ function assistantClientScript(): string {
       };
       form.addEventListener('submit', async event => {
         event.preventDefault(); const textarea = form.querySelector('textarea'); const request = textarea.value.trim(); if (request.length < 3) return;
-        addMessage(request, 'user'); textarea.value = ''; form.querySelector('button').disabled = true; status.textContent = 'The configured advisor may start while I work…';
+        addMessage(request, 'user'); textarea.value = ''; form.querySelector('button').disabled = true; status.textContent = 'The configured Assistant model may start while I work…';
         try {
           const body = await jsonRequest('/api/profile-advisor', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ request, currentDraft: currentDraft(), screen: currentScreen() }) });
           handleResult(body.result);
         } catch (error) { addMessage(error instanceof Error ? error.message : 'The assistant failed.'); }
         finally { form.querySelector('button').disabled = false; status.textContent = ''; }
       });
-      fetch('/api/profile-advisor/status').then(response => response.json()).then(data => { if (!data.enabled) { form.querySelector('textarea').disabled = true; form.querySelector('button').disabled = true; status.textContent = data.reason === 'maintenance_mode' ? 'The assistant is paused while NeurOn is in maintenance mode.' : 'An administrator has not selected an advisor target and model.'; } }).catch(() => undefined);
+      fetch('/api/profile-advisor/status').then(response => response.json()).then(data => { if (!data.enabled) { form.querySelector('textarea').disabled = true; form.querySelector('button').disabled = true; status.textContent = data.reason === 'maintenance_mode' ? 'The assistant is paused while NeurOn is in maintenance mode.' : 'An administrator has not configured the Assistant target and model.'; } }).catch(() => undefined);
       const pending = sessionStorage.getItem('neuron-profile-assistant-guidance'); if (pending && document.querySelector('#profile-form')) { try { document.dispatchEvent(new CustomEvent('neuron:apply-profile-guidance', { detail: JSON.parse(pending) })); } catch {} }
     })();`;
 }
@@ -1186,38 +1188,27 @@ export function usagePage(user: AuthenticatedUser): string {
   </script>`);
 }
 
-export function modelMetadataPage(user: AuthenticatedUser, deployments: ModelDeploymentSelectionView[], stored: ModelSelectionCatalogConfig, targets: TargetView[] = []): string {
+export function modelMetadataPage(user: AuthenticatedUser, deployments: ModelDeploymentSelectionView[], stored: ModelSelectionCatalogConfig): string {
   const capabilityByModel = new Map(stored.models.map((value) => [value.modelId, value]));
   const deploymentByKey = new Map(stored.deployments.map((value) => [`${value.targetId}::${value.modelId}`, value]));
   const models = Array.from(new Map(deployments.map((deployment) => [deployment.modelId, deployment])).values());
   const capabilityForms = models.map((model) => {
     const value = capabilityByModel.get(model.modelId);
     const domains = Object.entries(value?.domains ?? {}).map(([name, score]) => `${name}=${score}`).join(", ");
-    return `<details class="drilldown"><summary><div><strong>${escapeHtml(model.modelDisplayName)}</strong><div class="muted"><code>${escapeHtml(model.modelId)}</code></div></div><span class="pill">${value?.intelligence === undefined ? "Not rated" : `Good ${formatMetric(value.intelligence)}`}</span></summary><div class="drilldown-body"><form data-model-metadata data-model-id="${escapeHtml(model.modelId)}"><div class="field-grid"><label>Good / intelligence (0–100)<br><input name="intelligence" type="number" min="0" max="100" step="0.1" value="${value?.intelligence ?? ""}"></label><label>Capabilities (<code>tag=score</code>)<br><input name="domains" value="${escapeHtml(domains)}" placeholder="coding=92, reasoning=88"></label><label>Source<br><input name="source" value="${escapeHtml(value?.provenance?.source ?? "")}" placeholder="Manual benchmark"></label><label>Version<br><input name="version" value="${escapeHtml(value?.provenance?.version ?? "")}"></label></div><button type="submit">Save model data</button><span class="muted" data-save-status></span></form></div></details>`;
+    const legacyQuantization = stored.deployments.find((deployment) => deployment.modelId === model.modelId && deployment.quantization)?.quantization;
+    const quantization = value?.quantization ?? legacyQuantization;
+    const technical = deployments.find((deployment) => deployment.modelId === model.modelId)?.technicalCapabilities ?? [];
+    return `<details class="drilldown"><summary><div><strong>${escapeHtml(model.modelDisplayName)}</strong><div class="muted"><code>${escapeHtml(model.modelId)}</code></div></div><span class="pill">${value?.intelligence === undefined ? "Not rated" : `Intelligence ${formatMetric(value.intelligence)}`}</span></summary><div class="drilldown-body"><form data-model-metadata data-model-id="${escapeHtml(model.modelId)}"><div class="field-grid"><label>Intelligence (0–100)${helpTip("General model intelligence. The Good corner of the profile triangle increases the weight of this score.")}<br><input name="intelligence" type="number" min="0" max="100" step="0.1" value="${value?.intelligence ?? ""}"></label><label>Scored strengths (<code>tag=score</code>)${helpTip("Optional subject scores such as coding or reasoning. These refine Intelligence ranking; they are not binary runtime features.")}<br><input name="domains" value="${escapeHtml(domains)}" placeholder="coding=92, reasoning=88"></label><label>Quantization / artifact<br><input name="quantization" value="${escapeHtml(quantization?.format ?? "")}"></label><label>Estimated quality retained (%)${helpTip("Display-only measured retention for this model artifact relative to its named reference.")}<br><input name="retention" type="number" min="0" max="100" step="0.1" value="${quantization?.qualityRetentionPercent ?? ""}"></label><label>Reference artifact<br><input name="reference" value="${escapeHtml(quantization?.reference ?? "")}"></label><label>Source<br><input name="source" value="${escapeHtml(value?.provenance?.source ?? "")}" placeholder="Manual benchmark"></label><label>Version<br><input name="version" value="${escapeHtml(value?.provenance?.version ?? "")}"></label></div>${technical.length ? `<p><strong>Advertised technical capabilities:</strong> ${technical.map((capability) => `<span class="pill" title="${escapeHtml(capability.title ?? capability.label)}">${escapeHtml(capability.label)}</span>`).join(" ")}</p>` : `<p class="muted">The runtime has not advertised any recognized technical capability flags for this model.</p>`}<button type="submit">Save model data</button><span class="muted" data-save-status></span></form></div></details>`;
   }).join("");
   const deploymentForms = deployments.map((deployment) => {
     const value = deploymentByKey.get(deployment.key);
-    return `<details class="drilldown"><summary><div><strong>${escapeHtml(deployment.modelDisplayName)}</strong><div class="muted">${escapeHtml(deployment.targetDisplayName)} · <code>${escapeHtml(deployment.key)}</code></div></div><span class="pill">${value?.performance?.decodeTokensPerSecond ? `${formatMetric(value.performance.decodeTokensPerSecond)} decode t/s` : "Not benchmarked"}</span></summary><div class="drilldown-body"><form data-deployment-metadata data-target-id="${escapeHtml(deployment.targetId)}" data-model-id="${escapeHtml(deployment.modelId)}"><div class="field-grid"><label>LiteLLM aliases (comma-separated)<br><input name="aliases" value="${escapeHtml(deployment.aliases.join(", "))}"></label><label>Per-request context<br><input name="context" type="number" min="1" step="1" value="${value?.contextWindowTokens ?? ""}"></label><label>Quantization/artifact<br><input name="quantization" value="${escapeHtml(value?.quantization?.format ?? "")}"></label><label>Estimated quality retained (%)<br><input name="retention" type="number" min="0" max="100" step="0.1" value="${value?.quantization?.qualityRetentionPercent ?? ""}"></label><label>Reference artifact<br><input name="reference" value="${escapeHtml(value?.quantization?.reference ?? "")}"></label><label>Decode tokens/s<br><input name="decode" type="number" min="0" step="0.01" value="${value?.performance?.decodeTokensPerSecond ?? ""}"></label><label>Prefill tokens/s<br><input name="prefill" type="number" min="0" step="0.01" value="${value?.performance?.prefillTokensPerSecond ?? ""}"></label><label>Source<br><input name="source" value="${escapeHtml(value?.provenance?.source ?? value?.performance?.provenance?.source ?? "")}" placeholder="NeurOn benchmark"></label><label>Version<br><input name="version" value="${escapeHtml(value?.provenance?.version ?? value?.performance?.provenance?.version ?? "")}"></label></div><button type="submit">Save deployment data and aliases</button><span class="muted" data-save-status></span></form></div></details>`;
+    const context = deployment.contextWindowTokens ? `${formatTokenCount(deployment.contextWindowTokens)} context (${deployment.contextSource ?? "target"})` : "Context not reported by target/model";
+    return `<details class="drilldown"><summary><div><strong>${escapeHtml(deployment.modelDisplayName)}</strong><div class="muted">${escapeHtml(deployment.targetDisplayName)} · <code>${escapeHtml(deployment.key)}</code></div></div><span class="pill">${value?.performance?.decodeTokensPerSecond ? `${formatMetric(value.performance.decodeTokensPerSecond)} decode t/s` : "Not benchmarked"}</span></summary><div class="drilldown-body"><form data-deployment-metadata data-target-id="${escapeHtml(deployment.targetId)}" data-model-id="${escapeHtml(deployment.modelId)}"><p class="muted">${escapeHtml(context)}. Context is owned by the target/model configuration or runtime discovery and is not duplicated here.</p><div class="field-grid"><label>LiteLLM aliases (comma-separated)<br><input name="aliases" value="${escapeHtml(deployment.aliases.join(", "))}"></label><label>Decode tokens/s<br><input name="decode" type="number" min="0" step="0.01" value="${value?.performance?.decodeTokensPerSecond ?? ""}"></label><label>Prefill tokens/s<br><input name="prefill" type="number" min="0" step="0.01" value="${value?.performance?.prefillTokensPerSecond ?? ""}"></label><label>Source<br><input name="source" value="${escapeHtml(value?.provenance?.source ?? value?.performance?.provenance?.source ?? "")}" placeholder="NeurOn benchmark"></label><label>Version<br><input name="version" value="${escapeHtml(value?.provenance?.version ?? value?.performance?.provenance?.version ?? "")}"></label></div><button type="submit">Save deployment speed and aliases</button><span class="muted" data-save-status></span></form></div></details>`;
   }).join("");
-  const targetById = new Map(targets.map((target) => [target.id, target]));
-  const selectedAdvisor = targets.find((target) => target.profileAdvisor);
-  const advisorOptions = deployments.map((deployment) => {
-    const target = targetById.get(deployment.targetId);
-    const selected = selectedAdvisor?.id === deployment.targetId && selectedAdvisor.profileAdvisor?.modelId === deployment.modelId;
-    return `<option value="${escapeHtml(deployment.key)}" ${selected ? "selected" : ""} ${target?.editable ? "" : "disabled"}>${escapeHtml(deployment.targetDisplayName)} · ${escapeHtml(deployment.modelDisplayName)}${target?.editable ? "" : " (copy target to database first)"}</option>`;
-  }).join("");
-  return layout("Model data", user, `<section class="panel"><h1>Model data</h1><p>Store model quality and deployment measurements in NeurOn. These durable records—not environment variables—drive profile guidance.</p><p class="muted">Only enter benchmark values you are permitted to store. Every rating should name its source and version.</p></section><section class="panel"><h2>Profile assistant backend</h2><p>Select the existing NeurOn deployment that runs the assistant. Asking for guidance creates or refreshes a synthetic system reservation, waits for normal reconciliation and health, then calls this model directly.</p><p class="muted">The selected runtime must provide OpenAI-compatible chat completions and support function/tool calling for screen changes and action proposals.</p><form id="profile-advisor-backend-form"><div class="field-grid"><label>Target and model<br><select name="deployment"><option value="">Disabled</option>${advisorOptions}</select></label><label>Reservation / keep-alive minutes<br><input name="reservationMinutes" type="number" min="1" max="60" value="${selectedAdvisor?.profileAdvisor?.reservationMinutes ?? 15}"></label><label>Cold-start timeout seconds<br><input name="startupTimeoutSeconds" type="number" min="1" max="1800" value="${selectedAdvisor?.profileAdvisor?.startupTimeoutSeconds ?? 600}"></label><label>Model response timeout seconds<br><input name="requestTimeoutSeconds" type="number" min="1" max="300" value="${selectedAdvisor?.profileAdvisor?.requestTimeoutSeconds ?? 120}"></label></div><button type="submit">Save assistant backend</button><span class="muted" data-advisor-save-status></span></form></section><section class="panel"><h2>Model quality and capabilities</h2><div class="summary-list">${capabilityForms || `<p class="muted">No models are known.</p>`}</div></section><section class="panel"><h2>Target/model deployments</h2><div class="summary-list">${deploymentForms || `<p class="muted">No deployments are known.</p>`}</div></section>
+  return layout("Model data", user, `<section class="panel"><h1>Model data</h1><p>Store model intelligence, scored strengths, artifact facts, and target-specific speed measurements in NeurOn.</p><p class="muted">Binary technical capabilities come from target/model configuration or runtime discovery. Only enter rating data you are permitted to store, with source and version provenance.</p></section><section class="panel"><h2>Model intelligence and artifact data</h2><div class="summary-list">${capabilityForms || `<p class="muted">No models are known.</p>`}</div></section><section class="panel"><h2>Target-specific speed and routing</h2><div class="summary-list">${deploymentForms || `<p class="muted">No deployments are known.</p>`}</div></section>
   <script type="module">
     const number = (form, name) => form.elements[name].value === '' ? undefined : Number(form.elements[name].value);
     const provenance = form => form.elements.source.value.trim() ? { source: form.elements.source.value.trim(), ...(form.elements.version.value.trim() ? { version: form.elements.version.value.trim() } : {}) } : undefined;
-    document.querySelector('#profile-advisor-backend-form')?.addEventListener('submit', async event => {
-      event.preventDefault(); const form = event.currentTarget; const status = form.querySelector('[data-advisor-save-status]'); status.textContent = ' Saving…';
-      try {
-        const [targetId, modelId] = form.elements.deployment.value ? form.elements.deployment.value.split('::') : [null, null];
-        const response = await fetch('/api/admin/profile-advisor-backend', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ targetId, modelId, reservationMinutes: Number(form.elements.reservationMinutes.value), startupTimeoutSeconds: Number(form.elements.startupTimeoutSeconds.value), requestTimeoutSeconds: Number(form.elements.requestTimeoutSeconds.value) }) });
-        if (!response.ok) throw new Error((await response.json()).error || 'Save failed'); status.textContent = ' Saved';
-      } catch (error) { status.textContent = ' ' + (error instanceof Error ? error.message : 'Save failed'); }
-    });
     document.addEventListener('submit', async event => {
       const form = event.target.closest('[data-model-metadata], [data-deployment-metadata]'); if (!form) return;
       event.preventDefault(); const status = form.querySelector('[data-save-status]'); status.textContent = ' Saving…';
@@ -1225,21 +1216,42 @@ export function modelMetadataPage(user: AuthenticatedUser, deployments: ModelDep
         let path; let body;
         if (form.matches('[data-model-metadata]')) {
           const domains = Object.fromEntries(form.elements.domains.value.split(',').map(value => value.trim()).filter(Boolean).map(value => { const [key, score] = value.split('='); return [key.trim(), Number(score)]; }));
+          const format = form.elements.quantization.value.trim(); const retention = number(form, 'retention'); const reference = form.elements.reference.value.trim();
           path = '/api/admin/model-metadata/models/' + encodeURIComponent(form.dataset.modelId);
-          body = { intelligence: number(form, 'intelligence'), ...(Object.keys(domains).length ? { domains } : {}), provenance: provenance(form) };
+          body = { intelligence: number(form, 'intelligence'), ...(Object.keys(domains).length ? { domains } : {}), ...(format ? { quantization: { format, ...(retention === undefined ? {} : { qualityRetentionPercent: retention }), ...(reference ? { reference } : {}) } } : {}), provenance: provenance(form) };
         } else {
           const aliases = form.elements.aliases.value.split(',').map(value => value.trim()).filter(Boolean);
           const aliasResponse = await fetch('/api/admin/targets/' + encodeURIComponent(form.dataset.targetId) + '/models/' + encodeURIComponent(form.dataset.modelId) + '/aliases', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ aliases }) });
           if (!aliasResponse.ok) throw new Error((await aliasResponse.json()).error || 'Alias save failed');
-          const format = form.elements.quantization.value.trim();
-          const retention = number(form, 'retention'); const reference = form.elements.reference.value.trim();
           const decode = number(form, 'decode'); const prefill = number(form, 'prefill');
           path = '/api/admin/model-metadata/deployments/' + encodeURIComponent(form.dataset.targetId) + '/' + encodeURIComponent(form.dataset.modelId);
-          body = { contextWindowTokens: number(form, 'context'), ...(format ? { quantization: { format, ...(retention === undefined ? {} : { qualityRetentionPercent: retention }), ...(reference ? { reference } : {}) } } : {}), ...((decode || prefill) ? { performance: { ...(decode ? { decodeTokensPerSecond: decode } : {}), ...(prefill ? { prefillTokensPerSecond: prefill } : {}), measuredAt: new Date().toISOString(), sampleCount: 1 } } : {}), provenance: provenance(form) };
+          body = { ...((decode || prefill) ? { performance: { ...(decode ? { decodeTokensPerSecond: decode } : {}), ...(prefill ? { prefillTokensPerSecond: prefill } : {}), measuredAt: new Date().toISOString(), sampleCount: 1 } } : {}), provenance: provenance(form) };
         }
         const response = await fetch(path, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
         if (!response.ok) throw new Error((await response.json()).error || 'Save failed'); status.textContent = ' Saved';
       } catch (error) { status.textContent = ' ' + (error instanceof Error ? error.message : 'Save failed'); }
+    });
+  </script>`);
+}
+
+export function assistantConfigPage(user: AuthenticatedUser, deployments: ModelDeploymentSelectionView[], config?: AssistantConfig, error = ""): string {
+  const options = deployments.map((deployment) => `<option value="${escapeHtml(JSON.stringify({ targetId: deployment.targetId, modelId: deployment.modelId }))}" ${config?.targetId === deployment.targetId && config.modelId === deployment.modelId ? "selected" : ""}>${escapeHtml(deployment.targetDisplayName)} · ${escapeHtml(deployment.modelDisplayName)}</option>`).join("");
+  const reservationMinutes = config?.reservationMinutes ?? 15;
+  const keepaliveMinutes = config?.keepaliveMinutes ?? 15;
+  const choices = (kind: string, values: number[], selected: number) => values.map((value) => `<button class="choice" type="button" data-assistant-${kind}="${value}" aria-pressed="${String(value === selected)}">${value} min</button>`).join("");
+  return layout("Assistant", user, `${error ? `<p class="status">${escapeHtml(error)}</p>` : ""}<section class="panel"><h1>Assistant</h1><p>Select the existing NeurOn target and model that power the in-application assistant. The configuration is stored independently from targets and model-selection data.</p><p class="muted">The selected deployment must support OpenAI-compatible chat completions and function/tool calling. Asking a question may create a visible synthetic reservation and cold-start that target through normal reconciliation.</p></section><section class="panel"><form id="assistant-config-form"><input type="hidden" name="reservationMinutes" value="${reservationMinutes}"><input type="hidden" name="keepaliveMinutes" value="${keepaliveMinutes}"><label>Target and model${helpTip("The exact deployment NeurOn reserves and calls for assistant requests.")}<br><select name="deployment"><option value="">Disabled</option>${options}</select></label><div class="field-grid" style="margin-top:16px"><div><h2>Reservation duration${helpTip("How long the assistant reservation remains active. This is also the maximum cold-start wait for an individual request.")}</h2><div class="row">${choices("duration", [2, 5, 15, 30, 60], reservationMinutes)}</div></div><div><h2>Keepalive${helpTip("How long idle assistant capacity stays available after its reservation window, reducing repeated cold starts.")}</h2><div class="row">${choices("keepalive", [1, 2, 5, 15], keepaliveMinutes)}</div></div></div><details style="margin-top:16px"><summary><strong>Advanced</strong></summary><label>Model response timeout (seconds)${helpTip("Maximum time for the ready model to answer. This does not control target startup.")}<br><input name="requestTimeoutSeconds" type="number" min="1" max="600" value="${config?.requestTimeoutSeconds ?? 120}"></label></details><div class="actions"><button type="submit">Save assistant settings</button><span class="muted" data-assistant-config-status></span></div></form></section>
+  <script type="module">
+    const form = document.querySelector('#assistant-config-form');
+    const select = (kind, button) => { form.querySelectorAll('[data-assistant-' + kind + ']').forEach(candidate => candidate.setAttribute('aria-pressed', String(candidate === button))); form.elements[kind === 'duration' ? 'reservationMinutes' : 'keepaliveMinutes'].value = button.dataset['assistant' + kind[0].toUpperCase() + kind.slice(1)]; };
+    form.querySelectorAll('[data-assistant-duration]').forEach(button => button.addEventListener('click', () => select('duration', button)));
+    form.querySelectorAll('[data-assistant-keepalive]').forEach(button => button.addEventListener('click', () => select('keepalive', button)));
+    form.addEventListener('submit', async event => {
+      event.preventDefault(); const status = form.querySelector('[data-assistant-config-status]'); status.textContent = ' Saving…';
+      try {
+        const deployment = form.elements.deployment.value ? JSON.parse(form.elements.deployment.value) : { targetId: null, modelId: null }; const { targetId, modelId } = deployment;
+        const response = await fetch('/api/admin/assistant-config', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ targetId, modelId, reservationMinutes: Number(form.elements.reservationMinutes.value), keepaliveMinutes: Number(form.elements.keepaliveMinutes.value), requestTimeoutSeconds: Number(form.elements.requestTimeoutSeconds.value) }) });
+        if (!response.ok) throw new Error((await response.json()).error || 'Save failed'); status.textContent = ' Saved'; setTimeout(() => location.reload(), 250);
+      } catch (caught) { status.textContent = ' ' + (caught instanceof Error ? caught.message : 'Save failed'); }
     });
   </script>`);
 }
@@ -2654,28 +2666,21 @@ function profileCreateModal(
 
 function profileSelectionGuide(deployments: ModelDeploymentSelectionView[]): string {
   const domains = Array.from(new Set(deployments.flatMap((deployment) => Object.keys(deployment.domains)))).sort();
-  const domainOptions = domains.map((domain) => `<option value="${escapeHtml(domain)}">${escapeHtml(domainLabel(domain))}</option>`).join("");
+  const technicalCapabilities = Array.from(new Set(deployments.flatMap((deployment) => deployment.technicalCapabilities.map((capability) => capability.label)))).sort();
   const contexts = Array.from(new Set(deployments.map((deployment) => deployment.contextWindowTokens).filter((value): value is number => typeof value === "number" && value > 0))).sort((left, right) => left - right);
   const contextStops = contexts.map((value, index) => `<option value="${index + 1}" label="${escapeHtml(formatTokenCount(value))}"></option>`).join("");
+  const costs = Array.from(new Set(deployments.map((deployment) => deployment.hourlyUsd).filter((value): value is number => typeof value === "number" && value >= 0))).sort((left, right) => left - right);
+  const costStops = costs.map((value, index) => `<option value="${index + 1}" label="$${value.toFixed(2)}"></option>`).join("");
   return `<section class="profile-guide" aria-labelledby="profile-guide-title">
     <h3 id="profile-guide-title">Find the best fit</h3>
     <p class="muted">Requirements remove deployments that cannot work. The Good, Fast, and Cheap triangle ranks what remains.</p>
-    <details>
-      <summary><strong>Quick profile wizard</strong></summary>
-      <div class="selection-filter-grid" style="margin-top: 10px;">
-        <label>Workload<br><select id="profile-wizard-domain"><option value="">General purpose</option>${domainOptions}</select></label>
-        <label>Response style<br><select id="profile-wizard-response"><option value="mixed">A mix</option><option value="short">Short and interactive</option><option value="long">Long generations</option></select></label>
-        <label>Main priority<br><select id="profile-wizard-priority"><option value="balanced">Balanced</option><option value="intelligence">Best quality</option><option value="speed">Fastest response</option><option value="cost">Lowest cost</option></select></label>
-        <label>Budget ceiling ($/hr)<br><input id="profile-wizard-budget" type="number" min="0" step="0.01" placeholder="No ceiling"></label>
-      </div>
-      <button id="profile-wizard-run" type="button" style="margin-top: 10px;">Find a fit</button>
-    </details>
     <div class="selection-filter-grid" style="margin-top: 14px;">
-      <label>Minimum context<br><input id="profile-min-context" class="context-slider" type="range" min="0" max="${contexts.length}" step="1" value="0" list="profile-context-stops" data-context-values="${escapeHtml(JSON.stringify(contexts))}"><datalist id="profile-context-stops"><option value="0" label="Any"></option>${contextStops}</datalist><output id="profile-min-context-output">No minimum</output></label>
-      <label>Hosting mode<br><select id="profile-hosting-mode"><option value="">Dedicated or multi-model</option><option value="dedicated">Dedicated model host</option><option value="multi-model">Multi-model host</option></select></label>
-      <label>Maximum target cost ($/hr)<br><input id="profile-max-cost" type="number" min="0" step="0.01" placeholder="No maximum"></label>
+      <label>Minimum context${helpTip("A hard per-request context requirement. Values come from target configuration or runtime discovery, including any concurrency sharing.")}<br><input id="profile-min-context" class="context-slider" type="range" min="0" max="${contexts.length}" step="1" value="0" list="profile-context-stops" data-context-values="${escapeHtml(JSON.stringify(contexts))}"><datalist id="profile-context-stops"><option value="0" label="Any"></option>${contextStops}</datalist><output id="profile-min-context-output">No minimum</output></label>
+      <label>Hosting mode${helpTip("Dedicated targets serve one model deployment. Multi-model targets can keep several models available together.")}<br><select id="profile-hosting-mode"><option value="">Dedicated or multi-model</option><option value="dedicated">Dedicated model host</option><option value="multi-model">Multi-model host</option></select></label>
+      <label>Maximum target cost${helpTip("A hard hourly target-cost ceiling. The slider stops are the costs currently known to NeurOn.")}<br><input id="profile-max-cost" class="context-slider" type="range" min="0" max="${costs.length}" step="1" value="0" list="profile-cost-stops" data-cost-values="${escapeHtml(JSON.stringify(costs))}"><datalist id="profile-cost-stops"><option value="0" label="Any"></option>${costStops}</datalist><output id="profile-max-cost-output">No maximum</output></label>
     </div>
-    ${domains.length ? `<fieldset><legend>Required capabilities</legend><p class="muted">A deployment must have measurements for every selected capability.</p><div id="profile-domains" class="requirement-tags">${domains.map((domain) => `<label><input type="checkbox" value="${escapeHtml(domain)}" data-profile-domain> ${escapeHtml(domainLabel(domain))}</label>`).join("")}</div></fieldset>` : ""}
+    ${technicalCapabilities.length ? `<fieldset><legend>Required technical capabilities${helpTip("Binary features advertised by the runtime or configured by an operator, such as vision or tool use. Selected features are hard requirements.")}</legend><div id="profile-technical-capabilities" class="requirement-tags">${technicalCapabilities.map((capability) => `<label><input type="checkbox" value="${escapeHtml(capability)}" data-profile-technical-capability> ${escapeHtml(domainLabel(capability))}</label>`).join("")}</div></fieldset>` : `<p class="muted">No runtime has advertised a recognized technical capability such as vision or tool use yet.</p>`}
+    ${domains.length ? `<fieldset><legend>Desired strengths${helpTip("Curated, scored areas such as coding, math, or reasoning. These refine Intelligence ranking but never remove a model.")}</legend><div id="profile-domains" class="requirement-tags">${domains.map((domain) => `<label><input type="checkbox" value="${escapeHtml(domain)}" data-profile-domain> ${escapeHtml(domainLabel(domain))}</label>`).join("")}</div></fieldset>` : `<p class="muted">No scored model strengths have been entered yet; general Intelligence is used when available.</p>`}
     <div class="preference-grid">
       <svg id="profile-preference-triangle" class="preference-triangle" viewBox="0 0 320 280" role="img" tabindex="0" aria-label="Good, Fast, and Cheap ranking preference. Center balances all three; corners favor one category.">
         <polygon points="160,28 24,244 296,244"></polygon>
@@ -2683,10 +2688,10 @@ function profileSelectionGuide(deployments: ModelDeploymentSelectionView[]): str
         <circle id="profile-preference-point" cx="160" cy="172" r="9"></circle>
       </svg>
       <div class="triangle-leaders">
-        <p class="muted">Drag toward a corner to emphasize it. The center gives Good, Fast, and Cheap equal priority. Nearby center, edge, and corner presets snap into place.</p>
-        <div id="profile-leader-good" class="category-leader"><strong>Good leader</strong><span class="muted">Not measured</span></div>
-        <div id="profile-leader-fast" class="category-leader"><strong>Fast leader</strong><span class="muted">Not measured</span></div>
-        <div id="profile-leader-cheap" class="category-leader"><strong>Cheap leader</strong><span class="muted">Not measured</span></div>
+        <p class="muted">This triangle is the profile wizard. Drag toward Good, Fast, or Cheap to change the internal Intelligence, Speed, and Cost preferences. The center balances all three; useful centers, edges, and corners snap into place.</p>
+        <div id="profile-leader-good" class="category-leader"><strong>Intelligence leader</strong><span class="muted">Not measured</span></div>
+        <div id="profile-leader-fast" class="category-leader"><strong>Speed leader</strong><span class="muted">Not measured</span></div>
+        <div id="profile-leader-cheap" class="category-leader"><strong>Cost leader</strong><span class="muted">Not measured</span></div>
       </div>
     </div>
     <div id="profile-filter-status" class="muted filter-status" aria-live="polite"></div>
@@ -2710,28 +2715,37 @@ function profileSelectionClientScript(deployments: ModelDeploymentSelectionView[
       const contextOutput = root.querySelector('#profile-min-context-output');
       const contextValues = JSON.parse(contextInput?.dataset.contextValues ?? '[]');
       const domainInputs = [...root.querySelectorAll('[data-profile-domain]')];
+      const technicalInputs = [...root.querySelectorAll('[data-profile-technical-capability]')];
       const hostingInput = root.querySelector('#profile-hosting-mode');
       const maxCostInput = root.querySelector('#profile-max-cost');
+      const maxCostOutput = root.querySelector('#profile-max-cost-output');
+      const costValues = JSON.parse(maxCostInput?.dataset.costValues ?? '[]');
       const point = root.querySelector('#profile-preference-point');
       const triangle = root.querySelector('#profile-preference-triangle');
       const recommendations = root.querySelector('#profile-recommendations');
       const filterStatus = root.querySelector('#profile-filter-status');
       let weights = { intelligence: 1, speed: 1, cost: 1 };
       const escapeText = (value) => String(value ?? '').replace(/[&<>"']/g, character => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' }[character]));
-      const numberValue = (input) => input?.value === '' ? undefined : Number(input?.value);
       const isNumber = (value) => typeof value === 'number' && Number.isFinite(value);
       const selectedDomains = () => domainInputs.filter(input => input.checked).map(input => input.value);
-      const qualityValue = (deployment) => {
+      const selectedTechnicalCapabilities = () => technicalInputs.filter(input => input.checked).map(input => input.value);
+      const maximumCost = () => {
+        const index = Number(maxCostInput?.value) || 0;
+        return index ? costValues[index - 1] : undefined;
+      };
+      const intelligenceValue = (deployment) => {
         const domains = selectedDomains();
         if (!domains.length) return deployment.intelligence;
         const values = domains.map(domain => deployment.domains?.[domain]).filter(isNumber);
         return values.length === domains.length ? Math.min(...values) : undefined;
       };
-      const percentile = (value, values, higherIsBetter) => {
-        if (values.length <= 1 || values.every(candidate => candidate === values[0])) return 1;
-        const better = values.filter(candidate => higherIsBetter ? candidate < value : candidate > value).length;
-        const equal = values.filter(candidate => candidate === value).length;
-        return (better + Math.max(0, equal - 1) / 2) / (values.length - 1);
+      const clamp01 = value => Math.max(0, Math.min(1, value));
+      const relativeToMaximum = (value, values) => values.length && Math.max(...values) > 0 ? clamp01(value / Math.max(...values)) : undefined;
+      const relativeCost = (value, values) => {
+        if (!values.length) return undefined;
+        const minimum = Math.min(...values);
+        if (minimum === 0) return value === 0 ? 1 : 0;
+        return value > 0 ? clamp01(minimum / value) : undefined;
       };
       const weightedAverage = (parts) => {
         const total = parts.reduce((sum, part) => sum + part.weight, 0);
@@ -2744,39 +2758,38 @@ function profileSelectionClientScript(deployments: ModelDeploymentSelectionView[
       const eligibleDeployments = () => {
         const contextIndex = Number(contextInput.value) || 0;
         const minimumContext = contextIndex ? contextValues[contextIndex - 1] : 0;
-        const maximumCost = numberValue(maxCostInput);
-        const domains = selectedDomains();
+        const costCeiling = maximumCost();
+        const requiredTechnical = selectedTechnicalCapabilities();
         return deployments.filter(deployment => {
           if (minimumContext && (!isNumber(deployment.contextWindowTokens) || deployment.contextWindowTokens < minimumContext)) return false;
-          if (maximumCost !== undefined && (!isNumber(deployment.hourlyUsd) || deployment.hourlyUsd > maximumCost)) return false;
+          if (costCeiling !== undefined && (!isNumber(deployment.hourlyUsd) || deployment.hourlyUsd > costCeiling)) return false;
           if (hostingInput.value && deployment.hostingMode !== hostingInput.value) return false;
-          if (domains.some(domain => !isNumber(deployment.domains?.[domain]))) return false;
+          if (requiredTechnical.some(required => !deployment.technicalCapabilities?.some(capability => capability.label === required))) return false;
           return true;
         });
       };
       const rankedDeployments = () => {
         const eligible = eligibleDeployments();
-        const qualityValues = eligible.map(qualityValue).filter(isNumber);
         const decodeValues = eligible.map(item => item.performance?.decodeTokensPerSecond).filter(isNumber);
         const prefillValues = eligible.map(item => item.performance?.prefillTokensPerSecond).filter(isNumber);
         const costValues = eligible.map(item => item.hourlyUsd).filter(isNumber);
         const weights = currentWeights();
         return eligible.map(deployment => {
-          const rawQuality = qualityValue(deployment);
-          const qualityScore = isNumber(rawQuality) ? percentile(rawQuality, qualityValues, true) : undefined;
-          const decodeScore = isNumber(deployment.performance?.decodeTokensPerSecond) ? percentile(deployment.performance.decodeTokensPerSecond, decodeValues, true) : undefined;
-          const prefillScore = isNumber(deployment.performance?.prefillTokensPerSecond) ? percentile(deployment.performance.prefillTokensPerSecond, prefillValues, true) : undefined;
-          const speedParts = [isNumber(decodeScore) ? { score: decodeScore, weight: 0.75 } : undefined, isNumber(prefillScore) ? { score: prefillScore, weight: 0.25 } : undefined].filter(Boolean);
+          const rawIntelligence = intelligenceValue(deployment);
+          const intelligenceScore = isNumber(rawIntelligence) ? clamp01(rawIntelligence / 100) : undefined;
+          const decodeScore = isNumber(deployment.performance?.decodeTokensPerSecond) ? relativeToMaximum(deployment.performance.decodeTokensPerSecond, decodeValues) : undefined;
+          const prefillScore = isNumber(deployment.performance?.prefillTokensPerSecond) ? relativeToMaximum(deployment.performance.prefillTokensPerSecond, prefillValues) : undefined;
+          const speedParts = [isNumber(decodeScore) ? { score: decodeScore, weight: 0.8 } : undefined, isNumber(prefillScore) ? { score: prefillScore, weight: 0.2 } : undefined].filter(Boolean);
           const speedScore = speedParts.length ? weightedAverage(speedParts) : undefined;
-          const costScore = isNumber(deployment.hourlyUsd) ? percentile(deployment.hourlyUsd, costValues, false) : undefined;
-          const dimensions = [isNumber(qualityScore) ? { score: qualityScore, weight: weights.intelligence } : undefined, isNumber(speedScore) ? { score: speedScore, weight: weights.speed } : undefined, isNumber(costScore) ? { score: costScore, weight: weights.cost } : undefined].filter(Boolean);
-          return { ...deployment, fitScore: dimensions.length ? weightedAverage(dimensions) : 0, coverage: Math.round(dimensions.reduce((sum, dimension) => sum + dimension.weight, 0) * 100), qualityScore, speedScore, costScore };
+          const costScore = isNumber(deployment.hourlyUsd) ? relativeCost(deployment.hourlyUsd, costValues) : undefined;
+          const dimensions = [isNumber(intelligenceScore) ? { score: intelligenceScore, weight: weights.intelligence } : undefined, isNumber(speedScore) ? { score: speedScore, weight: weights.speed } : undefined, isNumber(costScore) ? { score: costScore, weight: weights.cost } : undefined].filter(Boolean);
+          return { ...deployment, fitScore: dimensions.length ? weightedAverage(dimensions) : 0, coverage: Math.round(dimensions.reduce((sum, dimension) => sum + dimension.weight, 0) * 100), intelligenceScore, speedScore, costScore };
         }).sort((left, right) => right.fitScore - left.fitScore || Number(Boolean(right.favorite)) - Number(Boolean(left.favorite)) || (right.popularityScore ?? 0) - (left.popularityScore ?? 0) || right.coverage - left.coverage || left.targetDisplayName.localeCompare(right.targetDisplayName));
       };
       const metricSummary = (deployment) => {
         const pieces = [];
-        const quality = qualityValue(deployment);
-        if (isNumber(quality)) pieces.push((selectedDomains().length ? 'Required capabilities' : 'Good') + ' ' + quality.toFixed(1));
+        const intelligence = intelligenceValue(deployment);
+        if (isNumber(intelligence)) pieces.push((selectedDomains().length ? 'Desired strengths' : 'Intelligence') + ' ' + intelligence.toFixed(1));
         if (isNumber(deployment.performance?.decodeTokensPerSecond)) pieces.push(deployment.performance.decodeTokensPerSecond.toFixed(1) + ' t/s');
         if (isNumber(deployment.hourlyUsd)) pieces.push('$' + deployment.hourlyUsd.toFixed(2) + '/hr');
         if (isNumber(deployment.contextWindowTokens)) pieces.push(Math.round(deployment.contextWindowTokens / 1000) + 'K context');
@@ -2795,43 +2808,52 @@ function profileSelectionClientScript(deployments: ModelDeploymentSelectionView[
         const normalizedWeights = currentWeights();
         root.dataset.assistantRequirements = JSON.stringify({
           ...(contextIndex ? { minimumContextTokens: contextValues[contextIndex - 1] } : {}),
-          ...(numberValue(maxCostInput) === undefined ? {} : { maximumHourlyUsd: numberValue(maxCostInput) }),
+          ...(maximumCost() === undefined ? {} : { maximumHourlyUsd: maximumCost() }),
           ...(hostingInput.value ? { hostingMode: hostingInput.value } : {}),
           domains: selectedDomains(),
+          technicalCapabilities: selectedTechnicalCapabilities(),
           weights: normalizedWeights
         });
         const ranked = rankedDeployments();
         const matchingKeys = new Set(ranked.map(deployment => deployment.key));
+        const rankByKey = new Map(ranked.map((deployment, index) => [deployment.key, { deployment, index }]));
         root.querySelectorAll('[data-deployment-key]').forEach(option => {
           const matches = matchingKeys.has(option.dataset.deploymentKey);
-          const checked = option.querySelector('[data-profile-model]')?.checked;
-          option.hidden = !matches && !checked;
-          option.classList.toggle('does-not-match', !matches && checked);
+          const input = option.querySelector('[data-profile-model]');
+          if (!matches && input?.checked) input.checked = false;
+          option.hidden = !matches;
+          option.classList.remove('does-not-match');
+          option.style.order = String(rankByKey.get(option.dataset.deploymentKey)?.index ?? deployments.length);
+          const score = option.querySelector('[data-profile-fit-score]');
+          const rankedEntry = rankByKey.get(option.dataset.deploymentKey)?.deployment;
+          if (score) score.textContent = rankedEntry ? 'Fit ' + Math.round(rankedEntry.fitScore * 100) + ' · ' + rankedEntry.coverage + '% data' : '';
         });
         root.querySelectorAll('[data-profile-target-card]').forEach(card => {
           const options = [...card.querySelectorAll('[data-deployment-key]')];
-          const selected = card.querySelector('[data-profile-target]')?.checked;
-          card.hidden = options.length > 0 && options.every(option => option.hidden) && !selected;
-          card.querySelectorAll('.family').forEach(family => { family.hidden = [...family.querySelectorAll('[data-deployment-key]')].every(option => option.hidden); });
+          const input = card.querySelector('[data-profile-target]');
+          const visible = options.filter(option => !option.hidden);
+          card.hidden = options.length > 0 && visible.length === 0;
+          if (card.hidden && input?.checked) { input.checked = false; input.dispatchEvent(new Event('change', { bubbles: true })); }
+          card.style.order = String(visible.length ? Math.min(...visible.map(option => Number(option.style.order))) : deployments.length);
         });
         filterStatus.textContent = ranked.length + ' of ' + deployments.length + ' target-model deployments meet the current requirements. Missing values never satisfy a hard requirement.';
-        const goodLeader = bestBy(ranked, qualityValue);
+        const goodLeader = bestBy(ranked, intelligenceValue);
         const fastLeader = bestBy(ranked, item => item.speedScore);
         const cheapLeader = bestBy(ranked, item => item.hourlyUsd, true);
-        setLeader('#profile-leader-good', 'Good leader', goodLeader, item => qualityValue(item).toFixed(1));
-        setLeader('#profile-leader-fast', 'Fast leader', fastLeader, item => item.performance?.decodeTokensPerSecond ? item.performance.decodeTokensPerSecond.toFixed(1) + ' decode t/s' : 'Measured speed leader');
-        setLeader('#profile-leader-cheap', 'Cheap leader', cheapLeader, item => '$' + item.hourlyUsd.toFixed(2) + '/hr');
+        setLeader('#profile-leader-good', 'Intelligence leader', goodLeader, item => intelligenceValue(item).toFixed(1));
+        setLeader('#profile-leader-fast', 'Speed leader', fastLeader, item => item.performance?.decodeTokensPerSecond ? item.performance.decodeTokensPerSecond.toFixed(1) + ' decode t/s' : 'Measured speed leader');
+        setLeader('#profile-leader-cheap', 'Cost leader', cheapLeader, item => '$' + item.hourlyUsd.toFixed(2) + '/hr');
         if (!ranked.length) {
           recommendations.innerHTML = '<p class="muted">No deployment satisfies every requirement. Relax a hard filter to see choices.</p>';
           return;
         }
         const winners = [
           ['Best fit', ranked[0]],
-          ['Good leader', goodLeader],
-          ['Fast leader', fastLeader],
-          ['Cheap leader', cheapLeader]
+          ['Intelligence leader', goodLeader],
+          ['Speed leader', fastLeader],
+          ['Cost leader', cheapLeader]
         ].filter(entry => entry[1]);
-        recommendations.innerHTML = winners.map(entry => '<button class="recommendation-card" type="button" data-use-deployment="' + escapeText(entry[1].key) + '"><span class="pill">' + escapeText(entry[0]) + '</span><strong>' + escapeText(entry[1].modelDisplayName) + '</strong><span>' + escapeText(entry[1].targetDisplayName) + '</span><span class="muted">' + metricSummary(entry[1]) + '</span><span class="muted">' + entry[1].coverage + '% preference data coverage</span></button>').join('');
+        recommendations.innerHTML = winners.map(entry => '<button class="recommendation-card" type="button" data-use-deployment="' + escapeText(entry[1].key) + '"><span class="pill">' + escapeText(entry[0]) + '</span><strong>' + escapeText(entry[1].modelDisplayName) + '</strong><span>' + escapeText(entry[1].targetDisplayName) + '</span><span class="muted">' + metricSummary(entry[1]) + '</span><span class="muted">Fit ' + Math.round(entry[1].fitScore * 100) + ' · ' + entry[1].coverage + '% data coverage</span></button>').join('');
       };
       const setWeights = (intelligence, speed, cost) => {
         weights = { intelligence: Math.max(0, intelligence), speed: Math.max(0, speed), cost: Math.max(0, cost) };
@@ -2848,7 +2870,11 @@ function profileSelectionClientScript(deployments: ModelDeploymentSelectionView[
         const value = index ? contextValues[index - 1] : 0;
         contextOutput.value = value ? new Intl.NumberFormat(undefined, { notation: 'compact' }).format(value) + ' minimum' : 'No minimum';
       };
-      [contextInput, hostingInput, maxCostInput, ...domainInputs].forEach(input => input?.addEventListener('input', () => { updateContextOutput(); render(); }));
+      const updateCostOutput = () => {
+        const value = maximumCost();
+        maxCostOutput.value = isNumber(value) ? '$' + value.toFixed(2) + '/hr maximum' : 'No maximum';
+      };
+      [contextInput, hostingInput, maxCostInput, ...domainInputs, ...technicalInputs].forEach(input => input?.addEventListener('input', () => { updateContextOutput(); updateCostOutput(); render(); }));
       const snaps = [
         { x: 160, y: 28, weights: [1, 0, 0] }, { x: 296, y: 244, weights: [0, 1, 0] }, { x: 24, y: 244, weights: [0, 0, 1] },
         { x: 228, y: 136, weights: [1, 1, 0] }, { x: 92, y: 136, weights: [1, 0, 1] }, { x: 160, y: 244, weights: [0, 1, 1] },
@@ -2860,11 +2886,11 @@ function profileSelectionClientScript(deployments: ModelDeploymentSelectionView[
         const y = (event.clientY - bounds.top) / bounds.height * 280;
         const snapped = snaps.map(snap => ({ snap, distance: Math.hypot(snap.x - x, snap.y - y) })).sort((left, right) => left.distance - right.distance)[0];
         if (snapped && snapped.distance <= 24) { setWeights(...snapped.snap.weights); return; }
-        const quality = Math.max(0, Math.min(1, (244 - y) / 216));
-        const left = 24 + 136 * quality;
-        const right = 296 - 136 * quality;
+        const goodShare = Math.max(0, Math.min(1, (244 - y) / 216));
+        const left = 24 + 136 * goodShare;
+        const right = 296 - 136 * goodShare;
         const speedShare = right === left ? 0.5 : Math.max(0, Math.min(1, (x - left) / (right - left)));
-        setWeights(quality, (1 - quality) * speedShare, (1 - quality) * (1 - speedShare));
+        setWeights(goodShare, (1 - goodShare) * speedShare, (1 - goodShare) * (1 - speedShare));
       };
       triangle.addEventListener('pointerdown', event => { triangle.setPointerCapture(event.pointerId); updateFromPointer(event); });
       triangle.addEventListener('pointermove', event => { if (triangle.hasPointerCapture(event.pointerId)) updateFromPointer(event); });
@@ -2906,18 +2932,6 @@ function profileSelectionClientScript(deployments: ModelDeploymentSelectionView[
           render();
         } finally { button.disabled = false; }
       });
-      root.querySelector('#profile-wizard-run').addEventListener('click', () => {
-        const domain = root.querySelector('#profile-wizard-domain').value;
-        const response = root.querySelector('#profile-wizard-response').value;
-        const priority = root.querySelector('#profile-wizard-priority').value;
-        const budget = root.querySelector('#profile-wizard-budget').value;
-        domainInputs.forEach(input => { input.checked = Boolean(domain) && input.value === domain; });
-        maxCostInput.value = budget;
-        const presets = { balanced: [40, response === 'long' ? 45 : 35, response === 'short' ? 25 : 15], intelligence: [70, 20, 10], speed: [20, 70, 10], cost: [25, 20, 55] };
-        const selected = presets[priority] ?? presets.balanced;
-        setWeights(selected[0], selected[1], selected[2]);
-        recommendations.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      });
       const setMinimumContext = (value) => {
         if (!isNumber(value) || value <= 0) { contextInput.value = '0'; updateContextOutput(); return; }
         const index = contextValues.findIndex(candidate => candidate >= value);
@@ -2927,10 +2941,17 @@ function profileSelectionClientScript(deployments: ModelDeploymentSelectionView[
       const applyGuidance = guidance => {
         if (!guidance?.requirements || !guidance?.draft) return;
         setMinimumContext(guidance.requirements.minimumContextTokens);
-        maxCostInput.value = guidance.requirements.maximumHourlyUsd ?? '';
+        const advisedCost = guidance.requirements.maximumHourlyUsd;
+        if (!isNumber(advisedCost)) maxCostInput.value = '0';
+        else {
+          const index = costValues.findLastIndex(candidate => candidate <= advisedCost);
+          maxCostInput.value = String(index >= 0 ? index + 1 : 0);
+        }
         hostingInput.value = guidance.requirements.hostingMode ?? '';
         const advisedDomains = guidance.requirements.domains ?? [];
         domainInputs.forEach(input => { input.checked = advisedDomains.includes(input.value); });
+        const advisedTechnical = guidance.requirements.technicalCapabilities ?? [];
+        technicalInputs.forEach(input => { input.checked = advisedTechnical.includes(input.value); });
         const advisedWeights = guidance.requirements.weights ?? { intelligence: 1, speed: 1, cost: 1 };
         setWeights(advisedWeights.intelligence, advisedWeights.speed, advisedWeights.cost);
         if (guidance.draft.name) form.elements.name.value = guidance.draft.name;
@@ -2951,6 +2972,7 @@ function profileSelectionClientScript(deployments: ModelDeploymentSelectionView[
       };
       document.addEventListener('neuron:apply-profile-guidance', event => applyGuidance(event.detail));
       updateContextOutput();
+      updateCostOutput();
       setWeights(1, 1, 1);
     })();
   </script>`;
@@ -3029,7 +3051,7 @@ function profileTargetSelection(target: CapacityTarget, models: ModelDefinition[
     ? `<p class="muted">No models are known yet. This reserves the target and leaves its full discovered runtime available.</p>`
     : models.length === 1
       ? `<p class="muted">This target has one model, so NeurOn selects it automatically.</p><div class="models">${profileModelOption(target, models[0], selected, deploymentByKey.get(`${target.id}::${models[0].id}`))}</div>`
-      : `<p class="muted">Choose at least one model for this target.</p>${groupModelsByFamily(models).map(([family, familyModels]) => `<section class="family"><h3>${escapeHtml(family)}</h3><div class="models">${familyModels.map((model) => profileModelOption(target, model, selectedModelIds.includes(model.id), deploymentByKey.get(`${target.id}::${model.id}`))).join("")}</div></section>`).join("")}`;
+      : `<p class="muted">Choose at least one model for this target. Models reorder live as you move the triangle.</p><div class="models">${models.map((model) => profileModelOption(target, model, selectedModelIds.includes(model.id), deploymentByKey.get(`${target.id}::${model.id}`))).join("")}</div>`;
   return `<section class="target-status-card profile-target-selection" data-profile-target-card data-target-id="${escapeHtml(target.id)}">
     <div class="target-status-head"><label class="profile-target-toggle"><input type="checkbox" name="selectionTargetIds" value="${escapeHtml(target.id)}" data-profile-target ${selected ? "checked" : ""}><span><strong>${escapeHtml(target.displayName)}</strong><span class="muted"><code>${escapeHtml(target.id)}</code></span></span></label><span class="target-price">${targetCost === undefined ? "Cost unavailable" : `$${targetCost.toFixed(2)}/hr`}</span></div>
     <div data-profile-target-models>${modelContent}</div>
@@ -3048,13 +3070,15 @@ function profileModelOption(target: CapacityTarget, model: ModelDefinition, sele
   const context = contextTokens ? `<span class="pill" title="${escapeHtml(contextTitle)}">${escapeHtml(formatTokenCount(contextTokens))} context</span>` : "";
   const description = model.description ? `<div class="muted">${escapeHtml(model.description)}</div>` : "";
   const metrics = deployment ? profileModelMetrics(deployment) : "";
+  const capabilities = deployment?.technicalCapabilities.length ? `<span class="model-metrics">${deployment.technicalCapabilities.map((capability) => `<span class="metric" title="${escapeHtml(capability.title ?? "Advertised technical capability")}">${escapeHtml(domainLabel(capability.label))}</span>`).join("")}</span>` : "";
   const favorite = deployment ? `<button class="favorite-button" type="button" data-model-favorite data-target-id="${escapeHtml(target.id)}" data-model-id="${escapeHtml(model.id)}" aria-pressed="${String(Boolean(deployment.favorite))}" title="${deployment.favorite ? "Remove favorite" : "Favorite this deployment"}">${deployment.favorite ? "★" : "☆"}</button>` : "";
-  return `<label class="option" data-deployment-key="${escapeHtml(`${target.id}::${model.id}`)}"><input type="checkbox" name="selectionModels" value="${escapeHtml(value)}" data-profile-model ${selected ? "checked" : ""}><span class="model-body"><span class="model-head"><strong>${escapeHtml(model.displayName)}</strong><span>${context}${favorite}</span></span>${description}${metrics}<span class="copy-row">${scopedAlias ? copyChip(scopedAlias, "primary") : ""}${globalAlias && globalAlias !== scopedAlias ? copyChip(globalAlias) : ""}</span><span class="model-meta">Scoped route pins this target; the global route follows alias priority and fallback.</span></span></label>`;
+  return `<label class="option" data-deployment-key="${escapeHtml(`${target.id}::${model.id}`)}"><input type="checkbox" name="selectionModels" value="${escapeHtml(value)}" data-profile-model ${selected ? "checked" : ""}><span class="model-body"><span class="model-head"><strong>${escapeHtml(model.displayName)}</strong><span>${context}${favorite}</span></span><span class="pill" data-profile-fit-score></span>${description}${capabilities}${metrics}<span class="copy-row">${scopedAlias ? copyChip(scopedAlias, "primary") : ""}${globalAlias && globalAlias !== scopedAlias ? copyChip(globalAlias) : ""}</span><span class="model-meta">Scoped route pins this target; the global route follows alias priority and fallback.</span></span></label>`;
 }
 
 function profileModelMetrics(deployment: ModelDeploymentSelectionView): string {
   const metrics = [
-    deployment.intelligence === undefined ? "" : `<span class="metric">Good ${formatMetric(deployment.intelligence)}</span>`,
+    deployment.intelligence === undefined ? "" : `<span class="metric">Intelligence ${formatMetric(deployment.intelligence)}</span>`,
+    ...Object.entries(deployment.domains).map(([domain, score]) => `<span class="metric">${escapeHtml(domainLabel(domain))} ${formatMetric(score)}</span>`),
     deployment.performance?.decodeTokensPerSecond === undefined ? "" : `<span class="metric">Decode ${formatMetric(deployment.performance.decodeTokensPerSecond)} t/s</span>`,
     deployment.performance?.prefillTokensPerSecond === undefined ? "" : `<span class="metric">Prefill ${formatMetric(deployment.performance.prefillTokensPerSecond)} t/s</span>`,
     deployment.performance?.timeToFirstTokenSeconds === undefined ? "" : `<span class="metric">First token ${formatMetric(deployment.performance.timeToFirstTokenSeconds)}s</span>`,
@@ -3118,23 +3142,6 @@ function profilesForClient(profiles: ReservationProfile[], targets: Array<{ targ
 
 function primaryAliasesForProfile(profile: ReservationProfile, modelLookup: Record<string, { displayName: string; recommendedAlias: string }>): string[] {
   return Array.from(new Set(profile.selections.flatMap((selection) => selection.modelIds.map((modelId) => modelLookup[modelId]?.recommendedAlias ?? modelId)))).slice(0, 6);
-}
-
-function groupModelsByFamily(models: ModelDefinition[]): Array<[string, ModelDefinition[]]> {
-  const groups = new Map<string, ModelDefinition[]>();
-  for (const model of models) {
-    const family = model.modelFamily ?? inferModelFamily(model.displayName);
-    groups.set(family, [...(groups.get(family) ?? []), model]);
-  }
-  return Array.from(groups.entries());
-}
-
-function inferModelFamily(value: string): string {
-  const normalized = value.toLowerCase();
-  if (normalized.includes("gemma-4") || normalized.includes("gemma 4")) return "Gemma 4";
-  if (normalized.includes("qwen3.6") || normalized.includes("qwen-3.6") || normalized.includes("qwen 3.6")) return "Qwen 3.6";
-  if (normalized.includes("glm-4.7-flash") || normalized.includes("glm 4.7 flash")) return "GLM 4.7 Flash";
-  return "Other";
 }
 
 function aliasesForDisplay(model: ModelDefinition): string[] {

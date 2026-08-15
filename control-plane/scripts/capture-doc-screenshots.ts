@@ -19,8 +19,7 @@ const demoTarget: CapacityTarget = {
   hostingMode: "dedicated",
   aliasPriority: 10,
   healthUrl: "http://docs.invalid/health",
-  costEstimate: { hourlyUsd: 1.25 },
-  profileAdvisor: { modelId: "qwen-smol", reservationMinutes: 15, startupTimeoutSeconds: 60, requestTimeoutSeconds: 60 }
+  costEstimate: { hourlyUsd: 1.25 }
 };
 const demoModels: ModelDefinition[] = [{
   id: "qwen-smol",
@@ -28,6 +27,7 @@ const demoModels: ModelDefinition[] = [{
   aliases: ["qwen-smol"],
   contextLabel: "256k",
   contextWindowTokens: 256_000,
+  technicalCapabilities: [{ label: "tools", title: "Tool calling" }],
   targetIds: [demoTarget.id]
 }];
 const demoConfig: AppConfig = {
@@ -44,13 +44,12 @@ const demoConfig: AppConfig = {
       modelId: "qwen-smol",
       intelligence: 84,
       domains: { coding: 91, reasoning: 86 },
+      quantization: { format: "FP8", qualityRetentionPercent: 98.7, reference: "Synthetic reference" },
       provenance: { source: "Synthetic documentation fixture", version: "1" }
     }],
     deployments: [{
       targetId: "prefer-smol",
       modelId: "qwen-smol",
-      contextWindowTokens: 256_000,
-      quantization: { format: "FP8", qualityRetentionPercent: 98.7, reference: "Synthetic reference" },
       performance: { decodeTokensPerSecond: 78, prefillTokensPerSecond: 1_240, timeToFirstTokenSeconds: 0.42 },
       provenance: { source: "Synthetic documentation fixture", version: "1" }
     }]
@@ -81,6 +80,20 @@ try {
   await page.getByLabel("Username").fill("docs-user");
   await page.getByLabel("Password").fill("docs-demo-password");
   await page.getByRole("button", { name: "Sign in" }).click();
+  const assistantSaved = await page.evaluate(async () => {
+    const response = await fetch("/api/admin/assistant-config", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ targetId: "prefer-smol", modelId: "qwen-smol", reservationMinutes: 15, keepaliveMinutes: 5, requestTimeoutSeconds: 60 })
+    });
+    return response.ok;
+  });
+  if (!assistantSaved) throw new Error("Could not seed the isolated documentation Assistant configuration");
+  await page.goto(`${baseUrl}/admin/assistant`);
+  await page.getByRole("heading", { name: "Assistant", exact: true }).waitFor();
+  await page.screenshot({ path: path.join(outputDirectory, "assistant-config.png") });
+
+  await page.goto(`${baseUrl}/welcome`);
   await page.getByRole("heading", { name: "Shared model capacity without paying for idle time" }).waitFor();
   await page.screenshot({ path: path.join(outputDirectory, "welcome.png") });
 

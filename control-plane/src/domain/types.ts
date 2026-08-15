@@ -252,6 +252,8 @@ export interface ConfiguredModel {
   modelFamily?: string;
   aliases?: string[];
   tags?: ModelTag[];
+  /** Binary, technically advertised features such as vision or tool use. */
+  technicalCapabilities?: ModelTag[];
   description?: string;
   backendModelIds?: string[];
   contextWindowTokens?: number;
@@ -299,18 +301,17 @@ export interface CapacityTarget {
   costEstimate?: TargetCostEstimateConfig;
   hassleOff?: HassleOffTargetPolicy;
   activationPolicy?: TargetActivationPolicy;
-  /** Durable, operator-selected deployment used by the profile assistant. */
-  profileAdvisor?: ProfileAdvisorTargetConfig;
 }
 
-export interface ProfileAdvisorTargetConfig {
+/** Singleton durable configuration for NeurOn's in-application assistant. */
+export interface AssistantConfig {
+  id: "default";
+  targetId: string;
   modelId: string;
-  /** Length of the synthetic system reservation that keeps the advisor available. */
-  reservationMinutes?: number;
-  /** Maximum time a user request waits for a cold advisor target to become healthy. */
-  startupTimeoutSeconds?: number;
-  /** Maximum time allowed for the advisor model response after the target is ready. */
-  requestTimeoutSeconds?: number;
+  reservationMinutes: number;
+  keepaliveMinutes: number;
+  requestTimeoutSeconds: number;
+  updatedAt: Date;
 }
 
 export interface TargetCostEstimateConfig {
@@ -345,6 +346,8 @@ export interface ModelDefinition {
   modelFamily?: string;
   aliases: string[];
   tags?: ModelTag[];
+  /** Binary, technically advertised features such as vision or tool use. */
+  technicalCapabilities?: ModelTag[];
   targetIds: string[];
   description?: string;
   backendModelIds?: string[];
@@ -366,7 +369,14 @@ export interface ModelMetricProvenance {
 export interface ModelCapabilityMetadata {
   modelId: string;
   intelligence?: number;
+  /** Scored subject-matter strengths used to refine intelligence ranking. */
   domains?: Record<string, number>;
+  /** Artifact-level quantization facts. */
+  quantization?: {
+    format: string;
+    qualityRetentionPercent?: number;
+    reference?: string;
+  };
   provenance?: ModelMetricProvenance;
 }
 
@@ -382,7 +392,9 @@ export interface ModelDeploymentPerformance {
 export interface ModelDeploymentMetadata {
   targetId: string;
   modelId: string;
+  /** @deprecated Context is owned by target/model configuration or discovery. */
   contextWindowTokens?: number;
+  /** @deprecated Quantization is model/artifact metadata; retained for read compatibility. */
   quantization?: {
     format: string;
     qualityRetentionPercent?: number;
@@ -436,6 +448,13 @@ export interface RuntimeDiscoveredModel {
   id?: string;
   aliases?: string[];
   tags?: Array<string | { label?: string; title?: string }>;
+  capabilities?: unknown;
+  input_modalities?: unknown;
+  output_modalities?: unknown;
+  modalities?: unknown;
+  supports_vision?: unknown;
+  supports_tools?: unknown;
+  supports_tool_calls?: unknown;
   meta?: RuntimeModelMeta | null;
 }
 

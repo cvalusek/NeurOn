@@ -1,4 +1,4 @@
-import type { ApiKey, AuthenticatedUser, AuthMethod, CapacityProviderDefinition, CapacityProviderResource, CapacityProviderStatus, CapacityTarget, ModelCapabilityMetadata, ModelDeploymentMetadata, ModelFavorite, Reservation, ReservationProfile, RuntimeDiscoveredModel, StoredModelCapabilityMetadata, StoredModelDeploymentMetadata, TargetCostEstimateConfig, TargetModelDiscoveryRecord, TargetProvisioningJob, TargetActivation, TargetActivationReservation, TargetStatus } from "./types.js";
+import type { ApiKey, AssistantConfig, AuthenticatedUser, AuthMethod, CapacityProviderDefinition, CapacityProviderResource, CapacityProviderStatus, CapacityTarget, ModelCapabilityMetadata, ModelDeploymentMetadata, ModelFavorite, Reservation, ReservationProfile, RuntimeDiscoveredModel, StoredModelCapabilityMetadata, StoredModelDeploymentMetadata, TargetCostEstimateConfig, TargetModelDiscoveryRecord, TargetProvisioningJob, TargetActivation, TargetActivationReservation, TargetStatus } from "./types.js";
 
 export interface CapacityProvider {
   provisionTarget(target: CapacityTarget): Promise<Partial<CapacityTarget> | void>;
@@ -108,6 +108,12 @@ export interface TrafficSource {
       timeToFirstTokenSeconds?: number;
     };
   }>>;
+}
+
+export interface AssistantConfigRepository {
+  get(): Promise<AssistantConfig | undefined>;
+  save(input: Omit<AssistantConfig, "id" | "updatedAt"> & { updatedAt?: Date }): Promise<AssistantConfig>;
+  clear(): Promise<boolean>;
 }
 
 export interface ModelMetadataRepository {

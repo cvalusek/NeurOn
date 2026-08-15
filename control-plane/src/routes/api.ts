@@ -78,8 +78,9 @@ export function registerApiRoutes(
       const favoriteKeys = new Set(favorites.map((value) => `${value.targetId}::${value.modelId}`));
       return {
         domains: modelSelection.availableDomains(),
+        technicalCapabilities: modelSelection.availableTechnicalCapabilities(),
         deployments: modelSelection.listDeployments(costs).map((deployment) => ({ ...deployment, ...usageByKey.get(deployment.key), favorite: favoriteKeys.has(deployment.key) })),
-        advisorEnabled: profileAdvisor.isConfigured()
+        advisorEnabled: await profileAdvisor.isConfigured()
       };
     }
   );
@@ -109,14 +110,14 @@ export function registerApiRoutes(
 
   app.get("/api/profile-advisor/status", async () => {
     try {
-      const backend = targetService.profileAdvisorBackend();
+      const backend = await profileAdvisor.configuration();
       return {
         enabled: Boolean(backend) && !healthInfo.maintenanceMode,
         reason: healthInfo.maintenanceMode ? "maintenance_mode" : backend ? undefined : "not_configured",
         backend: backend ? { targetId: backend.target.id, targetDisplayName: backend.target.displayName, modelId: backend.config.modelId } : null
       };
     } catch (error) {
-      return { enabled: false, error: error instanceof Error ? error.message : "Profile advisor configuration is invalid" };
+      return { enabled: false, error: error instanceof Error ? error.message : "Assistant configuration is invalid" };
     }
   });
 
@@ -137,8 +138,13 @@ export function registerApiRoutes(
   app.put("/api/admin/model-metadata/models/:modelId", async (request, reply) => {
     try {
       const { modelId } = z.object({ modelId: z.string().min(1) }).parse(request.params);
-      const body = z.object({ intelligence: z.number().min(0).max(100).optional(), domains: z.record(z.number().min(0).max(100)).optional(), provenance: z.object({ source: z.string().min(1), sourceUrl: z.string().url().optional(), sourceModelId: z.string().optional(), retrievedAt: z.string().datetime().optional(), version: z.string().optional(), notes: z.string().optional() }).optional() }).parse(request.body);
-      if ((body.intelligence !== undefined || Object.keys(body.domains ?? {}).length > 0) && !body.provenance) throw new Error("Model ratings require a source");
+      const body = z.object({
+        intelligence: z.number().min(0).max(100).optional(),
+        domains: z.record(z.number().min(0).max(100)).optional(),
+        quantization: z.object({ format: z.string().min(1), qualityRetentionPercent: z.number().min(0).max(100).optional(), reference: z.string().optional() }).optional(),
+        provenance: z.object({ source: z.string().min(1), sourceUrl: z.string().url().optional(), sourceModelId: z.string().optional(), retrievedAt: z.string().datetime().optional(), version: z.string().optional(), notes: z.string().optional() }).optional()
+      }).parse(request.body);
+      if ((body.intelligence !== undefined || Object.keys(body.domains ?? {}).length > 0 || body.quantization) && !body.provenance) throw new Error("Model ratings and artifact facts require a source");
       await modelSelection.upsertCapability({ modelId, ...body });
       return { ok: true };
     } catch (error) { return sendError(reply, error); }
@@ -147,12 +153,10 @@ export function registerApiRoutes(
     try {
       const params = z.object({ targetId: z.string().min(1), modelId: z.string().min(1) }).parse(request.params);
       const body = z.object({
-        contextWindowTokens: z.number().int().positive().optional(),
-        quantization: z.object({ format: z.string().min(1), qualityRetentionPercent: z.number().min(0).max(100).optional(), reference: z.string().optional() }).optional(),
         performance: z.object({ decodeTokensPerSecond: z.number().positive().optional(), prefillTokensPerSecond: z.number().positive().optional(), timeToFirstTokenSeconds: z.number().positive().optional(), measuredAt: z.string().datetime().optional(), sampleCount: z.number().int().positive().optional() }).optional(),
         provenance: z.object({ source: z.string().min(1), sourceUrl: z.string().url().optional(), sourceModelId: z.string().optional(), retrievedAt: z.string().datetime().optional(), version: z.string().optional(), notes: z.string().optional() }).optional()
       }).parse(request.body);
-      if ((body.contextWindowTokens !== undefined || body.quantization || body.performance) && !body.provenance) throw new Error("Deployment measurements require a source");
+      if (body.performance && !body.provenance) throw new Error("Deployment measurements require a source");
       await modelSelection.upsertDeployment({ ...params, ...body });
       return { ok: true };
     } catch (error) { return sendError(reply, error); }
@@ -165,30 +169,30 @@ export function registerApiRoutes(
       return { ok: true, targetId: target.id, modelId: params.modelId, aliases };
     } catch (error) { return sendError(reply, error); }
   });
-  app.get("/api/admin/profile-advisor-backend", async (_request, reply) => {
+  app.get("/api/admin/assistant-config", async (_request, reply) => {
     try {
-      const backend = targetService.profileAdvisorBackend();
-      return { backend: backend ? { targetId: backend.target.id, targetDisplayName: backend.target.displayName, ...backend.config } : null };
+      const backend = await profileAdvisor.configuration();
+      return { backend: backend ? { ...backend.config, targetDisplayName: backend.target.displayName } : null };
     } catch (error) { return sendError(reply, error); }
   });
-  app.put("/api/admin/profile-advisor-backend", async (request, reply) => {
+  app.put("/api/admin/assistant-config", async (request, reply) => {
     try {
       const body = z.object({
         targetId: z.string().min(1).nullable(),
         modelId: z.string().min(1).nullable(),
-        reservationMinutes: z.number().int().min(1).max(60).optional(),
-        startupTimeoutSeconds: z.number().int().min(1).max(1800).optional(),
-        requestTimeoutSeconds: z.number().int().min(1).max(300).optional()
+        reservationMinutes: z.number().int().min(1).max(720),
+        keepaliveMinutes: z.number().int().min(1).max(60),
+        requestTimeoutSeconds: z.number().int().min(1).max(600)
       }).strict().parse(request.body);
       if ((body.targetId === null) !== (body.modelId === null)) throw new Error("Target and model must both be selected or both be cleared");
-      await targetService.setProfileAdvisorBackend(body.targetId && body.modelId ? {
+      const backend = await profileAdvisor.saveConfiguration(body.targetId && body.modelId ? {
         targetId: body.targetId,
         modelId: body.modelId,
         reservationMinutes: body.reservationMinutes,
-        startupTimeoutSeconds: body.startupTimeoutSeconds,
+        keepaliveMinutes: body.keepaliveMinutes,
         requestTimeoutSeconds: body.requestTimeoutSeconds
       } : undefined);
-      return { ok: true, backend: targetService.profileAdvisorBackend() ? { targetId: body.targetId, modelId: body.modelId } : null };
+      return { ok: true, backend: backend ? { targetId: backend.targetId, modelId: backend.modelId } : null };
     } catch (error) { return sendError(reply, error); }
   });
   app.get("/api/admin/usage", async (request) => {
@@ -225,7 +229,7 @@ export function registerApiRoutes(
               properties: {
                 path: { type: "string", maxLength: 500 },
                 title: { type: "string", maxLength: 200 },
-                surface: { type: "string", enum: ["home", "profiles", "profile_create", "profile_edit", "guide", "client_setup", "api_keys", "admin_model_data", "admin_targets", "admin_other", "other"] },
+                surface: { type: "string", enum: ["home", "profiles", "profile_create", "profile_edit", "guide", "client_setup", "api_keys", "admin_model_data", "admin_assistant", "admin_targets", "admin_other", "other"] },
                 startControls: { type: "object" },
                 profileRequirements: { type: "object" },
                 clientProfileId: { type: "string", maxLength: 200 }
@@ -238,7 +242,7 @@ export function registerApiRoutes(
       }
     },
     async (request, reply) => {
-      if (!profileAdvisor.isConfigured()) return reply.code(503).send({ error: "AI profile guidance is not configured" });
+      if (!(await profileAdvisor.isConfigured())) return reply.code(503).send({ error: "AI profile guidance is not configured" });
       try {
         const body = z.object({
           request: z.string().trim().min(3).max(2_000),
@@ -252,7 +256,7 @@ export function registerApiRoutes(
           screen: z.object({
             path: z.string().min(1).max(500),
             title: z.string().max(200).optional(),
-            surface: z.enum(["home", "profiles", "profile_create", "profile_edit", "guide", "client_setup", "api_keys", "admin_model_data", "admin_targets", "admin_other", "other"]),
+            surface: z.enum(["home", "profiles", "profile_create", "profile_edit", "guide", "client_setup", "api_keys", "admin_model_data", "admin_assistant", "admin_targets", "admin_other", "other"]),
             startControls: z.object({
               selectedProfileId: z.string().max(200).optional(),
               durationMinutes: z.number().int().min(1).max(720).optional(),
@@ -263,6 +267,7 @@ export function registerApiRoutes(
               maximumHourlyUsd: z.number().min(0).max(1_000_000).optional(),
               hostingMode: z.enum(["dedicated", "multi-model"]).optional(),
               domains: z.array(z.string().min(1).max(80)).max(20).optional(),
+              technicalCapabilities: z.array(z.string().min(1).max(80)).max(20).optional(),
               weights: z.object({ intelligence: z.number().min(0).max(1), speed: z.number().min(0).max(1), cost: z.number().min(0).max(1) }).strict().optional()
             }).strict().optional(),
             clientProfileId: z.string().max(200).optional()
@@ -283,7 +288,7 @@ export function registerApiRoutes(
         const invalidRequest = error instanceof z.ZodError;
         const message = invalidRequest
           ? "Describe the workload in 3 to 2,000 characters"
-          : error instanceof Error ? error.message : "Profile advisor failed";
+          : error instanceof Error ? error.message : "Assistant failed";
         return reply.code(invalidRequest ? 400 : 502).send({ error: message });
       }
     }

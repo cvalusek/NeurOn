@@ -6,8 +6,9 @@ import pg from "pg";
 import { migratePostgresSchema, POSTGRES_DATA_TABLES, POSTGRES_SCHEMA_VERSION, readPostgresSchemaState, validatePostgresSchema } from "./postgresSchema.js";
 import { parseReservationTargetSelections } from "../domain/reservationSelections.js";
 import { parseModelSelectionCatalog } from "../config/modelSelectionConfig.js";
+import { assistantConfigFromLegacyTarget, withoutLegacyAssistant } from "./assistantConfigUtils.js";
 
-export const SQLITE_SOURCE_SCHEMA_VERSION = 1;
+export const SQLITE_SOURCE_SCHEMA_VERSION = 2;
 
 export const MIGRATION_ENTITY_NAMES = [
   "reservations",
@@ -22,7 +23,8 @@ export const MIGRATION_ENTITY_NAMES = [
   "targetActivationReservations",
   "modelCapabilities",
   "modelDeployments",
-  "modelFavorites"
+  "modelFavorites",
+  "assistantConfig"
 ] as const;
 
 export type MigrationEntityName = typeof MIGRATION_ENTITY_NAMES[number];
@@ -78,7 +80,8 @@ const sqliteLegacyActivationColumns: Record<string, string[]> = {
 const sqliteAdditiveExpectedColumns: Record<string, string[]> = {
   model_capability_metadata: ["model_id", "metadata_json", "updated_at"],
   model_deployment_metadata: ["target_id", "model_id", "metadata_json", "updated_at"],
-  model_favorites: ["username", "target_id", "model_id", "created_at"]
+  model_favorites: ["username", "target_id", "model_id", "created_at"],
+  assistant_config: ["id", "target_id", "model_id", "reservation_minutes", "keepalive_minutes", "request_timeout_seconds", "updated_at"]
 };
 
 const sqliteIntegerColumns = new Set([
@@ -87,7 +90,10 @@ const sqliteIntegerColumns = new Set([
   "reservation_profiles.default_duration_minutes",
   "reservation_profiles.default_keepalive_minutes",
   "auth_methods.enabled",
-  "capacity_providers.provisioning_enabled"
+  "capacity_providers.provisioning_enabled",
+  "assistant_config.reservation_minutes",
+  "assistant_config.keepalive_minutes",
+  "assistant_config.request_timeout_seconds"
 ]);
 const sqliteRealColumns = new Set([
   "target_activations.estimated_hourly_cost_usd",
@@ -125,7 +131,8 @@ const sqlitePrimaryKeyColumns = new Set([
   "target_creation_jobs.id", "target_model_discoveries.target_id", "target_activations.id", "target_activation_reservations.id",
   "target_runs.id", "target_run_reservation_links.id", "model_capability_metadata.model_id",
   "model_deployment_metadata.target_id", "model_deployment_metadata.model_id",
-  "model_favorites.username", "model_favorites.target_id", "model_favorites.model_id"
+  "model_favorites.username", "model_favorites.target_id", "model_favorites.model_id",
+  "assistant_config.id"
 ]);
 
 export async function createConsistentSqliteBackup(
@@ -263,6 +270,18 @@ function readSqliteDataset(sqlitePath: string): MigrationDataset {
         ? rows(db, "select * from target_run_reservation_links order by id asc").map((row) => sqliteActivationReservationRow(row, "target_run_id"))
         : [])
     ].sort(compareId);
+    const capacityTargetRows = rows(db, "select * from capacity_targets order by id asc").map((row) => ({ id: text(row.id), target: json(row.target_json) }));
+    const legacyAssistantConfigs = capacityTargetRows.flatMap((row) => {
+      const config = assistantConfigFromLegacyTarget(row.target, row.id, new Date(0));
+      return config ? [config] : [];
+    });
+    if (legacyAssistantConfigs.length > 1) throw new Error("SQLite source contains more than one legacy assistant configuration");
+    const storedAssistantConfigs = optionalRows(db, "assistant_config", "select * from assistant_config order by id asc").map(sqliteAssistantConfigRow);
+    if (storedAssistantConfigs.length > 1) throw new Error("SQLite source contains more than one assistant configuration");
+    if (storedAssistantConfigs[0] && legacyAssistantConfigs[0] && !sameAssistantSelection(storedAssistantConfigs[0], legacyAssistantConfigs[0])) {
+      throw new Error("SQLite stored and legacy assistant configuration disagree");
+    }
+    const assistantConfig = storedAssistantConfigs.length ? storedAssistantConfigs : legacyAssistantConfigs.map(assistantConfigDatasetRow);
     const dataset: MigrationDataset = {
       reservations: rows(db, "select * from reservations order by id asc").map((row) => ({
         id: text(row.id), username: text(row.username), apiKeyName: nullableText(row.api_key_name), profileId: nullableText(row.profile_id), profileName: nullableText(row.profile_name),
@@ -282,20 +301,41 @@ function readSqliteDataset(sqlitePath: string): MigrationDataset {
       capacityProviders: rows(db, "select * from capacity_providers order by id asc").map((row) => ({
         id: text(row.id), displayName: text(row.display_name), type: text(row.type), provisioningEnabled: boolean(row.provisioning_enabled), config: nullableJson(row.config), credentialId: nullableText(row.credential_id)
       })),
-      capacityTargets: rows(db, "select * from capacity_targets order by id asc").map((row) => ({ id: text(row.id), target: json(row.target_json) })),
+      capacityTargets: capacityTargetRows.map((row) => ({ ...row, target: withoutLegacyAssistant(row.target) })),
       targetProvisioningJobs: rows(db, "select * from target_creation_jobs order by id asc").map((row) => ({ id: text(row.id), targetId: text(row.target_id), job: json(row.job_json) })),
       targetModelDiscoveries: rows(db, "select * from target_model_discoveries order by target_id asc").map((row) => ({ targetId: text(row.target_id), discovery: json(row.discovery_json), discoveredAt: iso(row.discovered_at) })),
       targetActivations,
       targetActivationReservations,
       modelCapabilities: optionalRows(db, "model_capability_metadata", "select * from model_capability_metadata order by model_id asc").map((row) => ({ modelId: text(row.model_id), metadata: json(row.metadata_json), updatedAt: iso(row.updated_at) })),
       modelDeployments: optionalRows(db, "model_deployment_metadata", "select * from model_deployment_metadata order by target_id asc, model_id asc").map((row) => ({ targetId: text(row.target_id), modelId: text(row.model_id), metadata: json(row.metadata_json), updatedAt: iso(row.updated_at) })),
-      modelFavorites: optionalRows(db, "model_favorites", "select * from model_favorites order by username asc, target_id asc, model_id asc").map((row) => ({ username: text(row.username), targetId: text(row.target_id), modelId: text(row.model_id), createdAt: iso(row.created_at) }))
+      modelFavorites: optionalRows(db, "model_favorites", "select * from model_favorites order by username asc, target_id asc, model_id asc").map((row) => ({ username: text(row.username), targetId: text(row.target_id), modelId: text(row.model_id), createdAt: iso(row.created_at) })),
+      assistantConfig
     };
     validateDatasetSemantics(dataset);
     return dataset;
   } finally {
     db.close();
   }
+}
+
+function sqliteAssistantConfigRow(row: Record<string, unknown>): Record<string, unknown> {
+  return {
+    id: text(row.id), targetId: text(row.target_id), modelId: text(row.model_id),
+    reservationMinutes: number(row.reservation_minutes), keepaliveMinutes: number(row.keepalive_minutes),
+    requestTimeoutSeconds: number(row.request_timeout_seconds), updatedAt: iso(row.updated_at)
+  };
+}
+
+function assistantConfigDatasetRow(config: NonNullable<ReturnType<typeof assistantConfigFromLegacyTarget>>): Record<string, unknown> {
+  return {
+    id: config.id, targetId: config.targetId, modelId: config.modelId,
+    reservationMinutes: config.reservationMinutes, keepaliveMinutes: config.keepaliveMinutes,
+    requestTimeoutSeconds: config.requestTimeoutSeconds, updatedAt: config.updatedAt.toISOString()
+  };
+}
+
+function sameAssistantSelection(left: Record<string, unknown>, right: NonNullable<ReturnType<typeof assistantConfigFromLegacyTarget>>): boolean {
+  return left.targetId === right.targetId && left.modelId === right.modelId;
 }
 
 function sqliteActivationRow(row: Record<string, unknown>): Record<string, unknown> {
@@ -340,6 +380,7 @@ async function readPostgresDataset(client: pg.PoolClient): Promise<MigrationData
   const modelCapabilities = await client.query("select * from model_capability_metadata order by model_id asc");
   const modelDeployments = await client.query("select * from model_deployment_metadata order by target_id asc, model_id asc");
   const modelFavorites = await client.query("select * from model_favorites order by username asc, target_id asc, model_id asc");
+  const assistantConfig = await client.query("select * from assistant_config order by id asc");
   return {
     reservations: reservations.rows.map((row) => ({
       id: text(row.id), username: text(row.username), apiKeyName: nullableText(row.api_key_name), profileId: nullableText(row.profile_id), profileName: nullableText(row.profile_name),
@@ -370,7 +411,8 @@ async function readPostgresDataset(client: pg.PoolClient): Promise<MigrationData
     })),
     modelCapabilities: modelCapabilities.rows.map((row) => ({ modelId: text(row.model_id), metadata: jsonObject(row.metadata_json), updatedAt: iso(row.updated_at) })),
     modelDeployments: modelDeployments.rows.map((row) => ({ targetId: text(row.target_id), modelId: text(row.model_id), metadata: jsonObject(row.metadata_json), updatedAt: iso(row.updated_at) })),
-    modelFavorites: modelFavorites.rows.map((row) => ({ username: text(row.username), targetId: text(row.target_id), modelId: text(row.model_id), createdAt: iso(row.created_at) }))
+    modelFavorites: modelFavorites.rows.map((row) => ({ username: text(row.username), targetId: text(row.target_id), modelId: text(row.model_id), createdAt: iso(row.created_at) })),
+    assistantConfig: assistantConfig.rows.map(sqliteAssistantConfigRow)
   };
 }
 
@@ -429,6 +471,12 @@ async function importDataset(client: pg.PoolClient, dataset: MigrationDataset): 
   }
   for (const row of dataset.modelFavorites) {
     await client.query("insert into model_favorites (username, target_id, model_id, created_at) values ($1,$2,$3,$4)", [row.username, row.targetId, row.modelId, row.createdAt]);
+  }
+  for (const row of dataset.assistantConfig) {
+    await client.query(
+      "insert into assistant_config (id, target_id, model_id, reservation_minutes, keepalive_minutes, request_timeout_seconds, updated_at) values ($1,$2,$3,$4,$5,$6,$7)",
+      [row.id, row.targetId, row.modelId, row.reservationMinutes, row.keepaliveMinutes, row.requestTimeoutSeconds, row.updatedAt]
+    );
   }
 }
 
@@ -514,6 +562,16 @@ function validateDatasetSemantics(dataset: MigrationDataset): void {
     return row.metadata;
   });
   parseModelSelectionCatalog({ schemaVersion: 1, models: capabilities, deployments });
+  if (dataset.assistantConfig.length > 1) throw new Error("SQLite source contains more than one assistant configuration");
+  const targetIds = new Set(dataset.capacityTargets.map((row) => String(row.id)));
+  for (const row of dataset.assistantConfig) {
+    if (row.id !== "default" || !targetIds.has(String(row.targetId)) || typeof row.modelId !== "string" || !row.modelId) {
+      throw new Error("SQLite source contains incompatible assistant configuration");
+    }
+    if (!boundedInteger(row.reservationMinutes, 1, 720) || !boundedInteger(row.keepaliveMinutes, 1, 60) || !boundedInteger(row.requestTimeoutSeconds, 1, 600)) {
+      throw new Error("SQLite source contains out-of-range assistant configuration");
+    }
+  }
   if (dataset.reservations.some((row) => !reservationStatuses.has(String(row.status)))) {
     throw new Error("SQLite source contains an unsupported reservation status");
   }
@@ -557,6 +615,10 @@ function validateDatasetSemantics(dataset: MigrationDataset): void {
     if (linkKeys.has(key)) throw new Error("SQLite source contains duplicate target activation reservation links");
     linkKeys.add(key);
   }
+}
+
+function boundedInteger(value: unknown, minimum: number, maximum: number): boolean {
+  return typeof value === "number" && Number.isInteger(value) && value >= minimum && value <= maximum;
 }
 
 function verifyDatasets(source: MigrationDataset, destination: MigrationDataset): void {

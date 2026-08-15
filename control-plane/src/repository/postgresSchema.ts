@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import type pg from "pg";
 
-export const POSTGRES_SCHEMA_VERSION = 3;
+export const POSTGRES_SCHEMA_VERSION = 4;
 
 export const POSTGRES_DATA_TABLES = [
   "reservations",
@@ -16,7 +16,8 @@ export const POSTGRES_DATA_TABLES = [
   "target_activation_reservations",
   "model_capability_metadata",
   "model_deployment_metadata",
-  "model_favorites"
+  "model_favorites",
+  "assistant_config"
 ] as const;
 
 const schemaVersionOneSql = `
@@ -161,10 +162,72 @@ const schemaVersionThreeSql = `
   create index if not exists idx_model_favorites_username on model_favorites(username, created_at);
 `;
 
+const schemaVersionFourSql = `
+  create table if not exists assistant_config (
+    id text primary key check (id = 'default'),
+    target_id text not null,
+    model_id text not null,
+    reservation_minutes integer not null check (reservation_minutes between 1 and 720),
+    keepalive_minutes integer not null check (keepalive_minutes between 1 and 60),
+    request_timeout_seconds integer not null check (request_timeout_seconds between 1 and 600),
+    updated_at timestamptz not null
+  );
+
+  do $$
+  declare
+    legacy_count integer;
+    legacy_target_id text;
+    legacy_model_id text;
+    legacy_reservation_minutes integer;
+    legacy_request_timeout_seconds integer;
+  begin
+    select count(*)::integer into legacy_count
+    from capacity_targets
+    where target_json ? 'profileAdvisor';
+    if legacy_count > 1 then
+      raise exception 'More than one legacy target contains assistant configuration';
+    end if;
+    if legacy_count = 1 then
+      select
+        id,
+        target_json #>> '{profileAdvisor,modelId}',
+        coalesce((target_json #>> '{profileAdvisor,reservationMinutes}')::integer, 15),
+        coalesce((target_json #>> '{profileAdvisor,requestTimeoutSeconds}')::integer, 120)
+      into legacy_target_id, legacy_model_id, legacy_reservation_minutes, legacy_request_timeout_seconds
+      from capacity_targets
+      where target_json ? 'profileAdvisor';
+      if legacy_model_id is null or btrim(legacy_model_id) = '' then
+        raise exception 'Legacy assistant configuration has no model';
+      end if;
+      if exists (select 1 from assistant_config where id = 'default') then
+        if not exists (
+          select 1 from assistant_config
+          where id = 'default' and target_id = legacy_target_id and model_id = legacy_model_id
+        ) then
+          raise exception 'Stored and legacy assistant configuration disagree';
+        end if;
+      else
+        insert into assistant_config (
+          id, target_id, model_id, reservation_minutes, keepalive_minutes,
+          request_timeout_seconds, updated_at
+        ) values (
+          'default', legacy_target_id, legacy_model_id, legacy_reservation_minutes,
+          least(60, legacy_reservation_minutes), legacy_request_timeout_seconds, now()
+        );
+      end if;
+    end if;
+  end $$;
+
+  update capacity_targets
+  set target_json = target_json - 'profileAdvisor'
+  where target_json ? 'profileAdvisor';
+`;
+
 const migrations = [
   { version: 1, name: "initial-centralized-schema", sql: schemaVersionOneSql },
   { version: 2, name: "reservation-target-selections", sql: schemaVersionTwoSql },
-  { version: 3, name: "model-selection-metadata-and-favorites", sql: schemaVersionThreeSql }
+  { version: 3, name: "model-selection-metadata-and-favorites", sql: schemaVersionThreeSql },
+  { version: 4, name: "independent-assistant-configuration", sql: schemaVersionFourSql }
 ] as const;
 
 const expectedColumns: Record<string, Record<string, { type: string; nullable: boolean }>> = {
@@ -201,6 +264,10 @@ const expectedColumns: Record<string, Record<string, { type: string; nullable: b
   model_capability_metadata: { model_id: required("text"), metadata_json: required("jsonb"), updated_at: required("timestamptz") },
   model_deployment_metadata: { target_id: required("text"), model_id: required("text"), metadata_json: required("jsonb"), updated_at: required("timestamptz") },
   model_favorites: { username: required("text"), target_id: required("text"), model_id: required("text"), created_at: required("timestamptz") },
+  assistant_config: {
+    id: required("text"), target_id: required("text"), model_id: required("text"), reservation_minutes: required("int4"),
+    keepalive_minutes: required("int4"), request_timeout_seconds: required("int4"), updated_at: required("timestamptz")
+  },
   neuron_schema_migrations: {
     version: required("int4"), name: required("text"), checksum: required("text"), applied_at: required("timestamptz")
   },

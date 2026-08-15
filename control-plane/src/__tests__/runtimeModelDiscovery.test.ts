@@ -71,6 +71,19 @@ describe("runtime model discovery synchronization", () => {
     expect(catalog.listModelsForTarget(target.id).map((model) => model.id)).toEqual(["gemma-4-e2b"]);
     expect(reportBackendSyncError).toHaveBeenCalledWith(target, expect.objectContaining({ message: "LiteLLM unavailable" }));
   });
+
+  it("records advertised technical capabilities as binary model flags", async () => {
+    const target: CapacityTarget = { id: "capabilities", displayName: "Capabilities", provider: "docker", modelIds: [], apiUrl: "http://runtime.invalid/v1" };
+    const catalog = new ModelCatalog([], [target]);
+    const discovery = new RuntimeModelDiscovery(catalog);
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({
+      data: [{ id: "multimodal", capabilities: ["vision", "tool_calling"], modalities: ["text", "image"] }]
+    }), { status: 200, headers: { "content-type": "application/json" } })));
+
+    await discovery.refreshTarget(target);
+
+    expect(catalog.getModel("multimodal")?.technicalCapabilities?.map((capability) => capability.label).sort()).toEqual(["tools", "vision"]);
+  });
 });
 
 describe("runtime model discovery lifecycle coordination", () => {

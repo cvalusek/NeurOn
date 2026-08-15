@@ -30,6 +30,7 @@ export interface ModelDeploymentSelectionView {
   modelDisplayName: string;
   modelFamily?: string;
   aliases: string[];
+  technicalCapabilities: Array<{ label: string; title?: string }>;
   hostingMode?: "dedicated" | "multi-model";
   contextWindowTokens?: number;
   contextSource?: "operator" | "runtime" | "runtime-shared" | "configured";
@@ -53,6 +54,7 @@ export interface ModelSelectionRequirements {
   minimumContextTokens?: number;
   maximumHourlyUsd?: number;
   domains?: string[];
+  technicalCapabilities?: string[];
   hostingMode?: "dedicated" | "multi-model";
   weights: {
     intelligence: number;
@@ -64,7 +66,7 @@ export interface ModelSelectionRequirements {
 export interface RankedModelDeployment extends ModelDeploymentSelectionView {
   fitScore: number;
   dataCoveragePercent: number;
-  qualityScore?: number;
+  intelligenceScore?: number;
   speedScore?: number;
   costScore?: number;
 }
@@ -146,6 +148,10 @@ export class ModelSelectionService {
     return Array.from(new Set(Array.from(this.capabilities.values()).flatMap((metadata) => Object.keys(metadata.domains ?? {})))).sort();
   }
 
+  availableTechnicalCapabilities(): string[] {
+    return Array.from(new Set(this.catalog.listModels().flatMap((model) => (model.technicalCapabilities ?? []).map((capability) => capability.label)))).sort();
+  }
+
   catalogConfig(): ModelSelectionCatalogConfig {
     return {
       schemaVersion: 1,
@@ -191,14 +197,15 @@ export class ModelSelectionService {
           modelDisplayName: model.displayName,
           modelFamily: model.modelFamily,
           aliases: this.catalog.deploymentAliases(target.id, model.id),
+          technicalCapabilities: structuredClone(model.technicalCapabilities ?? []),
           hostingMode: target.hostingMode,
-          contextWindowTokens: deployment?.contextWindowTokens ?? runtimeContext.tokens,
-          contextSource: deployment?.contextWindowTokens ? "operator" : runtimeContext.source,
-          contextConcurrency: deployment?.contextWindowTokens ? undefined : runtimeContext.concurrency,
+          contextWindowTokens: runtimeContext.tokens,
+          contextSource: runtimeContext.source,
+          contextConcurrency: runtimeContext.concurrency,
           hourlyUsd: costs[target.id]?.hourlyUsd,
           intelligence: capability?.intelligence,
           domains: { ...(capability?.domains ?? {}) },
-          quantization: deployment?.quantization ? structuredClone(deployment.quantization) : undefined,
+          quantization: capability?.quantization ? structuredClone(capability.quantization) : deployment?.quantization ? structuredClone(deployment.quantization) : undefined,
           performance,
           capabilityProvenance: capability?.provenance ? structuredClone(capability.provenance) : undefined,
           deploymentProvenance: deployment?.provenance ? structuredClone(deployment.provenance) : undefined
@@ -233,29 +240,28 @@ export function rankModelDeployments(
   const eligible = deployments.filter((deployment) => {
     if (requirements.minimumContextTokens && (deployment.contextWindowTokens ?? 0) < requirements.minimumContextTokens) return false;
     if (requirements.maximumHourlyUsd !== undefined && (deployment.hourlyUsd === undefined || deployment.hourlyUsd > requirements.maximumHourlyUsd)) return false;
-    if (requirements.domains?.some((domain) => deployment.domains[domain] === undefined)) return false;
+    if (requirements.technicalCapabilities?.some((required) => !deployment.technicalCapabilities.some((capability) => capability.label === required))) return false;
     if (requirements.hostingMode && deployment.hostingMode !== requirements.hostingMode) return false;
     return true;
   });
-  const qualityValues = eligible.map((deployment) => qualityValue(deployment, requirements.domains)).filter(isNumber);
   const decodeValues = eligible.map((deployment) => deployment.performance?.decodeTokensPerSecond).filter(isNumber);
   const prefillValues = eligible.map((deployment) => deployment.performance?.prefillTokensPerSecond).filter(isNumber);
   const costValues = eligible.map((deployment) => deployment.hourlyUsd).filter(isNumber);
   const weights = normalizedWeights(requirements.weights);
 
   return eligible.map((deployment) => {
-    const rawQuality = qualityValue(deployment, requirements.domains);
-    const qualityScore = rawQuality === undefined ? undefined : percentile(rawQuality, qualityValues, true);
-    const decodeScore = deployment.performance?.decodeTokensPerSecond === undefined ? undefined : percentile(deployment.performance.decodeTokensPerSecond, decodeValues, true);
-    const prefillScore = deployment.performance?.prefillTokensPerSecond === undefined ? undefined : percentile(deployment.performance.prefillTokensPerSecond, prefillValues, true);
+    const rawIntelligence = intelligenceValue(deployment, requirements.domains);
+    const intelligenceScore = rawIntelligence === undefined ? undefined : clamp01(rawIntelligence / 100);
+    const decodeScore = deployment.performance?.decodeTokensPerSecond === undefined ? undefined : relativeToMaximum(deployment.performance.decodeTokensPerSecond, decodeValues);
+    const prefillScore = deployment.performance?.prefillTokensPerSecond === undefined ? undefined : relativeToMaximum(deployment.performance.prefillTokensPerSecond, prefillValues);
     const speedParts = [
-      decodeScore === undefined ? undefined : { score: decodeScore, weight: 0.75 },
-      prefillScore === undefined ? undefined : { score: prefillScore, weight: 0.25 }
+      decodeScore === undefined ? undefined : { score: decodeScore, weight: 0.8 },
+      prefillScore === undefined ? undefined : { score: prefillScore, weight: 0.2 }
     ].filter(isDefined);
     const speedScore = speedParts.length ? weightedAverage(speedParts) : undefined;
-    const costScore = deployment.hourlyUsd === undefined ? undefined : percentile(deployment.hourlyUsd, costValues, false);
+    const costScore = deployment.hourlyUsd === undefined ? undefined : relativeCostScore(deployment.hourlyUsd, costValues);
     const dimensions = [
-      qualityScore === undefined ? undefined : { score: qualityScore, weight: weights.intelligence },
+      intelligenceScore === undefined ? undefined : { score: intelligenceScore, weight: weights.intelligence },
       speedScore === undefined ? undefined : { score: speedScore, weight: weights.speed },
       costScore === undefined ? undefined : { score: costScore, weight: weights.cost }
     ].filter(isDefined);
@@ -264,7 +270,7 @@ export function rankModelDeployments(
       ...deployment,
       fitScore: dimensions.length ? weightedAverage(dimensions) : 0,
       dataCoveragePercent: Math.round(coverage * 100),
-      qualityScore,
+      intelligenceScore,
       speedScore,
       costScore
     };
@@ -334,7 +340,7 @@ function median(values: number[]): number | undefined {
   return sorted.length % 2 ? sorted[midpoint] : (sorted[midpoint - 1] + sorted[midpoint]) / 2;
 }
 
-function qualityValue(deployment: ModelDeploymentSelectionView, domains: string[] | undefined): number | undefined {
+function intelligenceValue(deployment: ModelDeploymentSelectionView, domains: string[] | undefined): number | undefined {
   if (!domains?.length) return deployment.intelligence;
   const values = domains.map((domain) => deployment.domains[domain]).filter(isNumber);
   return values.length === domains.length ? Math.min(...values) : undefined;
@@ -351,12 +357,19 @@ function normalizedWeights(weights: ModelSelectionRequirements["weights"]): Mode
   return { intelligence: safe.intelligence / total, speed: safe.speed / total, cost: safe.cost / total };
 }
 
-function percentile(value: number, values: number[], higherIsBetter: boolean): number {
-  if (values.length <= 1 || values.every((candidate) => candidate === values[0])) return 1;
-  const better = values.filter((candidate) => higherIsBetter ? candidate < value : candidate > value).length;
-  const equal = values.filter((candidate) => candidate === value).length;
-  return (better + Math.max(0, equal - 1) / 2) / (values.length - 1);
+function relativeToMaximum(value: number, values: number[]): number | undefined {
+  const maximum = Math.max(...values);
+  return Number.isFinite(maximum) && maximum > 0 ? clamp01(value / maximum) : undefined;
 }
+
+function relativeCostScore(value: number, values: number[]): number | undefined {
+  const minimum = Math.min(...values);
+  if (!Number.isFinite(minimum)) return undefined;
+  if (minimum === 0) return value === 0 ? 1 : 0;
+  return value > 0 ? clamp01(minimum / value) : undefined;
+}
+
+function clamp01(value: number): number { return Math.max(0, Math.min(1, value)); }
 
 function weightedAverage(parts: Array<{ score: number; weight: number }>): number {
   const total = parts.reduce((sum, part) => sum + part.weight, 0);
