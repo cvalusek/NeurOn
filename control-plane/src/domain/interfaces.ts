@@ -1,4 +1,4 @@
-import type { ApiKey, AuthenticatedUser, AuthMethod, CapacityProviderDefinition, CapacityProviderResource, CapacityProviderStatus, CapacityTarget, Reservation, ReservationProfile, RuntimeDiscoveredModel, TargetCostEstimateConfig, TargetModelDiscoveryRecord, TargetProvisioningJob, TargetActivation, TargetActivationReservation, TargetStatus } from "./types.js";
+import type { ApiKey, AuthenticatedUser, AuthMethod, CapacityProviderDefinition, CapacityProviderResource, CapacityProviderStatus, CapacityTarget, ModelCapabilityMetadata, ModelDeploymentMetadata, ModelFavorite, Reservation, ReservationProfile, RuntimeDiscoveredModel, StoredModelCapabilityMetadata, StoredModelDeploymentMetadata, TargetCostEstimateConfig, TargetModelDiscoveryRecord, TargetProvisioningJob, TargetActivation, TargetActivationReservation, TargetStatus } from "./types.js";
 
 export interface CapacityProvider {
   provisionTarget(target: CapacityTarget): Promise<Partial<CapacityTarget> | void>;
@@ -28,6 +28,7 @@ export interface ReservationProfileRepository {
   create(input: Omit<ReservationProfile, "id" | "createdAt" | "updatedAt"> & { id?: string; createdAt?: Date; updatedAt?: Date }): Promise<ReservationProfile>;
   get(id: string): Promise<ReservationProfile | undefined>;
   listForUser(username: string): Promise<ReservationProfile[]>;
+  list(): Promise<ReservationProfile[]>;
   update(id: string, input: ReservationProfile): Promise<ReservationProfile>;
   deleteForUser(id: string, username: string): Promise<boolean>;
 }
@@ -107,6 +108,21 @@ export interface TrafficSource {
       timeToFirstTokenSeconds?: number;
     };
   }>>;
+}
+
+export interface ModelMetadataRepository {
+  listCapabilities(): Promise<StoredModelCapabilityMetadata[]>;
+  listDeployments(): Promise<StoredModelDeploymentMetadata[]>;
+  upsertCapability(input: ModelCapabilityMetadata, updatedAt?: Date): Promise<StoredModelCapabilityMetadata>;
+  upsertDeployment(input: ModelDeploymentMetadata, updatedAt?: Date): Promise<StoredModelDeploymentMetadata>;
+  deleteCapability(modelId: string): Promise<boolean>;
+  deleteDeployment(targetId: string, modelId: string): Promise<boolean>;
+}
+
+export interface ModelFavoriteRepository {
+  listForUser(username: string): Promise<ModelFavorite[]>;
+  add(input: Omit<ModelFavorite, "createdAt"> & { createdAt?: Date }): Promise<ModelFavorite>;
+  remove(username: string, targetId: string, modelId: string): Promise<boolean>;
 }
 
 export interface TargetStatusRepository {

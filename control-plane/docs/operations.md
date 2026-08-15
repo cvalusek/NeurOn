@@ -45,7 +45,8 @@ without forgetting active demand, so the reconciler continues to desire matching
 targets on after the process comes back. Durable API keys allow plugin and MCP
 clients to survive control-plane restarts. The selected driver also owns
 reservation profiles, auth methods, provider and target definitions,
-provisioning jobs, runtime model-discovery records, and target activation/cost
+provisioning jobs, runtime model-discovery records, durable model capability and
+deployment measurements, user model favorites, and target activation/cost
 history.
 
 Target startup estimates and target status remain in memory. They are
@@ -124,13 +125,18 @@ Production defaults are intentionally moderate:
 
 Set `LITELLM_TRAFFIC_POLL_SECONDS=0` to disable request-log polling.
 
-LiteLLM performance observations used by guided model selection are passive,
-in-memory rolling medians from ordinary successful, uncached, unambiguous
-traffic. NeurOn neither starts targets to benchmark them nor stores prompt or
-response content. A restart clears the observational overlay and leaves any
-operator-supplied baseline intact. Keep the private model-selection catalog and
+Explicit admin discovery can run a versioned direct speed benchmark after a
+target is activated. It discards one warm-up, measures three cache-disabled
+requests, and stores median prefill/decode throughput with provenance. Responses
+are not stored. **Rediscover all** processes targets sequentially. Startup cache
+hydration does not benchmark or contact a model. Run explicit benchmarking only
+during an approved capacity window.
+
+Ordinary LiteLLM traffic can still contribute a short-lived observational
+overlay when timing/token data is successful, uncached, and unambiguous. A
+restart clears that overlay but leaves durable measurements intact. Keep the
 optional advisor credential in the same secret-management boundary as other
-deployment configuration; do not commit either.
+deployment configuration; never commit it or private/licensed model facts.
 
 ## Control-Plane Shutdown
 

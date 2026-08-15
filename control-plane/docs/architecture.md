@@ -97,6 +97,7 @@ Important fields:
 - optional LiteLLM backend config
 - optional runtime model discovery config
 - optional HassleOff protection and activate-or-reprovision policy
+- optional `hostingMode` and numeric LiteLLM `aliasPriority`
 
 ### ModelDefinition
 
@@ -117,6 +118,11 @@ Important fields:
 - `runtimeModelIds`
 - `runtimeMeta`
 
+Capability facts attach to the canonical model. Context, performance,
+quantization, and estimated quality retained attach to the exact target-model
+deployment. Both retain provenance and use the selected durable storage driver.
+User favorites also identify an exact target-model pair.
+
 ## Interfaces
 
 The core interfaces keep replaceable parts isolated:
@@ -127,6 +133,8 @@ The core interfaces keep replaceable parts isolated:
 - `ApiKeyRepository`
 - `TargetModelDiscoveryRepository`
 - `TargetActivationRepository`
+- `ModelMetadataRepository`
+- `ModelFavoriteRepository`
 - `AuthProvider`
 - `TrafficSource`
 - `TargetStatusRepository`
@@ -147,10 +155,15 @@ into AWS, Docker, LiteLLM, or a concrete repository from unrelated code.
   material, lists key metadata, and revokes keys.
 - `ModelCatalog`: maps selectable model IDs, aliases, backend IDs, and runtime
   IDs to model definitions and targets.
-- `ModelSelectionService`: combines private capability metadata, exact
-  target-model deployment facts, target cost, and passive LiteLLM performance
-  observations. It applies hard requirements before deterministic weighted
-  ranking and treats missing measurements as unknown.
+- `ModelSelectionService`: combines durable capability metadata, exact
+  target-model deployment facts, target cost, and performance observations. It
+  applies hard requirements before deterministic weighted ranking and treats
+  missing measurements as unknown.
+- `ModelBenchmarkService`: runs a small explicit warm-up-plus-three-sample suite
+  against an activated target and persists median prefill/decode measurements.
+- `ModelFavoriteService`: stores user favorites for exact target-model pairs.
+- `UsageAnalyticsService`: derives deployment popularity and UTC daily/user/
+  provider/target/model breakdowns from durable reservations and allocations.
 - `ProfileAdvisorService`: optionally converts a workload description into a
   validated set of selector controls. It cannot select, save, reserve, or
   start capacity.
@@ -244,11 +257,12 @@ estimates remain in-memory observational state. Provider state is still
 observed on the next reconciliation loop, and startup estimates are not used
 for scheduling decisions.
 
-The durable driver is one control-plane ownership boundary covering nine
+The durable driver is one control-plane ownership boundary covering eleven
 repository families: reservations, profiles, hashed API keys, auth methods,
 provider definitions, target definitions, provisioning jobs, model-discovery
-records, and target activation/cost allocation history. PostgreSQL uses one
-bounded shared pool. Ordered transactional schema changes are recorded in
+records, model capability/deployment metadata, model favorites, and target
+activation/cost allocation history. PostgreSQL uses one bounded shared pool.
+Ordered transactional schema changes are recorded in
 `neuron_schema_migrations`; the data-transfer ledger is separate so an exact
 SQLite import can be verified without confusing it with schema upgrades.
 

@@ -35,6 +35,21 @@ export class ReservationProfileService {
     return profile;
   }
 
+  async updateForUser(id: string, user: AuthenticatedUser, input: ReservationProfileInput): Promise<ReservationProfile> {
+    const existing = await this.getOwned(id, user);
+    const selections = normalizeReservationProfileSelections(this.catalog, input.selections);
+    validateDefaults(input);
+    return this.repository.update(id, {
+      ...existing,
+      name: input.name.trim(),
+      description: input.description?.trim() || undefined,
+      selections,
+      defaultDurationMinutes: input.defaultDurationMinutes,
+      defaultKeepaliveMinutes: input.defaultKeepaliveMinutes,
+      updatedAt: new Date()
+    });
+  }
+
   async deleteForUser(id: string, user: AuthenticatedUser): Promise<boolean> {
     return this.repository.deleteForUser(id, user.username);
   }

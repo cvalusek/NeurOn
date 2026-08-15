@@ -30,6 +30,9 @@ import { AuthMethodService } from "./services/AuthMethodService.js";
 import { ModelCatalog } from "./services/ModelCatalog.js";
 import { ModelWarmupService } from "./services/ModelWarmupService.js";
 import { ModelSelectionService } from "./services/ModelSelectionService.js";
+import { ModelFavoriteService } from "./services/ModelFavoriteService.js";
+import { UsageAnalyticsService } from "./services/UsageAnalyticsService.js";
+import { ModelBenchmarkService } from "./services/ModelBenchmarkService.js";
 import { ProfileAdvisorService } from "./services/ProfileAdvisorService.js";
 import { ProviderCatalog } from "./services/ProviderCatalog.js";
 import { ProviderService } from "./services/ProviderService.js";
@@ -105,7 +108,11 @@ export async function buildApp(config: AppConfig, models: ModelDefinition[], opt
     catalog.listTargets().filter(shouldBootstrapRuntimeModels).map((target) => target.id)
   );
   await runtimeModelDiscovery.hydrateCachedTargets();
-  const modelSelection = new ModelSelectionService(catalog, config.modelSelectionCatalog);
+  const modelSelection = new ModelSelectionService(catalog, config.modelSelectionCatalog, reservationRepository.modelMetadata);
+  await modelSelection.initialize();
+  runtimeModelDiscovery.setBenchmarkService(new ModelBenchmarkService(catalog, modelSelection));
+  const modelFavorites = new ModelFavoriteService(reservationRepository.modelFavorites, catalog);
+  const usageAnalytics = new UsageAnalyticsService(reservations, reservationRepository.reservationProfiles, reservationRepository.targetActivations, catalog);
   const profileAdvisor = config.profileAdvisor
     ? new ProfileAdvisorService(config.profileAdvisor, () => modelSelection.availableDomains())
     : undefined;
@@ -251,7 +258,9 @@ export async function buildApp(config: AppConfig, models: ModelDefinition[], opt
     targetOperations,
     { storageDriver: config.storage.driver, maintenanceMode: Boolean(config.maintenanceMode) },
     modelSelection,
-    profileAdvisor
+    profileAdvisor,
+    modelFavorites,
+    usageAnalytics
   );
   registerMcpRoutes(app, catalog, reservations, statuses, reservationService);
   registerUiRoutes(
@@ -273,7 +282,9 @@ export async function buildApp(config: AppConfig, models: ModelDefinition[], opt
     capacityProvider,
     config.maintenanceMode ? undefined : hassleOffClient,
     modelSelection,
-    Boolean(profileAdvisor)
+    Boolean(profileAdvisor),
+    modelFavorites,
+    usageAnalytics
   );
 
   const bootstrapRuntimeModels = async (): Promise<StartupRuntimeModelDiscoveryOutcome[]> => {

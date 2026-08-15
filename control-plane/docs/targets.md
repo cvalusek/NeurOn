@@ -22,6 +22,9 @@ Important fields:
 - `provider`: provider type, such as `docker`, `runpod`, or `aws-ecs-asg`
 - `providerId`: configured provider instance; defaults to `provider`
 - `modelIds` and optional detailed `models`
+- optional `hostingMode`: `dedicated` or `multi-model`
+- optional positive `aliasPriority`: lower values win global LiteLLM alias
+  collisions and become ordered fallback priority
 - provider-specific resource config, such as `docker`, `runpod`, `aws`, or `neuron`
 - `healthUrl` and `apiUrl` overrides
 - optional `modelDiscovery`
@@ -29,6 +32,11 @@ Important fields:
 Provider relationships are direct: a target should reference the provider
 instance that owns it. Shared account/endpoint details belong on the provider;
 resource identifiers belong on the target.
+
+Persisted target models can carry operator-managed aliases in addition to
+runtime-discovered IDs. NeurOn publishes a scoped `<target>/<alias>` name for
+each and makes the lowest-priority-number target the global alias owner. The
+same names appear in profile selection and Client setup.
 
 ## Runtime Profiles
 

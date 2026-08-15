@@ -85,8 +85,14 @@ GET /api/model-selection
 ```
 
 The response includes explicit unknowns, target hourly estimates, measurement
-provenance, available domain keys, and whether the optional workload advisor is
-enabled. It is read-only and does not start a target to collect facts.
+provenance, available domain keys, favorites, popularity/profile counts, and
+whether the optional workload advisor is enabled. It is read-only and does not
+start a target to collect facts.
+
+Authenticated users may add or remove an exact target-model favorite through
+`/api/model-favorites`. Admins manage durable capability/deployment facts under
+`/api/admin/model-metadata`; **Admin > Model data** is the normal human
+interface.
 
 When configured, the advisor accepts `{ "request": "..." }` at
 `POST /api/profile-advisor` and returns validated selector requirements and
@@ -142,13 +148,16 @@ Set `NEURON_ALLOWED_PROVIDERS` to a comma-separated OpenCode provider allowlist
 (for example, `litellm`) when the same OpenCode installation uses providers that
 must not create NeurOn reservations.
 
-The plugin maps OpenCode's LiteLLM-facing model name to NeurOn model metadata
-using model IDs, aliases, backend IDs, runtime IDs, and each target's
-`litellmDisplayPrefix`. If `litellmDisplayPrefix` is not configured, NeurOn
-publishes the first `trafficModelPrefixes` value as the display prefix, or
-`<target-id>/` when no prefixes are configured. Set the display prefix to `""`
-in JSON config, or `__empty__` in env-expanded config, when LiteLLM aliases the
-route prefix away for users.
+The plugin reads `/api/client-models` and maps OpenCode's LiteLLM-facing name to
+the exact NeurOn target/model pair. The response includes global aliases,
+target-scoped aliases, canonical IDs, backend/runtime IDs, and legacy display
+prefix names. A 404 falls back to the older `/api/status` and `/api/models`
+mapping for compatibility.
+
+Users can open **Client setup** to copy an OpenCode provider configuration for
+the entire catalog or one profile. Global aliases choose the target with the
+lowest numeric `aliasPriority`; scoped `<target>/<alias>` names remain available
+for every deployment. The profile page shows these names alongside each model.
 The Admin target create and persisted-target edit forms expose
 `trafficModelPrefixes` as **LiteLLM model route prefixes**, so a value such as
 `clint-desktop/` links `clint-desktop/gemma-4-e2b` to the selected target
@@ -156,13 +165,20 @@ without editing JSON. Declarative targets can set the field in JSON/env config
 or use **Copy to DB** before editing it in Admin.
 
 With global LiteLLM connectivity configured, successful runtime discovery
-upserts a `neuron/<target-id>` credential and publishes each primary runtime
-model ID under the effective display prefix. The friendly target display name
-is preserved in LiteLLM metadata as `neuron_target_display_name`; routing remains
-based on the stable target ID. Credentials identify `openai` as their provider
-and use `noapikey` when the target has no configured runtime key. Target stops
-do not block or delete deployments, allowing LiteLLM requests to remain queued
-while NeurOn starts capacity.
+upserts a `neuron/<target-id>` credential and publishes primary IDs plus aliases
+as scoped routes. Global aliases use the target priority; ties fail closed. The
+same value becomes LiteLLM's deployment `order`, so a compatible LiteLLM router
+can try later target deployments after pre-call checks reject an unavailable
+one. Operators must enable pre-call checks and validate the pinned LiteLLM
+version because ordered fallback behavior has changed across releases.
+
+The friendly target display name is preserved in LiteLLM metadata as
+`neuron_target_display_name`; routing remains based on the stable target ID.
+Credentials identify `openai` as their provider and use `noapikey` when the
+target has no configured runtime key. Target stops do not block deployments,
+allowing requests to remain queued while NeurOn starts capacity. Aliases absent
+from later discovery are renamed under `neuron-retired/...` rather than deleted,
+preserving LiteLLM records without leaving the stale route callable.
 
 LiteLLM traffic monitoring remains useful for clients that cannot run a plugin.
 The OpenCode plugin is a stronger signal when it is available because it can

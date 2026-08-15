@@ -6,12 +6,12 @@ import { createPostgresTestSchema, postgresTestUrl } from "./postgresTestUtils.j
 const describePostgres = postgresTestUrl ? describe : describe.skip;
 
 describePostgres("PostgreSQL schema and repositories", () => {
-  it("initializes the versioned schema idempotently and persists all nine repository families", async () => {
+  it("initializes the versioned schema idempotently and persists every repository family", async () => {
     const database = await createPostgresTestSchema();
     try {
       await migratePostgresSchema(database.pool);
       await migratePostgresSchema(database.pool);
-      expect(await readPostgresSchemaState(database.pool)).toEqual({ currentVersion: POSTGRES_SCHEMA_VERSION, appliedVersions: [1, 2] });
+      expect(await readPostgresSchemaState(database.pool)).toEqual({ currentVersion: POSTGRES_SCHEMA_VERSION, appliedVersions: [1, 2, 3] });
 
       const first = await createReservationRepository({ driver: "postgres", connectionString: database.connectionString, maxConnections: 3 });
       const createdAt = new Date("2026-07-01T12:30:00-05:00");
@@ -105,6 +105,9 @@ describePostgres("PostgreSQL schema and repositories", () => {
         estimatedCostUsd: 0.61725
       });
       await first.targetActivations.closeReservationsForActivation(activation.id, endedAt);
+      await first.modelMetadata.upsertCapability({ modelId: "model-1", intelligence: 88, domains: { coding: 93 }, provenance: { source: "manual", version: "2026-08" } }, createdAt);
+      await first.modelMetadata.upsertDeployment({ targetId: "target-1", modelId: "model-1", contextWindowTokens: 131_072, quantization: { format: "Q6", qualityRetentionPercent: 98 }, performance: { decodeTokensPerSecond: 40, prefillTokensPerSecond: 900, sampleCount: 3 } }, endedAt);
+      await first.modelFavorites.add({ username: "clint", targetId: "target-1", modelId: "model-1", createdAt });
       await first.close();
 
       const second = await createReservationRepository({ driver: "postgres", connectionString: database.connectionString, maxConnections: 3 });
@@ -119,6 +122,9 @@ describePostgres("PostgreSQL schema and repositories", () => {
       expect(await second.targetActivations.listReservationAllocations(reservation.id)).toMatchObject([
         { targetActivationId: activation.id, reservationId: reservation.id, endedAt, estimatedCostUsd: 0.61725 }
       ]);
+      expect(await second.modelMetadata.listCapabilities()).toMatchObject([{ modelId: "model-1", intelligence: 88, domains: { coding: 93 }, updatedAt: createdAt }]);
+      expect(await second.modelMetadata.listDeployments()).toMatchObject([{ targetId: "target-1", modelId: "model-1", contextWindowTokens: 131_072, performance: { decodeTokensPerSecond: 40 }, updatedAt: endedAt }]);
+      expect(await second.modelFavorites.listForUser("clint")).toEqual([{ username: "clint", targetId: "target-1", modelId: "model-1", createdAt }]);
       await second.close();
     } finally {
       await database.cleanup();

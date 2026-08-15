@@ -10,14 +10,16 @@ NeurOn supports one control-plane database owner at a time. Never run SQLite
 and PostgreSQL application writers concurrently. HassleOff owns a separate
 SQLite database; this procedure does not read, stop, migrate, or restart it.
 
-PostgreSQL schema version 2 is managed by the transactional
+PostgreSQL schema version 3 is managed by the transactional
 `neuron_schema_migrations` ledger. The application uses one bounded shared pool
 for all repositories. The explicit transfer command records a completed source
 identity in `neuron_data_migrations`; an exact rerun verifies and exits as a
 no-op, while a changed source or unexplained nonempty destination fails closed.
 Version 2 adds the target-specific model-selection snapshot used by multi-target
-reservations. Startup upgrades an already-current version 1 database in order
-and in a transaction before repositories begin serving requests.
+reservations. Version 3 adds durable model capabilities, exact target-model
+deployment measurements, and user model favorites. Startup upgrades an
+already-current version 1 or 2 database in order and in a transaction before
+repositories begin serving requests.
 
 ## Durable scope
 
@@ -30,8 +32,11 @@ The command transfers:
 5. provider definitions;
 6. target definitions;
 7. target provisioning jobs;
-8. target model-discovery records; and
-9. target activations and their reservation cost-allocation links.
+8. target model-discovery records;
+9. model capability records;
+10. exact target-model deployment records;
+11. user model favorites; and
+12. target activations and their reservation cost-allocation links.
 
 Older local databases may also contain the predecessor tables `target_runs`
 and `target_run_reservation_links`. When both tables have the exact recognized

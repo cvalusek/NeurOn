@@ -142,10 +142,15 @@ function reservationKey(targetId, modelId) {
 
 export function matchLiteLlmModel(targets, models, litellmModelId) {
   const modelByLookup = buildModelLookup(models);
-  for (const target of targets) {
+  const orderedTargets = [...targets].sort(
+    (left, right) =>
+      (left.aliasPriority ?? 100) - (right.aliasPriority ?? 100) ||
+      String(left.id).localeCompare(String(right.id))
+  );
+  for (const target of orderedTargets) {
     for (const candidate of candidateModelIds(target, litellmModelId)) {
-      const model = modelByLookup.get(candidate);
-      if (model?.targetIds?.includes(target.id)) {
+      const model = modelByLookup.get(candidate)?.find((entry) => entry.targetIds?.includes(target.id));
+      if (model) {
         return { modelIds: [model.id], targetIds: [target.id] };
       }
       if (target.modelIds?.includes(candidate)) {
@@ -158,11 +163,14 @@ export function matchLiteLlmModel(targets, models, litellmModelId) {
 
 export function candidateModelIds(target, litellmModelId) {
   const values = new Set([litellmModelId]);
-  const displayPrefix = target.litellmDisplayPrefix;
-  if (displayPrefix !== undefined && litellmModelId.startsWith(displayPrefix)) {
+  const routePrefixes = target.trafficModelPrefixes?.length
+    ? target.trafficModelPrefixes
+    : [`${target.id}/`];
+  const displayPrefix = target.litellmDisplayPrefix ?? routePrefixes[0];
+  if (litellmModelId.startsWith(displayPrefix)) {
     values.add(litellmModelId.slice(displayPrefix.length));
   }
-  for (const prefix of target.trafficModelPrefixes ?? []) {
+  for (const prefix of routePrefixes) {
     if (litellmModelId.startsWith(prefix)) values.add(litellmModelId.slice(prefix.length));
     values.add(`${prefix}${litellmModelId}`);
   }
@@ -178,7 +186,7 @@ function buildModelLookup(models) {
       ...(model.backendModelIds ?? []),
       ...(model.runtimeModelIds ?? [])
     ]) {
-      lookup.set(id, model);
+      lookup.set(id, [...(lookup.get(id) ?? []), model]);
     }
   }
   return lookup;
@@ -289,11 +297,15 @@ class NeurOnClient {
   }
 
   async getStatus() {
-    const [status, models] = await Promise.all([
+    const [status, models, clientModels] = await Promise.all([
       this.request("/api/status"),
-      this.request("/api/models")
+      this.request("/api/models"),
+      this.request("/api/client-models").catch((error) => {
+        if (error instanceof NeurOnApiError && error.status === 404) return { models: [] };
+        throw error;
+      })
     ]);
-    return { ...status, models: models.models ?? [] };
+    return { ...status, models: mergeClientModels(models.models ?? [], clientModels.models ?? []) };
   }
 
   async createReservation(match) {
@@ -360,6 +372,20 @@ class NeurOnClient {
     }
     return response.json();
   }
+}
+
+export function mergeClientModels(models, deployments) {
+  return [
+    ...models,
+    ...deployments.map((deployment) => ({
+      id: deployment.modelId,
+      aliases: [
+        ...(deployment.aliases?.global ?? []),
+        ...(deployment.aliases?.scoped ?? [])
+      ],
+      targetIds: [deployment.targetId]
+    }))
+  ];
 }
 
 function isRecoverableReservationError(error) {

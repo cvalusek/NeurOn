@@ -176,8 +176,8 @@ describe("reservation behavior", () => {
       targetIds: [discoveryTarget.id],
       aliases: expect.arrayContaining(["qwen-3.6", "qwen-3.6-35b-a3b"]),
       runtimeMeta: expect.objectContaining({ n_params: 35_000_000_000, size: 28_000_000_000 }),
-      contextWindowTokens: 1_000_000,
-      contextLabel: "1m"
+      contextWindowTokens: undefined,
+      contextLabel: undefined
     });
     expect(discoveredModels[1]).toMatchObject({
       id: "unsloth/GLM-4.7-Flash-REAP-23B-A3B-GGUF:UD-Q6_K_XL",
@@ -227,6 +227,13 @@ describe("reservation behavior", () => {
         size: 20_218_236_544
       })
     });
+  });
+
+  it("uses per-sequence context when a runtime shares its context across concurrent slots", () => {
+    const discoveryTarget: CapacityTarget = { id: "parallel", displayName: "Parallel", provider: "docker", modelIds: [] };
+    const catalog = new ModelCatalog([], [discoveryTarget]);
+    catalog.recordRuntimeModels(discoveryTarget.id, [{ id: "parallel-model", meta: { n_ctx: 131_072, n_parallel: 4, n_ctx_train: 1_000_000 } }]);
+    expect(catalog.deploymentContext(discoveryTarget.id, "parallel-model")).toEqual({ tokens: 32_768, source: "runtime-shared", concurrency: 4 });
   });
 
   it("hydrates discovered models from the discovery cache", async () => {

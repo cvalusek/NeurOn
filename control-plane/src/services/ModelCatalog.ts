@@ -5,6 +5,7 @@ export class ModelCatalog {
   private readonly modelById: Map<string, ModelDefinition>;
   private readonly modelByLookupId = new Map<string, ModelDefinition>();
   private readonly targetById: Map<string, CapacityTarget>;
+  private readonly runtimeModelsByDeployment = new Map<string, RuntimeModelInfo[]>();
 
   constructor(models: ModelDefinition[], targets: CapacityTarget[]) {
     this.modelById = new Map(models.map((model) => [model.id, model]));
@@ -32,6 +33,28 @@ export class ModelCatalog {
     return this.targetById.get(id);
   }
 
+  deploymentContext(targetId: string, modelId: string): { tokens?: number; source?: "runtime" | "runtime-shared" | "configured"; concurrency?: number } {
+    const model = this.getModel(modelId);
+    if (!model) return {};
+    const runtimeContexts = (this.runtimeModelsByDeployment.get(deploymentKey(targetId, model.id)) ?? [])
+      .map(runtimeContext)
+      .filter((value): value is NonNullable<ReturnType<typeof runtimeContext>> => Boolean(value));
+    if (runtimeContexts.length) return runtimeContexts.sort((left, right) => left.tokens - right.tokens)[0];
+    const configured = this.targetById.get(targetId)?.models?.find((candidate) => candidate.id === model.id || candidate.aliases?.includes(model.id));
+    const tokens = configured?.contextWindowTokens ?? model.contextWindowTokens;
+    return tokens ? { tokens, source: "configured" } : {};
+  }
+
+  deploymentAliases(targetId: string, modelId: string): string[] {
+    const model = this.getModel(modelId);
+    if (!model) return [];
+    const configured = this.targetById.get(targetId)?.models?.find((candidate) => candidate.id === model.id);
+    if (configured?.aliases !== undefined) return Array.from(new Set(configured.aliases.map((value) => value.trim()).filter(Boolean)));
+    const runtime = this.runtimeModelsByDeployment.get(deploymentKey(targetId, model.id)) ?? [];
+    const runtimeAliases = runtime.flatMap((value) => value.aliases ?? []).map((value) => value.trim()).filter(Boolean);
+    return Array.from(new Set(runtimeAliases.length ? runtimeAliases : model.aliases));
+  }
+
   upsertTarget(target: CapacityTarget): void {
     this.targetById.set(target.id, target);
     for (const modelId of target.modelIds) {
@@ -56,6 +79,7 @@ export class ModelCatalog {
 
   recordRuntimeModels(targetId: string, runtimeModels: Array<string | RuntimeModelInfo>): void {
     const runtimeInfos = dedupeRuntimeModels(runtimeModels.map(toRuntimeModelInfo).filter(isSelectableRuntimeModel));
+    for (const key of this.runtimeModelsByDeployment.keys()) if (key.startsWith(`${targetId}\u0000`)) this.runtimeModelsByDeployment.delete(key);
     const runtimeIds = runtimeInfos.map((model) => model.id);
     const target = this.targetById.get(targetId);
     if (target) target.modelIds = Array.from(new Set([...target.modelIds, ...runtimeIds]));
@@ -64,6 +88,7 @@ export class ModelCatalog {
       const existing = this.modelByLookupId.get(runtimeId);
       if (existing) {
         this.updateModelFromRuntimeInfo(existing, targetId, runtimeInfo);
+        this.recordDeploymentRuntime(targetId, existing.id, runtimeInfo);
         continue;
       }
       const model: ModelDefinition = {
@@ -80,6 +105,7 @@ export class ModelCatalog {
       };
       this.modelById.set(model.id, model);
       this.addModelLookups(model);
+      this.recordDeploymentRuntime(targetId, model.id, runtimeInfo);
     }
     for (const model of this.modelById.values()) {
       if (!model.targetIds.includes(targetId)) continue;
@@ -88,6 +114,11 @@ export class ModelCatalog {
       model.runtimeModelIds = matches.length > 0 ? matches : model.runtimeModelIds;
       this.addModelLookups(model);
     }
+  }
+
+  private recordDeploymentRuntime(targetId: string, modelId: string, runtimeInfo: RuntimeModelInfo): void {
+    const key = deploymentKey(targetId, modelId);
+    this.runtimeModelsByDeployment.set(key, [...(this.runtimeModelsByDeployment.get(key) ?? []), runtimeInfo]);
   }
 
   private updateModelFromRuntimeInfo(model: ModelDefinition, targetId: string, runtimeInfo: RuntimeModelInfo & { id: string }): void {
@@ -192,8 +223,24 @@ function tagsForRuntimeModel(model: RuntimeModelInfo & { id: string }): ModelTag
 }
 
 function contextWindowTokensForRuntimeModel(model: RuntimeModelInfo): number | undefined {
-  return model.meta?.n_ctx ?? model.meta?.n_ctx_train;
+  return runtimeContext(model)?.tokens;
 }
+
+function runtimeContext(model: RuntimeModelInfo): { tokens: number; source: "runtime" | "runtime-shared"; concurrency?: number } | undefined {
+  const perSequence = positiveInteger(model.meta?.n_ctx_per_sequence);
+  if (perSequence) return { tokens: perSequence, source: "runtime", concurrency: positiveInteger(model.meta?.n_parallel) };
+  const total = positiveInteger(model.meta?.n_ctx);
+  if (!total) return undefined;
+  const concurrency = positiveInteger(model.meta?.n_parallel);
+  if (concurrency && concurrency > 1) return { tokens: Math.floor(total / concurrency), source: "runtime-shared", concurrency };
+  return { tokens: total, source: "runtime", concurrency };
+}
+
+function positiveInteger(value: number | undefined): number | undefined {
+  return typeof value === "number" && Number.isInteger(value) && value > 0 ? value : undefined;
+}
+
+function deploymentKey(targetId: string, modelId: string): string { return `${targetId}\u0000${modelId}`; }
 
 function contextLabelForRuntimeModel(model: RuntimeModelInfo & { id: string }): string | undefined {
   return contextLabelForTokens(contextWindowTokensForRuntimeModel(model)) ?? inferContextLabel(model.id);

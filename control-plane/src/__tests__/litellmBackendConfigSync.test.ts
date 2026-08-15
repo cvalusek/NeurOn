@@ -35,7 +35,7 @@ describe("LiteLlmBackendConfigSync", () => {
         return Response.json({
           data: [
             {
-              model_name: "old/gemma-4-e2b",
+              model_name: "g6.xlarge.general/gemma",
               model_info: {
                 id: "existing-gemma",
                 managed_by: "neuron",
@@ -78,7 +78,7 @@ describe("LiteLlmBackendConfigSync", () => {
 
     const updateGemma = calls.find((call) => call.url.endsWith("/model/existing-gemma/update"));
     expect(updateGemma?.body).toMatchObject({
-      model_name: "g6.xlarge.general/gemma-4-e2b",
+      model_name: "g6.xlarge.general/gemma",
       litellm_params: {
         custom_llm_provider: "openai",
         litellm_credential_name: "neuron/g6.xlarge.general",
@@ -93,17 +93,21 @@ describe("LiteLlmBackendConfigSync", () => {
       }
     });
 
-    const createQwen = calls.find((call) => call.url.endsWith("/model/new") && call.method === "POST");
+    const createQwen = calls.find((call) => call.url.endsWith("/model/new") && call.method === "POST" && call.body?.model_name === "g6.xlarge.general/qwen-3");
     expect(createQwen?.body).toMatchObject({
       model_name: "g6.xlarge.general/qwen-3",
       litellm_params: { custom_llm_provider: "openai", model: "qwen-3" },
       model_info: { neuron_target_display_name: "G6 XL General" }
     });
-    expect(calls.some((call) => call.url.endsWith("/model/stale-model/update"))).toBe(false);
+    const retired = calls.find((call) => call.url.endsWith("/model/stale-model/update"));
+    expect(retired?.body).toMatchObject({
+      model_name: "neuron-retired/g6.xlarge.general/stale-model",
+      model_info: { id: "stale-model", neuron_alias_scope: "retired" }
+    });
     expect(calls.some((call) => call.url.endsWith("/model/manual/update"))).toBe(false);
 
     const callCount = calls.length;
-    await sync.syncTargetHealthy(target, [{ id: "qwen-3" }, { id: "gemma-4-e2b" }]);
+    await sync.syncTargetHealthy(target, [{ id: "qwen-3" }, { id: "gemma-4-e2b", aliases: ["gemma"] }]);
     expect(calls).toHaveLength(callCount);
   });
 
@@ -133,7 +137,7 @@ describe("LiteLlmBackendConfigSync", () => {
       credential_values: { api_key: "noapikey" },
       credential_info: { custom_llm_provider: "openai", provider: "openai" }
     });
-    expect(calls.find((call) => call.url.endsWith("/model/new"))?.body).toMatchObject({
+    expect(calls.find((call) => call.url.endsWith("/model/new") && call.body?.model_name === "prefer.g6.xlarge.general/gemma-4-e2b")?.body).toMatchObject({
       model_name: "prefer.g6.xlarge.general/gemma-4-e2b",
       litellm_params: { litellm_credential_name: "neuron/custom-g6", model: "gemma-4-e2b" }
     });
@@ -146,6 +150,29 @@ describe("LiteLlmBackendConfigSync", () => {
 
     await expect(sync.syncTargetHealthy(target, [{ id: "gemma-4-e2b" }])).rejects.toThrow("PREFER_G6_API_KEY is not set");
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("publishes shared aliases as ordered fallback deployments and rejects equal priorities", async () => {
+    const calls: Array<{ url: string; body?: Record<string, unknown> }> = [];
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      calls.push({ url, body: typeof init?.body === "string" ? JSON.parse(init.body) as Record<string, unknown> : undefined });
+      if (url.endsWith("/model/info")) return Response.json({ data: [] });
+      return url.includes("/credentials/by_name/") ? new Response("", { status: 404 }) : Response.json({ success: true });
+    }));
+    const sync = new LiteLlmBackendConfigSync("http://litellm.internal:4000", "admin-key");
+    const primary = { ...target, id: "primary", aliasPriority: 10, litellm: undefined };
+    const fallback = { ...target, id: "fallback", aliasPriority: 20, litellm: undefined };
+    await sync.syncTargetHealthy(primary, [{ id: "runtime-a", aliases: ["coding"] }]);
+    await sync.syncTargetHealthy(fallback, [{ id: "runtime-b", aliases: ["coding"] }]);
+
+    const globalRoutes = calls.filter((call) => call.body?.model_name === "coding").map((call) => call.body?.litellm_params as { order?: number });
+    expect(globalRoutes.map((route) => route.order)).toEqual([10, 20]);
+    expect(calls.some((call) => call.body?.model_name === "primary/coding")).toBe(true);
+    expect(calls.some((call) => call.body?.model_name === "fallback/coding")).toBe(true);
+
+    const tied = { ...target, id: "tied", aliasPriority: 20, litellm: undefined };
+    await expect(sync.syncTargetHealthy(tied, [{ id: "runtime-c", aliases: ["coding"] }])).rejects.toThrow("priority 20");
   });
 });
 

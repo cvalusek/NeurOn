@@ -110,6 +110,30 @@ export class TargetService {
     return cloneTarget(runtime);
   }
 
+  async updateModelAliases(targetId: string, modelId: string, aliases: string[]): Promise<CapacityTarget> {
+    const target = this.runtimeTargets.find((candidate) => candidate.id === targetId);
+    const model = this.catalog.getModel(modelId);
+    if (!target || !model?.targetIds.includes(targetId)) throw new Error("Target/model deployment not found");
+    if (!(await this.repository.get(targetId))) throw new Error(`Target ${targetId} must be copied to the database before its model aliases can be edited`);
+    const normalized = Array.from(new Set(aliases.map((alias) => alias.trim()).filter(Boolean)));
+    const currentModels = target.models?.map((entry) => ({ ...entry, aliases: entry.aliases ? [...entry.aliases] : undefined })) ?? [];
+    const existingIndex = currentModels.findIndex((entry) => entry.id === model.id);
+    const configuredModel = {
+      id: model.id,
+      displayName: model.displayName,
+      modelFamily: model.modelFamily,
+      aliases: normalized,
+      tags: model.tags,
+      description: model.description,
+      backendModelIds: Array.from(new Set([...(model.backendModelIds ?? []), ...(model.runtimeModelIds ?? [])])),
+      contextWindowTokens: model.contextWindowTokens,
+      contextLabel: model.contextLabel
+    };
+    if (existingIndex >= 0) currentModels.splice(existingIndex, 1, { ...currentModels[existingIndex], ...configuredModel });
+    else currentModels.push(configuredModel);
+    return this.update(targetId, { ...target, models: currentModels });
+  }
+
   async canPersistReplacementPatch(id: string): Promise<boolean> {
     return Boolean(await this.repository.get(id));
   }

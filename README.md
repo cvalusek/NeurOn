@@ -9,6 +9,13 @@ lets the expensive capacity turn off.
 
 ![NeurOn home page with an active reservation and capacity status](control-plane/docs/images/home-reservation.png)
 
+The dedicated profile builder filters exact target/model deployments by hard
+requirements, ranks the rest with Good/Fast/Cheap preferences, and exposes the
+context, measured speed, quality, cost, popularity, favorites, and LiteLLM
+aliases behind each choice.
+
+![NeurOn model selection with requirements and Good/Fast/Cheap ranking](control-plane/docs/images/model-selection.png)
+
 ## How it works
 
 1. An operator connects existing or explicitly provisionable runtime capacity
@@ -89,7 +96,9 @@ NeurOn exposes:
 Users create personal `sk-neuron-...` API keys from **API keys**. The full key
 is shown once and only its hash is stored. See
 [Integrations](control-plane/docs/integrations.md) for REST, MCP, Codex, and
-OpenCode examples.
+OpenCode examples. **Client setup** shows the live global and target-scoped
+LiteLLM names and generates an OpenCode provider configuration for all models or
+one profile.
 
 ## Operations and updates
 

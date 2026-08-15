@@ -45,6 +45,11 @@ export class PostgresReservationProfileRepository implements ReservationProfileR
     return result.rows.map(fromRow);
   }
 
+  async list(): Promise<ReservationProfile[]> {
+    const result = await this.pool.query<ReservationProfileRow>("select * from reservation_profiles order by username asc, name asc, id asc");
+    return result.rows.map(fromRow);
+  }
+
   async update(id: string, input: ReservationProfile): Promise<ReservationProfile> {
     await this.pool.query(
       `update reservation_profiles set

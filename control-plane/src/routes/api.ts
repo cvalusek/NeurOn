@@ -8,6 +8,9 @@ import { ApiKeyService } from "../services/ApiKeyService.js";
 import { CostEstimationService } from "../services/CostEstimationService.js";
 import { ModelCatalog } from "../services/ModelCatalog.js";
 import { ModelSelectionService } from "../services/ModelSelectionService.js";
+import { ModelFavoriteService } from "../services/ModelFavoriteService.js";
+import { UsageAnalyticsService } from "../services/UsageAnalyticsService.js";
+import { litellmAliases } from "../litellm/modelRouting.js";
 import type { ProfileAdvisorService } from "../services/ProfileAdvisorService.js";
 import { ReservationService } from "../services/ReservationService.js";
 import { ReservationProfileService } from "../services/ReservationProfileService.js";
@@ -39,7 +42,9 @@ export function registerApiRoutes(
   targetOperations: TargetOperationCoordinator,
   healthInfo: { storageDriver: string; maintenanceMode: boolean },
   modelSelection: ModelSelectionService,
-  profileAdvisor?: ProfileAdvisorService
+  profileAdvisor: ProfileAdvisorService | undefined,
+  modelFavorites: ModelFavoriteService,
+  usageAnalytics: UsageAnalyticsService
 ) {
   app.get("/healthz", async () => ({ ok: true, ...healthInfo }));
   app.get(
@@ -64,12 +69,93 @@ export function registerApiRoutes(
         security: authSecurity()
       }
     },
-    async () => ({
-      domains: modelSelection.availableDomains(),
-      deployments: modelSelection.listDeployments(await selectionCostEstimates(catalog.listTargets(), costEstimation)),
-      advisorEnabled: Boolean(profileAdvisor)
-    })
+    async (request) => {
+      const user = requireUser(request);
+      const [usage, favorites, costs] = await Promise.all([
+        usageAnalytics.deploymentUsage(), modelFavorites.listForUser(user), selectionCostEstimates(catalog.listTargets(), costEstimation)
+      ]);
+      const usageByKey = new Map(usage.map((value) => [`${value.targetId}::${value.modelId}`, value]));
+      const favoriteKeys = new Set(favorites.map((value) => `${value.targetId}::${value.modelId}`));
+      return {
+        domains: modelSelection.availableDomains(),
+        deployments: modelSelection.listDeployments(costs).map((deployment) => ({ ...deployment, ...usageByKey.get(deployment.key), favorite: favoriteKeys.has(deployment.key) })),
+        advisorEnabled: Boolean(profileAdvisor)
+      };
+    }
   );
+
+  app.get("/api/client-models", async (request) => {
+    const user = requireUser(request);
+    const profiles = await reservationProfileService.listForUser(user);
+    const targets = new Map(catalog.listTargets().map((target) => [target.id, target]));
+    return {
+      models: modelSelection.listDeployments().flatMap((deployment) => {
+        const target = targets.get(deployment.targetId);
+        if (!target) return [];
+        return [{
+          targetId: target.id,
+          targetDisplayName: target.displayName,
+          modelId: deployment.modelId,
+          modelDisplayName: deployment.modelDisplayName,
+          aliases: litellmAliases(target, deployment.modelId, deployment.aliases),
+          aliasPriority: target.aliasPriority ?? 100,
+          contextWindowTokens: deployment.contextWindowTokens,
+          profileIds: profiles.filter((profile) => profile.selections.some((selection) => selection.targetId === target.id && selection.modelIds.includes(deployment.modelId))).map((profile) => profile.id)
+        }];
+      }),
+      profiles: profiles.map((profile) => ({ id: profile.id, name: profile.name }))
+    };
+  });
+
+  app.post("/api/model-favorites", async (request, reply) => {
+    try {
+      const body = z.object({ targetId: z.string().min(1), modelId: z.string().min(1) }).parse(request.body);
+      return reply.code(201).send(await modelFavorites.add(requireUser(request), body.targetId, body.modelId));
+    } catch (error) { return sendError(reply, error); }
+  });
+  app.delete("/api/model-favorites/:targetId/:modelId", async (request, reply) => {
+    try {
+      const params = z.object({ targetId: z.string().min(1), modelId: z.string().min(1) }).parse(request.params);
+      return { removed: await modelFavorites.remove(requireUser(request), params.targetId, params.modelId) };
+    } catch (error) { return sendError(reply, error); }
+  });
+
+  app.get("/api/admin/model-metadata", async () => ({ catalog: modelSelection.catalogConfig() }));
+  app.put("/api/admin/model-metadata/models/:modelId", async (request, reply) => {
+    try {
+      const { modelId } = z.object({ modelId: z.string().min(1) }).parse(request.params);
+      const body = z.object({ intelligence: z.number().min(0).max(100).optional(), domains: z.record(z.number().min(0).max(100)).optional(), provenance: z.object({ source: z.string().min(1), sourceUrl: z.string().url().optional(), sourceModelId: z.string().optional(), retrievedAt: z.string().datetime().optional(), version: z.string().optional(), notes: z.string().optional() }).optional() }).parse(request.body);
+      if ((body.intelligence !== undefined || Object.keys(body.domains ?? {}).length > 0) && !body.provenance) throw new Error("Model ratings require a source");
+      await modelSelection.upsertCapability({ modelId, ...body });
+      return { ok: true };
+    } catch (error) { return sendError(reply, error); }
+  });
+  app.put("/api/admin/model-metadata/deployments/:targetId/:modelId", async (request, reply) => {
+    try {
+      const params = z.object({ targetId: z.string().min(1), modelId: z.string().min(1) }).parse(request.params);
+      const body = z.object({
+        contextWindowTokens: z.number().int().positive().optional(),
+        quantization: z.object({ format: z.string().min(1), qualityRetentionPercent: z.number().min(0).max(100).optional(), reference: z.string().optional() }).optional(),
+        performance: z.object({ decodeTokensPerSecond: z.number().positive().optional(), prefillTokensPerSecond: z.number().positive().optional(), timeToFirstTokenSeconds: z.number().positive().optional(), measuredAt: z.string().datetime().optional(), sampleCount: z.number().int().positive().optional() }).optional(),
+        provenance: z.object({ source: z.string().min(1), sourceUrl: z.string().url().optional(), sourceModelId: z.string().optional(), retrievedAt: z.string().datetime().optional(), version: z.string().optional(), notes: z.string().optional() }).optional()
+      }).parse(request.body);
+      if ((body.contextWindowTokens !== undefined || body.quantization || body.performance) && !body.provenance) throw new Error("Deployment measurements require a source");
+      await modelSelection.upsertDeployment({ ...params, ...body });
+      return { ok: true };
+    } catch (error) { return sendError(reply, error); }
+  });
+  app.put("/api/admin/targets/:targetId/models/:modelId/aliases", async (request, reply) => {
+    try {
+      const params = z.object({ targetId: z.string().min(1), modelId: z.string().min(1) }).parse(request.params);
+      const { aliases } = z.object({ aliases: z.array(z.string().trim().min(1)).max(50) }).parse(request.body);
+      const target = await targetService.updateModelAliases(params.targetId, params.modelId, aliases);
+      return { ok: true, targetId: target.id, modelId: params.modelId, aliases };
+    } catch (error) { return sendError(reply, error); }
+  });
+  app.get("/api/admin/usage", async (request) => {
+    const { days } = z.object({ days: z.coerce.number().int().min(1).max(366).default(30) }).parse(request.query);
+    return usageAnalytics.report(days);
+  });
 
   app.post(
     "/api/profile-advisor",
@@ -342,11 +428,24 @@ export function registerApiRoutes(
       const { id } = z.object({ id: z.string() }).parse(request.params);
       const target = catalog.getTarget(id);
       if (!target) throw new Error("Target not found");
-      await runtimeModelDiscovery.bootstrapTarget(target, capacityProvider, healthChecker);
+      await runtimeModelDiscovery.bootstrapTarget(target, capacityProvider, healthChecker, { benchmark: true });
       return { ok: true, models: catalog.listModelsForTarget(id) };
     } catch (error) {
       return sendError(reply, error, operationStatusCode(error));
     }
+  });
+
+  app.post("/api/admin/targets/rediscover-all", async () => {
+    const results: Array<{ targetId: string; ok: boolean; error?: string }> = [];
+    for (const target of catalog.listTargets()) {
+      try {
+        await runtimeModelDiscovery.bootstrapTarget(target, capacityProvider, healthChecker, { benchmark: true });
+        results.push({ targetId: target.id, ok: true });
+      } catch (error) {
+        results.push({ targetId: target.id, ok: false, error: error instanceof Error ? error.message : String(error) });
+      }
+    }
+    return { ok: results.every((result) => result.ok), results };
   });
 
   app.post("/api/admin/targets/:id/force-stop", async (request, reply) => {
@@ -432,13 +531,15 @@ async function targetsPayload(
   runtimeModelDiscovery: RuntimeModelDiscovery
 ) {
   const active = await reservations.listActive(new Date());
+  const history = await reservations.list();
   return catalog.listTargets().map((target) =>
     targetJson(
       target,
       statuses.get(target.id),
       Array.from(new Set(active.filter((reservation) => reservation.targetIds.includes(target.id)).map(reservationDisplayUsername))),
       runtimeModelDiscovery.cachedDiscoveryAt(target.id),
-      runtimeModelDiscovery.startupOutcome(target.id)
+      runtimeModelDiscovery.startupOutcome(target.id),
+      lastUsedAtForTarget(history, target.id)
     )
   );
 }
@@ -508,6 +609,14 @@ function reservationProfileJson(profile: ReservationProfile) {
     createdAt: profile.createdAt.toISOString(),
     updatedAt: profile.updatedAt.toISOString()
   };
+}
+
+function lastUsedAtForTarget(reservations: Reservation[], targetId: string): Date | undefined {
+  const matching = reservations.filter((reservation) => reservation.targetIds.includes(targetId));
+  const preferred = matching.some((reservation) => !reservation.synthetic) ? matching.filter((reservation) => !reservation.synthetic) : matching;
+  const now = Date.now();
+  const timestamp = Math.max(...preferred.map((reservation) => reservation.endedAt?.getTime() ?? Math.min(reservation.expiresAt.getTime(), now)));
+  return Number.isFinite(timestamp) ? new Date(timestamp) : undefined;
 }
 
 async function selectionCostEstimates(
@@ -688,8 +797,10 @@ const targetSchema = {
     providerId: { type: "string" },
     modelIds: { type: "array", items: { type: "string" } },
     modelsMax: { type: "number" },
+    hostingMode: { type: "string", enum: ["dedicated", "multi-model"] },
     trafficModelPrefixes: { type: "array", items: { type: "string" } },
     litellmDisplayPrefix: { type: "string" },
+    aliasPriority: { type: "number" },
     litellm: {
       type: "object",
       properties: {
@@ -705,6 +816,7 @@ const targetSchema = {
     desired: { type: "string" },
     observed: { type: "string" },
     message: { type: "string" },
+    lastUsedAt: { type: "string" },
     startupEstimate: {
       type: "object",
       properties: {

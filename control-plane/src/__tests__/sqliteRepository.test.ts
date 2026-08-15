@@ -12,6 +12,8 @@ import { SqliteReservationRepository } from "../repository/SqliteReservationRepo
 import { SqliteTargetModelDiscoveryRepository } from "../repository/SqliteTargetModelDiscoveryRepository.js";
 import { SqliteTargetProvisioningJobRepository } from "../repository/SqliteTargetProvisioningJobRepository.js";
 import { SqliteTargetActivationRepository } from "../repository/SqliteTargetActivationRepository.js";
+import { SqliteModelMetadataRepository } from "../repository/SqliteModelMetadataRepository.js";
+import { SqliteModelFavoriteRepository } from "../repository/SqliteModelFavoriteRepository.js";
 
 let tempDir: string | undefined;
 
@@ -265,5 +267,26 @@ describe("SqliteTargetModelDiscoveryRepository", () => {
         }
       ]
     });
+  });
+});
+
+describe("SQLite model-selection repositories", () => {
+  it("persists model facts and user favorites across repository restarts", async () => {
+    tempDir = await mkdtemp(path.join(os.tmpdir(), "neuron-sqlite-"));
+    const databasePath = path.join(tempDir, "neuron.db");
+    const updatedAt = new Date("2026-08-10T14:30:00.000Z");
+    const metadata = new SqliteModelMetadataRepository(databasePath);
+    const favorites = new SqliteModelFavoriteRepository(databasePath);
+    await metadata.upsertCapability({ modelId: "model-1", intelligence: 87, domains: { coding: 92 }, provenance: { source: "manual", version: "2026-08" } }, updatedAt);
+    await metadata.upsertDeployment({ targetId: "target-1", modelId: "model-1", contextWindowTokens: 131_072, quantization: { format: "Q6", qualityRetentionPercent: 98.5 }, performance: { decodeTokensPerSecond: 42, prefillTokensPerSecond: 800, sampleCount: 3 } }, updatedAt);
+    await favorites.add({ username: "clint", targetId: "target-1", modelId: "model-1", createdAt: updatedAt });
+    metadata.close(); favorites.close();
+
+    const reopenedMetadata = new SqliteModelMetadataRepository(databasePath);
+    const reopenedFavorites = new SqliteModelFavoriteRepository(databasePath);
+    expect(await reopenedMetadata.listCapabilities()).toMatchObject([{ modelId: "model-1", intelligence: 87, domains: { coding: 92 }, updatedAt }]);
+    expect(await reopenedMetadata.listDeployments()).toMatchObject([{ targetId: "target-1", modelId: "model-1", contextWindowTokens: 131_072, performance: { decodeTokensPerSecond: 42 }, updatedAt }]);
+    expect(await reopenedFavorites.listForUser("clint")).toEqual([{ username: "clint", targetId: "target-1", modelId: "model-1", createdAt: updatedAt }]);
+    reopenedMetadata.close(); reopenedFavorites.close();
   });
 });

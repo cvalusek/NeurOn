@@ -1,9 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import {
-  loadModelSelectionCatalogFromEnvironment,
-  loadProfileAdvisorFromEnvironment,
-  parseModelSelectionCatalog
-} from "../config/modelSelectionConfig.js";
+import { loadProfileAdvisorFromEnvironment, parseModelSelectionCatalog } from "../config/modelSelectionConfig.js";
 import type { CapacityTarget, ModelDefinition } from "../domain/types.js";
 import { ModelCatalog } from "../services/ModelCatalog.js";
 import { ModelSelectionService, rankModelDeployments } from "../services/ModelSelectionService.js";
@@ -21,8 +17,6 @@ const models: ModelDefinition[] = [
 afterEach(() => {
   vi.unstubAllGlobals();
   for (const key of [
-    "MODEL_SELECTION_CATALOG_JSON",
-    "MODEL_SELECTION_CATALOG_FILE",
     "PROFILE_ADVISOR_API_BASE_URL",
     "PROFILE_ADVISOR_API_KEY",
     "PROFILE_ADVISOR_MODEL",
@@ -82,7 +76,7 @@ describe("model selection metadata", () => {
     const ranked = rankModelDeployments(deployments, {
       minimumContextTokens: 64_000,
       maximumHourlyUsd: 2,
-      domain: "coding",
+      domains: ["coding"],
       weights: { intelligence: 0.5, speed: 0.3, cost: 0.2 }
     });
     expect(ranked.map((deployment) => deployment.key)).toEqual(["small::fast"]);
@@ -108,12 +102,6 @@ describe("model selection metadata", () => {
     expect(() => new ModelSelectionService(catalog, { schemaVersion: 1, models: [], deployments: [{ targetId: "small", modelId: "smart" }] })).toThrow(/not selectable/);
   });
 
-  it("loads one private catalog source and refuses ambiguous sources", async () => {
-    process.env.MODEL_SELECTION_CATALOG_JSON = JSON.stringify({ schemaVersion: 1, models: [], deployments: [] });
-    await expect(loadModelSelectionCatalogFromEnvironment()).resolves.toEqual({ schemaVersion: 1, models: [], deployments: [] });
-    process.env.MODEL_SELECTION_CATALOG_FILE = "model-selection.local.private.json";
-    await expect(loadModelSelectionCatalogFromEnvironment()).rejects.toThrow(/only one/);
-  });
 });
 
 describe("profile advisor", () => {
@@ -142,10 +130,10 @@ describe("profile advisor", () => {
       useCase: "interactive coding",
       responseLength: "short",
       requirements: {
-        domain: "coding",
+        domains: ["coding"],
+        hostingMode: undefined,
         minimumContextTokens: 64_000,
         maximumHourlyUsd: 5,
-        minimumQualityRetentionPercent: undefined,
         weights: { intelligence: 0.6, speed: 0.3, cost: 0.1 }
       }
     });

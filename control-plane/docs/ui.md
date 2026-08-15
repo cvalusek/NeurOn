@@ -40,7 +40,8 @@ The main page contains:
 - every active reservation owned by the current user, each with independent
   extend and end controls
 - reservation profile cards with target and primary model aliases
-- profile creation for one or more target-specific model choices
+- links to dedicated profile creation/editing pages for one or more
+  target-specific model choices
 - duration quick buttons plus custom duration
 - keepalive quick buttons plus custom keepalive
 - start-form estimated cost based on target hourly cost, duration, and keepalive
@@ -49,9 +50,10 @@ The main page contains:
 - the current user's reservations expanded under each target status card
 - other users' reservations collapsed under each target status card
 
-Server status cards place targets with active reservations first, then
-unreserved targets whose desired state is on, then the remaining targets.
-Configured target order remains stable within each group.
+Server status cards place the current user's reserved targets first, then other
+targets whose desired state is on, then the remaining targets. Most recently
+used targets sort first inside each group. Expanded reservation details retain
+their state across status polling.
 
 The start form shows a projected cost before reservation creation when NeurOn
 knows the selected target's hourly cost. Reservation cards split cost into
@@ -66,13 +68,14 @@ so the live countdown does not increase API traffic.
 Reservation profiles are user-owned saved launch shapes. The home page treats
 profiles as the main reservation path: users pick from a compact profile
 selector, adjust duration/keepalive if needed, and reserve. Target and model
-choices live in the new-profile modal so the main page can remain compact. The
-builder shows target hourly cost, context, private capability metadata when
-configured, target-specific performance, and measured quantization retention.
-Hard filters remove deployments with missing or insufficient facts. The
-quality/speed/cost triangle, accessible sliders, category recommendations, and
-short wizard all update the same deterministic ranking. Applying a suggestion
-only fills the exact target-model choice; saving remains explicit.
+choices live on dedicated create/edit pages so the main page can remain compact
+and the selector has enough room. The builder shows target hourly cost,
+effective per-request context, durable capability metadata, target-specific
+performance, estimated quantization retention, favorites, usage, and LiteLLM
+aliases. Hard filters remove deployments with missing or insufficient facts.
+The Good/Fast/Cheap triangle ranks the remainder and shows category leaders;
+the short wizard updates the same deterministic requirements/preferences.
+Applying guidance only fills controls; saving remains explicit.
 Selecting a profile immediately updates the visible duration and keepalive
 buttons to its stored defaults. Single-model targets select their only model
 automatically; multi-model targets require an explicit model choice.
@@ -102,9 +105,11 @@ GET /help
 
 Home redirects a signed-in user with no profiles to `/welcome`. The page
 explains the cost-control loop, profile intent, duration, keepalive, and traffic
-reservation, then opens `/profiles?create=1&onboarding=1`. After the first
-profile is saved, the user returns to Home. `/help` exposes the same explanation
-at any time from **How NeurOn works** in the navigation.
+reservation, then opens `/profiles/new?onboarding=1`. After the first profile is
+saved, the user returns to Home. `/help` exposes the same explanation
+at any time from **Guide** in the navigation. Home does not redirect a user who
+has an active reservation created through an API or plugin even if they have no
+profile, so that reservation remains manageable.
 
 ## Profiles Page
 
@@ -112,12 +117,13 @@ Route:
 
 ```text
 GET /profiles
+GET /profiles/new
+GET /profiles/:id/edit
 ```
 
 The profiles page lists the current user's reservation profiles with target
 summaries, primary model aliases, default duration/keepalive, and delete
-actions. Users can create profiles directly from this page with the same
-target/model chooser used by the home page.
+actions. Create and edit actions open the dedicated target/model builder.
 
 ## Reservation History
 
@@ -172,6 +178,10 @@ Model cards show:
 - model trait pills such as parameter shape, instruction tuning, and quantization
 - short description
 - copy chips for the shortest alias, canonical ID, and other aliases
+- exact global and target-scoped LiteLLM names
+- target hourly cost, intelligence, prefill/decode speed, and diagnostic TTFT
+- estimated quantization quality retained, when measured
+- profile/reservation popularity and the current user's favorite state
 
 Aliases discovered from llama.cpp `/v1/models` are treated as authoritative.
 The shortest supported alias is rendered first and emphasized. The card does
@@ -200,7 +210,33 @@ expose comma-separated LiteLLM model route prefixes; for example,
 `clint-desktop/` links `clint-desktop/gemma-4-e2b` model names and traffic to
 that target. Declarative targets remain configuration-owned and must be copied
 to the database before Admin can edit them. **Discover models now** explicitly
-refreshes the cache and may activate a stopped target.
+refreshes the cache, benchmarks an activated runtime, and may activate a stopped
+target. **Rediscover all** runs targets one by one. AWS EC2 resource discovery
+hides instances already assigned to a NeurOn target by default.
+
+## Client Setup
+
+Route:
+
+```text
+GET /client-setup
+```
+
+The page shows global and target-scoped LiteLLM aliases and creates an OpenCode
+provider configuration for all models or one selected profile. It never creates
+a reservation or changes capacity.
+
+## Usage Reports
+
+Route:
+
+```text
+GET /admin/usage
+```
+
+Admins can inspect 7-, 30-, or 90-day UTC breakdowns by day, user, provider,
+target, and model. Reports use durable reservation/activation allocations and
+exclude synthetic traffic reservations.
 
 ## Activations Page
 

@@ -5,6 +5,7 @@ import Database from "better-sqlite3";
 import pg from "pg";
 import { migratePostgresSchema, POSTGRES_DATA_TABLES, POSTGRES_SCHEMA_VERSION, readPostgresSchemaState, validatePostgresSchema } from "./postgresSchema.js";
 import { parseReservationTargetSelections } from "../domain/reservationSelections.js";
+import { parseModelSelectionCatalog } from "../config/modelSelectionConfig.js";
 
 export const SQLITE_SOURCE_SCHEMA_VERSION = 1;
 
@@ -18,7 +19,10 @@ export const MIGRATION_ENTITY_NAMES = [
   "targetProvisioningJobs",
   "targetModelDiscoveries",
   "targetActivations",
-  "targetActivationReservations"
+  "targetActivationReservations",
+  "modelCapabilities",
+  "modelDeployments",
+  "modelFavorites"
 ] as const;
 
 export type MigrationEntityName = typeof MIGRATION_ENTITY_NAMES[number];
@@ -71,6 +75,11 @@ const sqliteLegacyActivationColumns: Record<string, string[]> = {
   target_runs: ["id", "target_id", "started_at", "ended_at", "status", "estimated_hourly_cost_usd", "estimated_cost_usd", "last_costed_at"],
   target_run_reservation_links: ["id", "target_run_id", "reservation_id", "started_at", "ended_at", "estimated_cost_usd"]
 };
+const sqliteAdditiveExpectedColumns: Record<string, string[]> = {
+  model_capability_metadata: ["model_id", "metadata_json", "updated_at"],
+  model_deployment_metadata: ["target_id", "model_id", "metadata_json", "updated_at"],
+  model_favorites: ["username", "target_id", "model_id", "created_at"]
+};
 
 const sqliteIntegerColumns = new Set([
   "reservations.keepalive_minutes",
@@ -111,6 +120,13 @@ const sqliteNullableColumns = new Set([
 const sqliteOptionalColumns: Record<string, string[]> = {
   reservations: ["target_selections"]
 };
+const sqlitePrimaryKeyColumns = new Set([
+  "reservations.id", "reservation_profiles.id", "api_keys.id", "auth_methods.id", "capacity_providers.id", "capacity_targets.id",
+  "target_creation_jobs.id", "target_model_discoveries.target_id", "target_activations.id", "target_activation_reservations.id",
+  "target_runs.id", "target_run_reservation_links.id", "model_capability_metadata.model_id",
+  "model_deployment_metadata.target_id", "model_deployment_metadata.model_id",
+  "model_favorites.username", "model_favorites.target_id", "model_favorites.model_id"
+]);
 
 export async function createConsistentSqliteBackup(
   sqlitePath: string,
@@ -270,7 +286,10 @@ function readSqliteDataset(sqlitePath: string): MigrationDataset {
       targetProvisioningJobs: rows(db, "select * from target_creation_jobs order by id asc").map((row) => ({ id: text(row.id), targetId: text(row.target_id), job: json(row.job_json) })),
       targetModelDiscoveries: rows(db, "select * from target_model_discoveries order by target_id asc").map((row) => ({ targetId: text(row.target_id), discovery: json(row.discovery_json), discoveredAt: iso(row.discovered_at) })),
       targetActivations,
-      targetActivationReservations
+      targetActivationReservations,
+      modelCapabilities: optionalRows(db, "model_capability_metadata", "select * from model_capability_metadata order by model_id asc").map((row) => ({ modelId: text(row.model_id), metadata: json(row.metadata_json), updatedAt: iso(row.updated_at) })),
+      modelDeployments: optionalRows(db, "model_deployment_metadata", "select * from model_deployment_metadata order by target_id asc, model_id asc").map((row) => ({ targetId: text(row.target_id), modelId: text(row.model_id), metadata: json(row.metadata_json), updatedAt: iso(row.updated_at) })),
+      modelFavorites: optionalRows(db, "model_favorites", "select * from model_favorites order by username asc, target_id asc, model_id asc").map((row) => ({ username: text(row.username), targetId: text(row.target_id), modelId: text(row.model_id), createdAt: iso(row.created_at) }))
     };
     validateDatasetSemantics(dataset);
     return dataset;
@@ -297,6 +316,10 @@ function sqliteTableExists(db: Database.Database, table: string): boolean {
   return Boolean(db.prepare("select 1 from sqlite_master where type = 'table' and name = ?").get(table));
 }
 
+function optionalRows(db: Database.Database, table: string, sql: string): Array<Record<string, unknown>> {
+  return sqliteTableExists(db, table) ? rows(db, sql) : [];
+}
+
 function compareId(left: Record<string, unknown>, right: Record<string, unknown>): number {
   const leftId = String(left.id);
   const rightId = String(right.id);
@@ -314,6 +337,9 @@ async function readPostgresDataset(client: pg.PoolClient): Promise<MigrationData
   const targetModelDiscoveries = await client.query("select * from target_model_discoveries order by target_id asc");
   const targetActivations = await client.query("select * from target_activations order by id asc");
   const targetActivationReservations = await client.query("select * from target_activation_reservations order by id asc");
+  const modelCapabilities = await client.query("select * from model_capability_metadata order by model_id asc");
+  const modelDeployments = await client.query("select * from model_deployment_metadata order by target_id asc, model_id asc");
+  const modelFavorites = await client.query("select * from model_favorites order by username asc, target_id asc, model_id asc");
   return {
     reservations: reservations.rows.map((row) => ({
       id: text(row.id), username: text(row.username), apiKeyName: nullableText(row.api_key_name), profileId: nullableText(row.profile_id), profileName: nullableText(row.profile_name),
@@ -341,7 +367,10 @@ async function readPostgresDataset(client: pg.PoolClient): Promise<MigrationData
     targetActivationReservations: targetActivationReservations.rows.map((row) => ({
       id: text(row.id), targetActivationId: text(row.target_activation_id), reservationId: text(row.reservation_id), startedAt: iso(row.started_at),
       endedAt: nullableIso(row.ended_at), estimatedCostUsd: number(row.estimated_cost_usd)
-    }))
+    })),
+    modelCapabilities: modelCapabilities.rows.map((row) => ({ modelId: text(row.model_id), metadata: jsonObject(row.metadata_json), updatedAt: iso(row.updated_at) })),
+    modelDeployments: modelDeployments.rows.map((row) => ({ targetId: text(row.target_id), modelId: text(row.model_id), metadata: jsonObject(row.metadata_json), updatedAt: iso(row.updated_at) })),
+    modelFavorites: modelFavorites.rows.map((row) => ({ username: text(row.username), targetId: text(row.target_id), modelId: text(row.model_id), createdAt: iso(row.created_at) }))
   };
 }
 
@@ -392,6 +421,15 @@ async function importDataset(client: pg.PoolClient, dataset: MigrationDataset): 
       [row.id, row.targetActivationId, row.reservationId, row.startedAt, row.endedAt, row.estimatedCostUsd]
     );
   }
+  for (const row of dataset.modelCapabilities) {
+    await client.query("insert into model_capability_metadata (model_id, metadata_json, updated_at) values ($1,$2::jsonb,$3)", [row.modelId, JSON.stringify(row.metadata), row.updatedAt]);
+  }
+  for (const row of dataset.modelDeployments) {
+    await client.query("insert into model_deployment_metadata (target_id, model_id, metadata_json, updated_at) values ($1,$2,$3::jsonb,$4)", [row.targetId, row.modelId, JSON.stringify(row.metadata), row.updatedAt]);
+  }
+  for (const row of dataset.modelFavorites) {
+    await client.query("insert into model_favorites (username, target_id, model_id, created_at) values ($1,$2,$3,$4)", [row.username, row.targetId, row.modelId, row.createdAt]);
+  }
 }
 
 async function countPostgresDataRows(client: pg.PoolClient): Promise<Record<string, number>> {
@@ -413,7 +451,7 @@ function validateSqliteIntegrity(db: Database.Database): void {
 function validateSqliteSchema(db: Database.Database): void {
   const tables = new Set((db.prepare("select name from sqlite_master where type = 'table'").all() as Array<{ name: string }>).map((row) => row.name));
   const problems: string[] = [];
-  const allowedTables = new Set([...Object.keys(sqliteExpectedColumns), ...Object.keys(sqliteLegacyActivationColumns)]);
+  const allowedTables = new Set([...Object.keys(sqliteExpectedColumns), ...Object.keys(sqliteLegacyActivationColumns), ...Object.keys(sqliteAdditiveExpectedColumns)]);
   for (const table of tables) {
     if (!allowedTables.has(table) && !table.startsWith("sqlite_")) problems.push(`unexpected table ${table}`);
   }
@@ -423,6 +461,9 @@ function validateSqliteSchema(db: Database.Database): void {
       continue;
     }
     validateSqliteTable(db, table, expected, problems, sqliteOptionalColumns[table] ?? []);
+  }
+  for (const [table, expected] of Object.entries(sqliteAdditiveExpectedColumns)) {
+    if (tables.has(table)) validateSqliteTable(db, table, expected, problems);
   }
   const legacyTables = Object.keys(sqliteLegacyActivationColumns);
   const presentLegacyTables = legacyTables.filter((table) => tables.has(table));
@@ -447,8 +488,8 @@ function validateSqliteTable(db: Database.Database, table: string, expected: str
     }
     const expectedType = sqliteIntegerColumns.has(key) ? "INTEGER" : sqliteRealColumns.has(key) ? "REAL" : "TEXT";
     if (actual.type.toUpperCase() !== expectedType) problems.push(`${key} has type ${actual.type || "untyped"}, expected ${expectedType}`);
-    const isPrimaryKey = column === "id" || (table === "target_model_discoveries" && column === "target_id");
-    if (isPrimaryKey && actual.pk !== 1) problems.push(`${key} is not the primary key`);
+    const isPrimaryKey = sqlitePrimaryKeyColumns.has(key);
+    if (isPrimaryKey && actual.pk < 1) problems.push(`${key} is not part of the primary key`);
     if (!isPrimaryKey && !sqliteNullableColumns.has(key) && actual.notnull !== 1) problems.push(`${key} nullability is incompatible`);
   }
   for (const column of optional) {
@@ -464,6 +505,15 @@ function validateDatasetSemantics(dataset: MigrationDataset): void {
   const reservationStatuses = new Set(["active", "done", "expired", "failed"]);
   const activationStatuses = new Set(["open", "closed"]);
   const provisioningStatuses = new Set(["draft", "running", "completed", "failed", "aborting", "aborted"]);
+  const capabilities = dataset.modelCapabilities.map((row) => {
+    if (!row.metadata || typeof row.metadata !== "object" || String((row.metadata as Record<string, unknown>).modelId) !== String(row.modelId)) throw new Error("SQLite source contains incompatible model capability metadata");
+    return row.metadata;
+  });
+  const deployments = dataset.modelDeployments.map((row) => {
+    if (!row.metadata || typeof row.metadata !== "object" || String((row.metadata as Record<string, unknown>).targetId) !== String(row.targetId) || String((row.metadata as Record<string, unknown>).modelId) !== String(row.modelId)) throw new Error("SQLite source contains incompatible model deployment metadata");
+    return row.metadata;
+  });
+  parseModelSelectionCatalog({ schemaVersion: 1, models: capabilities, deployments });
   if (dataset.reservations.some((row) => !reservationStatuses.has(String(row.status)))) {
     throw new Error("SQLite source contains an unsupported reservation status");
   }

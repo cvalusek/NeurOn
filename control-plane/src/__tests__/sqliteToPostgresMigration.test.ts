@@ -51,7 +51,10 @@ describePostgres("SQLite to PostgreSQL migration", () => {
         targetProvisioningJobs: 1,
         targetModelDiscoveries: 1,
         targetActivations: 1,
-        targetActivationReservations: 1
+        targetActivationReservations: 1,
+        modelCapabilities: 1,
+        modelDeployments: 1,
+        modelFavorites: 1
       });
       const migrated = await createReservationRepository({ driver: "postgres", connectionString: database.connectionString, maxConnections: 3 });
       expect(await migrated.repository.get(fixture.reservationId)).toMatchObject({
@@ -68,6 +71,9 @@ describePostgres("SQLite to PostgreSQL migration", () => {
       expect(await migrated.targetActivations.listReservationAllocations(fixture.reservationId)).toMatchObject([
         { targetActivationId: "activation-migrate", estimatedCostUsd: 0.123456, endedAt: fixture.endedAt }
       ]);
+      expect(await migrated.modelMetadata.listCapabilities()).toMatchObject([{ modelId: "model-migrate", intelligence: 89, domains: { coding: 94 } }]);
+      expect(await migrated.modelMetadata.listDeployments()).toMatchObject([{ targetId: "target-migrate", modelId: "model-migrate", contextWindowTokens: 202_752, quantization: { format: "Q6", qualityRetentionPercent: 98.4 } }]);
+      expect(await migrated.modelFavorites.listForUser("clint")).toMatchObject([{ targetId: "target-migrate", modelId: "model-migrate" }]);
       await migrated.close();
 
       const rerun = await migrateSqliteToPostgres({ sqlitePath: fixture.sqlitePath, pool: database.pool });
@@ -262,6 +268,9 @@ async function createPopulatedSqlite(): Promise<{ sqlitePath: string; reservatio
   });
   await handle.targetActivations.addReservationCost({ targetActivationId: "activation-migrate", reservationId: reservation.id, at: createdAt, estimatedCostUsd: 0.123456 });
   await handle.targetActivations.closeReservationsForActivation("activation-migrate", endedAt);
+  await handle.modelMetadata.upsertCapability({ modelId: "model-migrate", intelligence: 89, domains: { coding: 94 }, provenance: { source: "manual", version: "fixture-v1" } }, createdAt);
+  await handle.modelMetadata.upsertDeployment({ targetId: "target-migrate", modelId: "model-migrate", contextWindowTokens: 202_752, quantization: { format: "Q6", qualityRetentionPercent: 98.4 }, performance: { decodeTokensPerSecond: 33, prefillTokensPerSecond: 700, sampleCount: 3 }, provenance: { source: "NeurOn direct benchmark", version: "neuron-speed-v1" } }, endedAt);
+  await handle.modelFavorites.add({ username: "clint", targetId: "target-migrate", modelId: "model-migrate", createdAt });
   await handle.close();
   return { sqlitePath, reservationId: reservation.id, endedAt };
 }

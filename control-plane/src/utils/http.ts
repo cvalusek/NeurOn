@@ -63,7 +63,8 @@ export function targetJson(
   status?: TargetStatus,
   activeUsers: string[] = [],
   runtimeModelDiscoveredAt?: Date,
-  startupDiscoveryOutcome?: StartupRuntimeModelDiscoveryOutcome
+  startupDiscoveryOutcome?: StartupRuntimeModelDiscoveryOutcome,
+  lastUsedAt?: Date
 ) {
   return {
     id: target.id,
@@ -72,8 +73,10 @@ export function targetJson(
     providerId: target.providerId,
     modelIds: target.modelIds,
     modelsMax: target.modelsMax,
+    hostingMode: target.hostingMode,
     trafficModelPrefixes: litellmRoutePrefixes(target),
     litellmDisplayPrefix: litellmDisplayPrefix(target),
+    aliasPriority: target.aliasPriority,
     litellm: target.litellm,
     healthUrl: target.healthUrl,
     apiUrl: target.apiUrl,
@@ -85,7 +88,8 @@ export function targetJson(
     runtimeModelDiscovery: runtimeModelDiscoveredAt
       ? { cached: true, discoveredAt: runtimeModelDiscoveredAt.toISOString(), startupOutcome: startupDiscoveryOutcome }
       : { cached: false, startupOutcome: startupDiscoveryOutcome },
-    activeUsers
+    activeUsers,
+    lastUsedAt: lastUsedAt?.toISOString()
   };
 }
 

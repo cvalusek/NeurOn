@@ -24,6 +24,12 @@ export class InMemoryReservationProfileRepository implements ReservationProfileR
       .map(cloneProfile);
   }
 
+  async list(): Promise<ReservationProfile[]> {
+    return Array.from(this.profiles.values())
+      .sort((left, right) => left.username.localeCompare(right.username) || left.name.localeCompare(right.name) || left.id.localeCompare(right.id))
+      .map(cloneProfile);
+  }
+
   async update(id: string, input: ReservationProfile): Promise<ReservationProfile> {
     if (!this.profiles.has(id)) throw new Error(`Reservation profile not found: ${id}`);
     this.profiles.set(id, cloneProfile(input));

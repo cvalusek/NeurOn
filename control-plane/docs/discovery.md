@@ -29,7 +29,9 @@ discovery:
    URL, or the `/v1` origin derived from `healthUrl`.
 5. Records discovered models and the discovery time in the configured storage
    layer.
-6. Releases the operation lease and, when discovery started the capacity,
+6. For an explicit admin discovery, runs the small direct speed benchmark for
+   the discovered target-model deployments and stores its versioned medians.
+7. Releases the operation lease and, when discovery started the capacity,
    immediately reconciles the target against current reservation and traffic
    demand.
 
@@ -60,11 +62,15 @@ no persisted record. The Admin Targets status shows the cache timestamp, and a
 startup log and status outcome record the cache reuse reason. SQLite and
 Postgres preserve this marker across process restarts; memory storage does not.
 
+Startup bootstrap does not run the benchmark.
 `modelDiscovery.bootstrapOnStartup=true` requests initial automatic discovery;
 it does not mean rediscover on every NeurOn process start. Set it to `false` to
 disable automatic bootstrap. The authenticated **Discover models now** action
-is the explicit way to force a refresh. Background discovery after an explicit
-provisioning action remains independent of the process-start cache check.
+is the explicit way to force a refresh and benchmark. **Rediscover all** runs
+the same explicit operation for targets one at a time, so it does not activate
+and benchmark every runtime concurrently. Background discovery after an
+explicit provisioning action remains independent of the process-start cache
+check.
 
 When startup actually needs discovery, it, the Admin action, and post-provision
 background discovery use the same operation path. Concurrent discovery

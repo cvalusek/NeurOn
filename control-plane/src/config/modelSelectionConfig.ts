@@ -1,5 +1,3 @@
-import { readFile } from "node:fs/promises";
-import path from "node:path";
 import { z } from "zod";
 import type { ModelSelectionCatalogConfig, ProfileAdvisorConfig } from "../domain/types.js";
 
@@ -37,7 +35,8 @@ export const modelSelectionCatalogSchema = z.object({
       prefillTokensPerSecond: positiveMetricSchema.optional(),
       timeToFirstTokenSeconds: positiveMetricSchema.optional(),
       measuredAt: z.string().datetime({ offset: true }).optional(),
-      sampleCount: z.number().int().positive().optional()
+      sampleCount: z.number().int().positive().optional(),
+      provenance: provenanceSchema.optional()
     }).strict().optional(),
     provenance: provenanceSchema.optional()
   }).strict()).default([])
@@ -60,15 +59,6 @@ export const modelSelectionCatalogSchema = z.object({
 
 export function parseModelSelectionCatalog(value: unknown): ModelSelectionCatalogConfig {
   return modelSelectionCatalogSchema.parse(value) as ModelSelectionCatalogConfig;
-}
-
-export async function loadModelSelectionCatalogFromEnvironment(): Promise<ModelSelectionCatalogConfig | undefined> {
-  const inline = optionalEnv("MODEL_SELECTION_CATALOG_JSON");
-  const file = optionalEnv("MODEL_SELECTION_CATALOG_FILE");
-  if (inline && file) throw new Error("Set only one of MODEL_SELECTION_CATALOG_JSON or MODEL_SELECTION_CATALOG_FILE");
-  if (!inline && !file) return undefined;
-  const raw = inline ?? await readFile(path.resolve(process.cwd(), file!), "utf8");
-  return parseModelSelectionCatalog(JSON.parse(raw));
 }
 
 export function loadProfileAdvisorFromEnvironment(): ProfileAdvisorConfig | undefined {

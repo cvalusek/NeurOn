@@ -5,6 +5,8 @@ import type {
   ModelMetricProvenance,
   ModelSelectionCatalogConfig
 } from "../domain/types.js";
+import type { ModelMetadataRepository } from "../domain/interfaces.js";
+import { parseModelSelectionCatalog } from "../config/modelSelectionConfig.js";
 import { ModelCatalog } from "./ModelCatalog.js";
 
 const MIN_OBSERVED_SAMPLES = 3;
@@ -27,7 +29,11 @@ export interface ModelDeploymentSelectionView {
   modelId: string;
   modelDisplayName: string;
   modelFamily?: string;
+  aliases: string[];
+  hostingMode?: "dedicated" | "multi-model";
   contextWindowTokens?: number;
+  contextSource?: "operator" | "runtime" | "runtime-shared" | "configured";
+  contextConcurrency?: number;
   hourlyUsd?: number;
   intelligence?: number;
   domains: Record<string, number>;
@@ -35,13 +41,19 @@ export interface ModelDeploymentSelectionView {
   performance?: ModelDeploymentPerformance & { source: "configured" | "observed" };
   capabilityProvenance?: ModelMetricProvenance;
   deploymentProvenance?: ModelMetricProvenance;
+  favorite?: boolean;
+  profileCount?: number;
+  reservationCount?: number;
+  distinctUserCount?: number;
+  lastUsedAt?: string;
+  popularityScore?: number;
 }
 
 export interface ModelSelectionRequirements {
   minimumContextTokens?: number;
   maximumHourlyUsd?: number;
-  domain?: string;
-  minimumQualityRetentionPercent?: number;
+  domains?: string[];
+  hostingMode?: "dedicated" | "multi-model";
   weights: {
     intelligence: number;
     speed: number;
@@ -67,7 +79,8 @@ export class ModelSelectionService {
 
   constructor(
     private readonly catalog: ModelCatalog,
-    configured: ModelSelectionCatalogConfig = { schemaVersion: 1, models: [], deployments: [] }
+    configured: ModelSelectionCatalogConfig = { schemaVersion: 1, models: [], deployments: [] },
+    private readonly repository?: ModelMetadataRepository
   ) {
     for (const capability of configured.models) {
       const model = catalog.getModel(capability.modelId);
@@ -85,8 +98,60 @@ export class ModelSelectionService {
     }
   }
 
+  async initialize(): Promise<void> {
+    if (!this.repository) return;
+    const [capabilities, deployments] = await Promise.all([this.repository.listCapabilities(), this.repository.listDeployments()]);
+    if (capabilities.length === 0 && deployments.length === 0 && (this.capabilities.size > 0 || this.configuredDeployments.size > 0)) {
+      await Promise.all([
+        ...Array.from(this.capabilities.values()).map((value) => this.repository!.upsertCapability(value)),
+        ...Array.from(this.configuredDeployments.values()).map((value) => this.repository!.upsertDeployment(value))
+      ]);
+      return;
+    }
+    if (capabilities.length === 0 && deployments.length === 0) return;
+    const parsed = parseModelSelectionCatalog({ schemaVersion: 1, models: capabilities.map(withoutUpdatedAt), deployments: deployments.map(withoutUpdatedAt) });
+    this.capabilities.clear();
+    this.configuredDeployments.clear();
+    for (const capability of parsed.models) this.setCapability(capability);
+    for (const deployment of parsed.deployments) this.setDeployment(deployment);
+  }
+
+  async upsertCapability(input: ModelCapabilityMetadata): Promise<void> {
+    const parsed = parseModelSelectionCatalog({ schemaVersion: 1, models: [input], deployments: [] }).models[0];
+    this.setCapability(parsed);
+    await this.repository?.upsertCapability(parsed);
+  }
+
+  async upsertDeployment(input: ModelDeploymentMetadata): Promise<void> {
+    const parsed = parseModelSelectionCatalog({ schemaVersion: 1, models: [], deployments: [input] }).deployments[0];
+    this.setDeployment(parsed);
+    await this.repository?.upsertDeployment(parsed);
+  }
+
+  private setCapability(capability: ModelCapabilityMetadata): void {
+    const model = this.catalog.getModel(capability.modelId);
+    if (!model || model.id !== capability.modelId) throw new Error(`Model selection metadata references unknown or non-canonical model ${capability.modelId}`);
+    this.capabilities.set(capability.modelId, structuredClone(capability));
+  }
+
+  private setDeployment(deployment: ModelDeploymentMetadata): void {
+    const target = this.catalog.getTarget(deployment.targetId);
+    const model = this.catalog.getModel(deployment.modelId);
+    if (!target) throw new Error(`Model selection metadata references unknown target ${deployment.targetId}`);
+    if (!model || model.id !== deployment.modelId || !model.targetIds.includes(target.id)) throw new Error(`Model selection metadata deployment ${deployment.targetId}/${deployment.modelId} is not selectable`);
+    this.configuredDeployments.set(deploymentKey(deployment.targetId, deployment.modelId), structuredClone(deployment));
+  }
+
   availableDomains(): string[] {
     return Array.from(new Set(Array.from(this.capabilities.values()).flatMap((metadata) => Object.keys(metadata.domains ?? {})))).sort();
+  }
+
+  catalogConfig(): ModelSelectionCatalogConfig {
+    return {
+      schemaVersion: 1,
+      models: Array.from(this.capabilities.values()).sort((a, b) => a.modelId.localeCompare(b.modelId)).map((value) => structuredClone(value)),
+      deployments: Array.from(this.configuredDeployments.values()).sort((a, b) => a.targetId.localeCompare(b.targetId) || a.modelId.localeCompare(b.modelId)).map((value) => structuredClone(value))
+    };
   }
 
   recordObservation(targetId: string, modelId: string, observation: ModelPerformanceObservation): boolean {
@@ -117,6 +182,7 @@ export class ModelSelectionService {
         const deployment = this.configuredDeployments.get(key);
         const observed = aggregateObservations(this.observations.get(key) ?? []);
         const performance = mergePerformance(deployment?.performance, observed);
+        const runtimeContext = this.catalog.deploymentContext(target.id, model.id);
         views.push({
           key,
           targetId: target.id,
@@ -124,7 +190,11 @@ export class ModelSelectionService {
           modelId: model.id,
           modelDisplayName: model.displayName,
           modelFamily: model.modelFamily,
-          contextWindowTokens: deployment?.contextWindowTokens ?? model.contextWindowTokens,
+          aliases: this.catalog.deploymentAliases(target.id, model.id),
+          hostingMode: target.hostingMode,
+          contextWindowTokens: deployment?.contextWindowTokens ?? runtimeContext.tokens,
+          contextSource: deployment?.contextWindowTokens ? "operator" : runtimeContext.source,
+          contextConcurrency: deployment?.contextWindowTokens ? undefined : runtimeContext.concurrency,
           hourlyUsd: costs[target.id]?.hourlyUsd,
           intelligence: capability?.intelligence,
           domains: { ...(capability?.domains ?? {}) },
@@ -163,27 +233,24 @@ export function rankModelDeployments(
   const eligible = deployments.filter((deployment) => {
     if (requirements.minimumContextTokens && (deployment.contextWindowTokens ?? 0) < requirements.minimumContextTokens) return false;
     if (requirements.maximumHourlyUsd !== undefined && (deployment.hourlyUsd === undefined || deployment.hourlyUsd > requirements.maximumHourlyUsd)) return false;
-    if (requirements.domain && deployment.domains[requirements.domain] === undefined) return false;
-    if (requirements.minimumQualityRetentionPercent !== undefined && (deployment.quantization?.qualityRetentionPercent === undefined || deployment.quantization.qualityRetentionPercent < requirements.minimumQualityRetentionPercent)) return false;
+    if (requirements.domains?.some((domain) => deployment.domains[domain] === undefined)) return false;
+    if (requirements.hostingMode && deployment.hostingMode !== requirements.hostingMode) return false;
     return true;
   });
-  const qualityValues = eligible.map((deployment) => qualityValue(deployment, requirements.domain)).filter(isNumber);
+  const qualityValues = eligible.map((deployment) => qualityValue(deployment, requirements.domains)).filter(isNumber);
   const decodeValues = eligible.map((deployment) => deployment.performance?.decodeTokensPerSecond).filter(isNumber);
   const prefillValues = eligible.map((deployment) => deployment.performance?.prefillTokensPerSecond).filter(isNumber);
-  const latencyValues = eligible.map((deployment) => deployment.performance?.timeToFirstTokenSeconds).filter(isNumber);
   const costValues = eligible.map((deployment) => deployment.hourlyUsd).filter(isNumber);
   const weights = normalizedWeights(requirements.weights);
 
   return eligible.map((deployment) => {
-    const rawQuality = qualityValue(deployment, requirements.domain);
+    const rawQuality = qualityValue(deployment, requirements.domains);
     const qualityScore = rawQuality === undefined ? undefined : percentile(rawQuality, qualityValues, true);
     const decodeScore = deployment.performance?.decodeTokensPerSecond === undefined ? undefined : percentile(deployment.performance.decodeTokensPerSecond, decodeValues, true);
     const prefillScore = deployment.performance?.prefillTokensPerSecond === undefined ? undefined : percentile(deployment.performance.prefillTokensPerSecond, prefillValues, true);
-    const latencyScore = deployment.performance?.timeToFirstTokenSeconds === undefined ? undefined : percentile(deployment.performance.timeToFirstTokenSeconds, latencyValues, false);
     const speedParts = [
-      decodeScore === undefined ? undefined : { score: decodeScore, weight: 0.7 },
-      prefillScore === undefined ? undefined : { score: prefillScore, weight: 0.2 },
-      latencyScore === undefined ? undefined : { score: latencyScore, weight: 0.1 }
+      decodeScore === undefined ? undefined : { score: decodeScore, weight: 0.75 },
+      prefillScore === undefined ? undefined : { score: prefillScore, weight: 0.25 }
     ].filter(isDefined);
     const speedScore = speedParts.length ? weightedAverage(speedParts) : undefined;
     const costScore = deployment.hourlyUsd === undefined ? undefined : percentile(deployment.hourlyUsd, costValues, false);
@@ -201,7 +268,7 @@ export function rankModelDeployments(
       speedScore,
       costScore
     };
-  }).sort((left, right) => right.fitScore - left.fitScore || right.dataCoveragePercent - left.dataCoveragePercent || left.targetDisplayName.localeCompare(right.targetDisplayName));
+  }).sort((left, right) => right.fitScore - left.fitScore || Number(Boolean(right.favorite)) - Number(Boolean(left.favorite)) || (right.popularityScore ?? 0) - (left.popularityScore ?? 0) || right.dataCoveragePercent - left.dataCoveragePercent || left.targetDisplayName.localeCompare(right.targetDisplayName));
 }
 
 function deploymentKey(targetId: string, modelId: string): string {
@@ -267,8 +334,10 @@ function median(values: number[]): number | undefined {
   return sorted.length % 2 ? sorted[midpoint] : (sorted[midpoint - 1] + sorted[midpoint]) / 2;
 }
 
-function qualityValue(deployment: ModelDeploymentSelectionView, domain: string | undefined): number | undefined {
-  return domain ? deployment.domains[domain] : deployment.intelligence;
+function qualityValue(deployment: ModelDeploymentSelectionView, domains: string[] | undefined): number | undefined {
+  if (!domains?.length) return deployment.intelligence;
+  const values = domains.map((domain) => deployment.domains[domain]).filter(isNumber);
+  return values.length === domains.length ? Math.min(...values) : undefined;
 }
 
 function normalizedWeights(weights: ModelSelectionRequirements["weights"]): ModelSelectionRequirements["weights"] {
@@ -300,4 +369,10 @@ function isNumber(value: number | undefined): value is number {
 
 function isDefined<T>(value: T | undefined): value is T {
   return value !== undefined;
+}
+
+function withoutUpdatedAt<T extends { updatedAt: Date }>(value: T): Omit<T, "updatedAt"> {
+  const { updatedAt, ...rest } = value;
+  void updatedAt;
+  return rest;
 }

@@ -93,8 +93,11 @@ In the Admin UI, create an `aws-ec2` provider with provisioning disabled. Its
 instance Name-tag pattern defaults to `*.prefer.*`; set an explicit pattern to
 narrow that convention, or `*` to intentionally search every named instance
 visible to the task role. When creating a target, **Find EC2 instances** lists
-matching pending, running, stopping, and stopped instances and fills the chosen
-instance ID. This discovery is read-only and uses the same
+matching pending, running, stopping, and stopped instances that are not already
+assigned to a NeurOn target, then fills the chosen instance ID. The admin API
+supports an explicit `includeConfigured=true` diagnostic override. This keeps
+the normal add-target flow focused on missing capacity without changing or
+configuring any EC2 instance. Discovery is read-only and uses the same
 `ec2:DescribeInstances` permission as status checks. The target can also be
 supplied declaratively with the JSON or environment forms below.
 

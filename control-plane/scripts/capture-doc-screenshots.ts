@@ -16,8 +16,10 @@ const demoTarget: CapacityTarget = {
   provider: "docker",
   providerId: "docker-docs",
   modelIds: ["qwen-smol"],
+  hostingMode: "dedicated",
+  aliasPriority: 10,
   healthUrl: "http://docs.invalid/health",
-  costEstimate: { hourlyUsd: 12 }
+  costEstimate: { hourlyUsd: 1.25 }
 };
 const demoModels: ModelDefinition[] = [{
   id: "qwen-smol",
@@ -79,13 +81,17 @@ try {
   await page.getByLabel("Password").fill("docs-demo-password");
   await page.getByRole("button", { name: "Sign in" }).click();
   await page.getByRole("heading", { name: "Shared model capacity without paying for idle time" }).waitFor();
-  await page.screenshot({ path: path.join(outputDirectory, "welcome.png"), fullPage: true });
+  await page.screenshot({ path: path.join(outputDirectory, "welcome.png") });
 
   await page.getByRole("button", { name: "Create your first profile" }).click();
   const modal = page.locator("#profile-modal");
   await modal.getByLabel("Name").fill("Daily coding");
   await modal.getByLabel("Description").fill("PreFer Smol for quick coding and review");
-  await page.screenshot({ path: path.join(outputDirectory, "profile-create.png"), fullPage: true });
+  await modal.getByLabel("Description").evaluate((element) => (element as HTMLInputElement).blur());
+  await page.evaluate(() => window.scrollTo(0, 0));
+  await page.screenshot({ path: path.join(outputDirectory, "profile-create.png") });
+  await page.getByRole("img", { name: /Good, Fast, and Cheap ranking preference/ }).scrollIntoViewIfNeeded();
+  await page.screenshot({ path: path.join(outputDirectory, "model-selection.png") });
 
   await modal.getByRole("button", { name: "Save profile" }).click();
   await page.getByRole("heading", { name: "Start capacity" }).waitFor();
@@ -94,7 +100,11 @@ try {
   await built.reconciler.reconcile();
   await page.reload();
   await page.locator("#current-reservation").getByText("active", { exact: true }).waitFor();
-  await page.screenshot({ path: path.join(outputDirectory, "home-reservation.png"), fullPage: true });
+  await page.screenshot({ path: path.join(outputDirectory, "home-reservation.png") });
+
+  await page.goto(`${baseUrl}/client-setup`);
+  await page.getByRole("heading", { name: "Client setup" }).waitFor();
+  await page.screenshot({ path: path.join(outputDirectory, "client-setup.png") });
 } finally {
   await browser.close();
   await built.app.close();

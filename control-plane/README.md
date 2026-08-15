@@ -149,8 +149,6 @@ Environment variables:
 | `LITELLM_API_KEY` | unset | LiteLLM admin API key |
 | `LITELLM_TRAFFIC_POLL_SECONDS` | `60` | Poll `/spend/logs/v2`; set `0` to disable |
 | `LITELLM_TRAFFIC_LOOKBACK_SECONDS` | `300` | Recent traffic window |
-| `MODEL_SELECTION_CATALOG_FILE` | unset | Private versioned capability/deployment metadata file |
-| `MODEL_SELECTION_CATALOG_JSON` | unset | Inline alternative to the private metadata file |
 | `PROFILE_ADVISOR_API_BASE_URL` | unset | Optional OpenAI-compatible workload advisor base URL |
 | `PROFILE_ADVISOR_API_KEY` | unset | Optional advisor credential; keep private |
 | `PROFILE_ADVISOR_MODEL` | unset | Advisor model name; required with an advisor URL |
@@ -164,10 +162,12 @@ Environment variables:
 
 Model choices are configuration-first. Put the user-facing choices in each
 target's `models` array with display names, aliases, backend model IDs, and
-context metadata. The profile builder can filter exact target-model deployments
-by context, cost, domain, and measured quantization retention, then rank them by
-quality, observed speed, and cost. Private benchmark data is optional; no
-PreFer manifest is required. See [Guided Model Selection](docs/model-selection.md).
+context metadata. Admins add durable intelligence/domain facts and exact
+target-model measurements at **Admin > Model data**. The profile builder filters
+by context, cost, required domains, and dedicated versus multi-model hosting,
+then ranks the eligible choices with the Good/Fast/Cheap preference triangle.
+Quality-retention estimates remain display-only. No PreFer manifest is required.
+See [Guided Model Selection](docs/model-selection.md).
 
 When a target becomes healthy, NeurOn polls the target's OpenAI-compatible
 `/v1/models` endpoint and records matching runtime model IDs from
@@ -180,7 +180,8 @@ only when no reservation or traffic demand needs it. On later NeurOn restarts,
 the persisted result is hydrated and startup skips provider and model contact.
 Set `modelDiscovery.bootstrapOnStartup=false` to disable automatic bootstrap,
 or `true` to request an initial bootstrap for a target with configured models.
-Use authenticated **Admin > Targets > Discover models now** to force a refresh.
+Use authenticated **Admin > Targets > Discover models now** to force a refresh
+and speed measurement, or **Rediscover all** to process targets sequentially.
 Cache reuse across process restarts requires SQLite or Postgres storage; the
 memory driver intentionally has no state to hydrate after a restart.
 If discovery has not populated models yet, users can still reserve the target
@@ -221,18 +222,22 @@ reservations. See [docs/integrations.md](docs/integrations.md).
 ## LiteLLM Model Synchronization
 
 When `LITELLM_API_BASE_URL` and `LITELLM_API_KEY` are set, runtime discovery
-publishes each target's primary OpenAI-compatible model IDs to LiteLLM. Model
-routes default to `<target-id>/<runtime-model-id>`, and each target gets one
-reusable `neuron/<target-id>` credential containing its current runtime API base.
+publishes each target's primary IDs and aliases to LiteLLM. Scoped model routes
+use `<target-id>/<alias>`. Global alias collisions choose the target with the
+lowest numeric `aliasPriority`, and LiteLLM receives the same order for fallback
+when pre-call checks and a compatible ordered-fallback configuration are enabled.
+Each target gets one reusable `neuron/<target-id>` credential containing its
+current runtime API base.
 Set the target's `litellm.apiKeyEnv` to the name of an injected runtime secret
 when the runtime requires authentication; otherwise NeurOn supplies the
 non-empty placeholder `noapikey` required by the OpenAI-compatible LiteLLM
 client. See
 [docs/configuration.md](docs/configuration.md#litellm-discovered-model-sync).
 
-NeurOn never changes LiteLLM deployment block state when capacity stops. The
-route remains available so LiteLLM can queue requests while NeurOn starts the
-target.
+NeurOn never changes LiteLLM deployment block state when capacity stops. Current
+routes remain available so LiteLLM can queue requests while NeurOn starts the
+target. Aliases removed by a later discovery are retired under a non-callable
+NeurOn name instead of deleting LiteLLM history.
 
 ## Traffic Keepalive
 

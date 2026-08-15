@@ -2,7 +2,7 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { z } from "zod";
 import type { AppConfig, AuthMethod, CapacityProviderDefinition, CapacityTarget, ModelDefinition, NeuronProviderConfig, RuntimeProfile, StorageConfig } from "../domain/types.js";
-import { loadModelSelectionCatalogFromEnvironment, loadProfileAdvisorFromEnvironment } from "./modelSelectionConfig.js";
+import { loadProfileAdvisorFromEnvironment } from "./modelSelectionConfig.js";
 
 const targetSchema = z.object({
   id: z.string().min(1),
@@ -42,7 +42,9 @@ const targetSchema = z.object({
     .optional(),
   trafficModelPrefixes: z.array(z.string()).optional(),
   litellmDisplayPrefix: z.string().optional(),
+  aliasPriority: z.number().int().positive().optional(),
   modelsMax: z.number().int().positive().optional(),
+  hostingMode: z.enum(["dedicated", "multi-model"]).optional(),
   aws: z
     .object({
       cluster: z.string().optional(),
@@ -235,7 +237,6 @@ export async function loadConfig(): Promise<{ config: AppConfig; models: ModelDe
   const configuredProviders = await loadCapacityProviders();
   const runtimeProfiles = loadRuntimeProfiles();
   const capacityTargets = await loadCapacityTargets(configuredProviders, { syncNeuronTargets: !maintenanceMode });
-  const modelSelectionCatalog = await loadModelSelectionCatalogFromEnvironment();
   const modelsById = new Map<string, ModelDefinition>();
 
   for (const target of capacityTargets) {
@@ -285,7 +286,6 @@ export async function loadConfig(): Promise<{ config: AppConfig; models: ModelDe
       litellmApiKey: process.env.LITELLM_API_KEY,
       litellmTrafficPollSeconds: intEnv("LITELLM_TRAFFIC_POLL_SECONDS", 60),
       litellmTrafficLookbackSeconds: intEnv("LITELLM_TRAFFIC_LOOKBACK_SECONDS", 300),
-      modelSelectionCatalog,
       profileAdvisor: loadProfileAdvisorFromEnvironment(),
       runtimeProfiles,
       capacityProviders: configuredProviders,
@@ -591,7 +591,9 @@ function loadTargetsFromEnv(providers: CapacityProviderDefinition[]): unknown[] 
       }),
       trafficModelPrefixes: listEnv(`${prefix}_TRAFFIC_MODEL_PREFIXES`),
       litellmDisplayPrefix: displayPrefixEnv(`${prefix}_LITELLM_DISPLAY_PREFIX`),
+      aliasPriority: intOptionalEnv(`${prefix}_ALIAS_PRIORITY`),
       modelsMax: intOptionalEnv(`${prefix}_MODELS_MAX`),
+      hostingMode: enumOptionalEnv(`${prefix}_HOSTING_MODE`, ["dedicated", "multi-model"]),
       aws: provider === "aws-ecs" || provider === "aws-ecs-asg" || provider === "aws-ec2" ? loadAwsTargetFromEnv(prefix, provider) : undefined,
       docker: provider === "docker" ? loadDockerContainerTargetFromEnv(prefix) : undefined,
       dockerCompose: provider === "docker-compose" ? loadDockerTargetFromEnv(prefix) : undefined,
@@ -770,7 +772,9 @@ async function fetchNeuronTargets(provider: CapacityProviderDefinition, config: 
           contextLabel: model.contextLabel
         })),
       modelsMax: target.modelsMax,
+      hostingMode: target.hostingMode,
       litellmDisplayPrefix: target.litellmDisplayPrefix,
+      aliasPriority: target.aliasPriority,
       healthUrl: target.healthUrl,
       apiUrl: target.apiUrl,
       neuron: { targetId: target.id }
@@ -800,7 +804,9 @@ interface NeuronStatusResponse {
     displayName: string;
     modelIds: string[];
     modelsMax?: number;
+    hostingMode?: "dedicated" | "multi-model";
     litellmDisplayPrefix?: string;
+    aliasPriority?: number;
     healthUrl?: string;
     apiUrl?: string;
   }>;
@@ -870,6 +876,13 @@ function boolEnv(name: string): boolean | undefined {
   const value = env(name);
   if (!value) return undefined;
   return ["1", "true", "yes", "on"].includes(value.toLowerCase());
+}
+
+function enumOptionalEnv<T extends string>(name: string, values: readonly T[]): T | undefined {
+  const value = env(name);
+  if (value === undefined) return undefined;
+  if (values.includes(value as T)) return value as T;
+  throw new Error(`${name} must be one of ${values.join(", ")}`);
 }
 
 function jsonOptionalEnv(name: string): unknown | undefined {

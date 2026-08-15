@@ -53,6 +53,11 @@ export class SqliteReservationProfileRepository implements ReservationProfileRep
     return rows.map(fromRow);
   }
 
+  async list(): Promise<ReservationProfile[]> {
+    const rows = this.db.prepare("select * from reservation_profiles order by username asc, name asc, id asc").all() as ReservationProfileRow[];
+    return rows.map(fromRow);
+  }
+
   async update(id: string, input: ReservationProfile): Promise<ReservationProfile> {
     this.db.prepare(
       `update reservation_profiles set

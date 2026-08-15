@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import type pg from "pg";
 
-export const POSTGRES_SCHEMA_VERSION = 2;
+export const POSTGRES_SCHEMA_VERSION = 3;
 
 export const POSTGRES_DATA_TABLES = [
   "reservations",
@@ -13,7 +13,10 @@ export const POSTGRES_DATA_TABLES = [
   "target_creation_jobs",
   "target_model_discoveries",
   "target_activations",
-  "target_activation_reservations"
+  "target_activation_reservations",
+  "model_capability_metadata",
+  "model_deployment_metadata",
+  "model_favorites"
 ] as const;
 
 const schemaVersionOneSql = `
@@ -135,9 +138,33 @@ const schemaVersionTwoSql = `
   alter table reservations add column if not exists target_selections jsonb;
 `;
 
+const schemaVersionThreeSql = `
+  create table if not exists model_capability_metadata (
+    model_id text primary key,
+    metadata_json jsonb not null,
+    updated_at timestamptz not null
+  );
+  create table if not exists model_deployment_metadata (
+    target_id text not null,
+    model_id text not null,
+    metadata_json jsonb not null,
+    updated_at timestamptz not null,
+    primary key(target_id, model_id)
+  );
+  create table if not exists model_favorites (
+    username text not null,
+    target_id text not null,
+    model_id text not null,
+    created_at timestamptz not null,
+    primary key(username, target_id, model_id)
+  );
+  create index if not exists idx_model_favorites_username on model_favorites(username, created_at);
+`;
+
 const migrations = [
   { version: 1, name: "initial-centralized-schema", sql: schemaVersionOneSql },
-  { version: 2, name: "reservation-target-selections", sql: schemaVersionTwoSql }
+  { version: 2, name: "reservation-target-selections", sql: schemaVersionTwoSql },
+  { version: 3, name: "model-selection-metadata-and-favorites", sql: schemaVersionThreeSql }
 ] as const;
 
 const expectedColumns: Record<string, Record<string, { type: string; nullable: boolean }>> = {
@@ -171,6 +198,9 @@ const expectedColumns: Record<string, Record<string, { type: string; nullable: b
     id: required("text"), target_activation_id: required("text"), reservation_id: required("text"), started_at: required("timestamptz"),
     ended_at: optional("timestamptz"), estimated_cost_usd: required("numeric")
   },
+  model_capability_metadata: { model_id: required("text"), metadata_json: required("jsonb"), updated_at: required("timestamptz") },
+  model_deployment_metadata: { target_id: required("text"), model_id: required("text"), metadata_json: required("jsonb"), updated_at: required("timestamptz") },
+  model_favorites: { username: required("text"), target_id: required("text"), model_id: required("text"), created_at: required("timestamptz") },
   neuron_schema_migrations: {
     version: required("int4"), name: required("text"), checksum: required("text"), applied_at: required("timestamptz")
   },

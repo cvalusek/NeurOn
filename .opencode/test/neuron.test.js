@@ -7,6 +7,7 @@ import {
   isCompletionEvent,
   matchLiteLlmModel,
   matchesAllowedProvider,
+  mergeClientModels,
   refreshExistingReservation,
   resetNeurOnPluginState
 } from "../plugins/neuron.js";
@@ -30,6 +31,47 @@ const models = [
 ];
 
 describe("NeurOn OpenCode plugin", () => {
+  it("maps a shared alias to the highest-priority target", () => {
+    const match = matchLiteLlmModel(
+      [
+        { id: "fallback", modelIds: ["model-b"], aliasPriority: 20 },
+        { id: "primary", modelIds: ["model-a"], aliasPriority: 10 }
+      ],
+      [
+        { id: "model-a", aliases: ["coding"], targetIds: ["primary"] },
+        { id: "model-b", aliases: ["coding"], targetIds: ["fallback"] }
+      ],
+      "coding"
+    );
+    assert.deepEqual(match, { modelIds: ["model-a"], targetIds: ["primary"] });
+  });
+
+  it("maps the default target-scoped alias without extra prefix configuration", () => {
+    assert.deepEqual(
+      matchLiteLlmModel(
+        [{ id: "primary", modelIds: ["model-a"] }],
+        [{ id: "model-a", aliases: ["coding"], targetIds: ["primary"] }],
+        "primary/coding"
+      ),
+      { modelIds: ["model-a"], targetIds: ["primary"] }
+    );
+  });
+
+  it("maps persisted per-target aliases from the NeurOn client catalog", () => {
+    const merged = mergeClientModels(models, [{
+      targetId: "t1",
+      modelId: "gemma-4-26b-a4b",
+      aliases: { global: ["coding"], scoped: ["t1/coding"] }
+    }]);
+    assert.deepEqual(matchLiteLlmModel(targets, merged, "coding"), {
+      modelIds: ["gemma-4-26b-a4b"],
+      targetIds: ["t1"]
+    });
+    assert.deepEqual(matchLiteLlmModel(targets, merged, "t1/coding"), {
+      modelIds: ["gemma-4-26b-a4b"],
+      targetIds: ["t1"]
+    });
+  });
   beforeEach(() => resetNeurOnPluginState());
 
   it("maps LiteLLM display-prefixed model names to NeurOn model reservations", () => {

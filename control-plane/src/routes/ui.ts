@@ -11,6 +11,8 @@ import { ApiKeyService } from "../services/ApiKeyService.js";
 import { AuthMethodService } from "../services/AuthMethodService.js";
 import { ModelCatalog } from "../services/ModelCatalog.js";
 import type { ModelSelectionService } from "../services/ModelSelectionService.js";
+import type { ModelFavoriteService } from "../services/ModelFavoriteService.js";
+import type { UsageAnalyticsService } from "../services/UsageAnalyticsService.js";
 import { ProviderService } from "../services/ProviderService.js";
 import { ReservationService } from "../services/ReservationService.js";
 import { ReservationProfileService } from "../services/ReservationProfileService.js";
@@ -18,7 +20,7 @@ import { CostEstimationService } from "../services/CostEstimationService.js";
 import { TargetService } from "../services/TargetService.js";
 import { TargetProvisioningService } from "../services/TargetProvisioningService.js";
 import type { HassleOffSafetyView } from "../ui/html.js";
-import { activationPage, adminAuthPage, apiKeysPage, hassleOffSafetyPage, loginPage, profilesPage, providerAdminPage, reservationHistoryPage, reservationPage, startPage, targetAdminPage, updatesPage, welcomePage } from "../ui/html.js";
+import { activationPage, adminAuthPage, apiKeysPage, clientSetupPage, hassleOffSafetyPage, loginPage, modelMetadataPage, profileEditorPage, profilesPage, providerAdminPage, reservationHistoryPage, reservationPage, startPage, targetAdminPage, updatesPage, usagePage, welcomePage } from "../ui/html.js";
 import { requireUser } from "../utils/http.js";
 import type { HassleOffClient } from "../safety/HassleOffClient.js";
 
@@ -41,11 +43,19 @@ export function registerUiRoutes(
   capacityProvider: CapacityProvider,
   hassleOffClient: HassleOffClient | undefined,
   modelSelection: ModelSelectionService,
-  profileAdvisorEnabled: boolean
+  profileAdvisorEnabled: boolean,
+  modelFavorites: ModelFavoriteService,
+  usageAnalytics: UsageAnalyticsService
 ) {
   const sharedPasswordEnabled = config.sharedPasswordEnabled !== false;
   const enabledAuthMethods = () => authMethodService.listEnabled();
   const renderLoginPage = async (error = "") => loginPage(error, await enabledAuthMethods(), sharedPasswordEnabled);
+  const selectionDeploymentsForUser = async (user: ReturnType<typeof requireUser>, costs: Record<string, { hourlyUsd: number }>) => {
+    const [favorites, usage] = await Promise.all([modelFavorites.listForUser(user), usageAnalytics.deploymentUsage()]);
+    const favoriteKeys = new Set(favorites.map((value) => `${value.targetId}::${value.modelId}`));
+    const usageByKey = new Map(usage.map((value) => [`${value.targetId}::${value.modelId}`, value]));
+    return modelSelection.listDeployments(costs).map((deployment) => ({ ...deployment, ...usageByKey.get(deployment.key), favorite: favoriteKeys.has(deployment.key) }));
+  };
   app.get("/login", async (_request, reply) => reply.type("text/html").send(await renderLoginPage()));
   app.post("/login", async (request, reply) => {
     if (!sharedPasswordEnabled) return reply.code(403).type("text/html").send(await renderLoginPage("Shared password authentication is disabled"));
@@ -140,7 +150,7 @@ export function registerUiRoutes(
     if (profiles.length === 0 && (await reservationService.listActiveOwned(user)).length === 0) return reply.redirect("/welcome");
     const targets = catalog.listTargets().map((target) => ({ target, models: catalog.listModelsForTarget(target.id) }));
     const costEstimates = await startCostEstimates(targets.map(({ target }) => target), costEstimation);
-    return reply.type("text/html").send(startPage(user, targets, profiles, query.error, costEstimates, config.adminStatusPollSeconds, modelSelection.listDeployments(costEstimates), profileAdvisorEnabled));
+    return reply.type("text/html").send(startPage(user, targets, profiles, query.error, costEstimates, config.adminStatusPollSeconds, await selectionDeploymentsForUser(user, costEstimates), profileAdvisorEnabled));
   });
   app.get("/welcome", async (request, reply) => {
     const user = requireUser(request);
@@ -158,10 +168,37 @@ export function registerUiRoutes(
   });
   app.get("/profiles", async (request, reply) => {
     const query = z.object({ create: z.string().optional(), onboarding: z.string().optional(), error: z.string().optional() }).parse(request.query);
+    if (query.create === "1") return reply.redirect(`/profiles/new${query.onboarding === "1" ? "?onboarding=1" : ""}`);
     const user = requireUser(request);
     const targets = catalog.listTargets().map((target) => ({ target, models: catalog.listModelsForTarget(target.id) }));
     const costEstimates = await startCostEstimates(targets.map(({ target }) => target), costEstimation);
-    return reply.type("text/html").send(profilesPage(user, await reservationProfileService.listForUser(user), targets, { openCreate: query.create === "1", onboarding: query.onboarding === "1", error: query.error }, modelSelection.listDeployments(costEstimates), profileAdvisorEnabled, costEstimates));
+    return reply.type("text/html").send(profilesPage(user, await reservationProfileService.listForUser(user), targets, { openCreate: query.create === "1", onboarding: query.onboarding === "1", error: query.error }, await selectionDeploymentsForUser(user, costEstimates), profileAdvisorEnabled, costEstimates));
+  });
+  app.get("/client-setup", async (request, reply) => {
+    const user = requireUser(request);
+    const targets = catalog.listTargets();
+    return reply.type("text/html").send(clientSetupPage(
+      user,
+      await reservationProfileService.listForUser(user),
+      targets,
+      await selectionDeploymentsForUser(user, await startCostEstimates(targets, costEstimation))
+    ));
+  });
+  app.get("/profiles/new", async (request, reply) => {
+    const query = z.object({ onboarding: z.string().optional(), error: z.string().optional() }).parse(request.query);
+    const user = requireUser(request);
+    const targets = catalog.listTargets().map((target) => ({ target, models: catalog.listModelsForTarget(target.id) }));
+    const costEstimates = await startCostEstimates(targets.map(({ target }) => target), costEstimation);
+    return reply.type("text/html").send(profileEditorPage(user, targets, await selectionDeploymentsForUser(user, costEstimates), profileAdvisorEnabled, costEstimates, { onboarding: query.onboarding === "1", error: query.error }));
+  });
+  app.get("/profiles/:id/edit", async (request, reply) => {
+    const { id } = z.object({ id: z.string() }).parse(request.params);
+    const query = z.object({ error: z.string().optional() }).parse(request.query);
+    const user = requireUser(request);
+    const profile = await reservationProfileService.getOwned(id, user);
+    const targets = catalog.listTargets().map((target) => ({ target, models: catalog.listModelsForTarget(target.id) }));
+    const costEstimates = await startCostEstimates(targets.map(({ target }) => target), costEstimation);
+    return reply.type("text/html").send(profileEditorPage(user, targets, await selectionDeploymentsForUser(user, costEstimates), profileAdvisorEnabled, costEstimates, { profile, error: query.error }));
   });
   app.post("/api-keys", async (request, reply) => {
     const user = requireUser(request);
@@ -219,7 +256,29 @@ export function registerUiRoutes(
       return reply.redirect(raw.returnTo);
     } catch (error) {
       const message = error instanceof Error ? error.message : "Could not save reservation profile";
-      return reply.redirect(`/profiles?create=1&error=${encodeURIComponent(message)}`);
+      const onboarding = (request.body as { returnTo?: unknown } | undefined)?.returnTo === "/";
+      return reply.redirect(`/profiles/new?${onboarding ? "onboarding=1&" : ""}error=${encodeURIComponent(message)}`);
+    }
+  });
+  app.post("/reservation-profiles/:id", async (request, reply) => {
+    const { id } = z.object({ id: z.string() }).parse(request.params);
+    try {
+      const raw = z.object({
+        name: z.string().min(1), description: z.string().optional(),
+        modelIds: z.union([z.string(), z.array(z.string())]).optional(), targetId: z.string().optional(),
+        selectionTargetIds: z.union([z.string(), z.array(z.string())]).optional(),
+        selectionModels: z.union([z.string(), z.array(z.string())]).optional(),
+        returnTo: z.enum(["/", "/profiles"]).default("/profiles"),
+        defaultDurationMinutes: z.coerce.number().optional(), defaultKeepaliveMinutes: z.coerce.number().optional()
+      }).parse(request.body);
+      await reservationProfileService.updateForUser(id, requireUser(request), {
+        name: raw.name, description: raw.description, selections: profileSelectionsFromForm(raw),
+        defaultDurationMinutes: raw.defaultDurationMinutes, defaultKeepaliveMinutes: raw.defaultKeepaliveMinutes
+      });
+      return reply.redirect(raw.returnTo);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Could not update reservation profile";
+      return reply.redirect(`/profiles/${encodeURIComponent(id)}/edit?error=${encodeURIComponent(message)}`);
     }
   });
   app.post("/reservation-profiles/:id/delete", async (request, reply) => {
@@ -246,6 +305,12 @@ export function registerUiRoutes(
   app.get("/admin", async (_request, reply) => reply.redirect("/admin/auth"));
   app.get("/admin/reservations", async (request, reply) => reply.type("text/html").send(reservationHistoryPage(requireUser(request))));
   app.get("/admin/activations", async (request, reply) => reply.type("text/html").send(activationPage(requireUser(request))));
+  app.get("/admin/usage", async (request, reply) => reply.type("text/html").send(usagePage(requireUser(request))));
+  app.get("/admin/models", async (request, reply) => {
+    const targets = catalog.listTargets();
+    const costs = await startCostEstimates(targets, costEstimation);
+    return reply.type("text/html").send(modelMetadataPage(requireUser(request), modelSelection.listDeployments(costs), modelSelection.catalogConfig()));
+  });
   app.get("/admin/hassleoff", async (request, reply) => {
     const query = z.object({ error: z.string().optional(), success: z.string().optional() }).parse(request.query);
     const user = requireUser(request);
@@ -443,10 +508,14 @@ export function registerUiRoutes(
   app.get("/api/admin/providers/:id/resources", async (request, reply) => {
     try {
       const { id } = z.object({ id: z.string() }).parse(request.params);
+      const query = z.object({ includeConfigured: z.enum(["true", "false"]).optional() }).parse(request.query);
+      const includeConfigured = query.includeConfigured === "true";
       const provider = (await providerService.list()).find((candidate) => candidate.id === id);
       if (!provider) throw new Error(`Provider not found: ${id}`);
       if (!capacityProvider.discoverResources) throw new Error(`Provider ${id} does not support resource discovery`);
-      return { resources: await capacityProvider.discoverResources(provider) };
+      const resources = await capacityProvider.discoverResources(provider);
+      const configuredIds = new Set(catalog.listTargets().filter((target) => target.providerId === id && target.aws?.instanceId).map((target) => target.aws!.instanceId!));
+      return { resources: resources.filter((resource) => includeConfigured || !configuredIds.has(resource.id)).map((resource) => ({ ...resource, configured: configuredIds.has(resource.id) })), configuredCount: resources.filter((resource) => configuredIds.has(resource.id)).length };
     } catch (error) {
       const message = error instanceof Error ? error.message : "Could not discover provider resources";
       return reply.code(400).send({ error: message });
@@ -634,6 +703,7 @@ const authMethodFormSchema = z.object({
 const optionalNumber = z.preprocess((value) => value === "" ? undefined : value, z.coerce.number().optional());
 const optionalNonnegativeNumber = z.preprocess((value) => value === "" ? undefined : value, z.coerce.number().nonnegative().optional());
 const optionalPort = z.preprocess((value) => value === "" ? undefined : value, z.coerce.number().int().positive().max(65_535).optional());
+const optionalPositiveInteger = z.preprocess((value) => value === "" ? undefined : value, z.coerce.number().int().positive().optional());
 
 const targetFormSchema = z.object({
   id: z.string().min(1),
@@ -641,6 +711,8 @@ const targetFormSchema = z.object({
   providerId: z.string().min(1),
   modelIds: z.string().optional(),
   trafficModelPrefixes: z.string().optional(),
+  aliasPriority: optionalPositiveInteger,
+  hostingMode: z.enum(["", "dedicated", "multi-model"]).optional(),
   litellmCredentialName: z.string().optional(),
   litellmApiKeyEnv: z.string().optional(),
   litellmSyncDisabled: z.string().optional(),
@@ -677,6 +749,8 @@ function targetFromForm(body: z.infer<typeof targetFormSchema>, provider: Capaci
   target.modelIds = listField(body.modelIds);
   const trafficModelPrefixes = listField(body.trafficModelPrefixes);
   if (trafficModelPrefixes.length > 0) target.trafficModelPrefixes = trafficModelPrefixes;
+  if (body.aliasPriority !== undefined) target.aliasPriority = body.aliasPriority;
+  if (body.hostingMode) target.hostingMode = body.hostingMode;
   const litellmCredentialName = body.litellmCredentialName?.trim();
   const litellmApiKeyEnv = body.litellmApiKeyEnv?.trim();
   if (litellmCredentialName || litellmApiKeyEnv || body.litellmSyncDisabled === "on") {

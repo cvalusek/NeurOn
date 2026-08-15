@@ -1,9 +1,9 @@
-import type { ApiKey, AppConfig, AuthMethod, AuthenticatedUser, CapacityTarget, ModelDefinition, Reservation, ReservationProfile, RuntimeProfile, TargetStatus } from "../domain/types.js";
+import type { ApiKey, AppConfig, AuthMethod, AuthenticatedUser, CapacityTarget, ModelDefinition, ModelSelectionCatalogConfig, Reservation, ReservationProfile, RuntimeProfile, TargetStatus } from "../domain/types.js";
 import { DEFAULT_AWS_EC2_INSTANCE_NAME_PATTERN } from "../capacity/AwsEc2CapacityProvider.js";
 import type { AuthMethodView } from "../services/AuthMethodService.js";
 import type { ProviderView } from "../services/ProviderService.js";
 import type { TargetView } from "../services/TargetService.js";
-import { litellmRoutePrefixes } from "../litellm/modelRouting.js";
+import { litellmAliases, litellmRoutePrefixes } from "../litellm/modelRouting.js";
 import type { ShutdownStatus } from "../services/ShutdownCoordinator.js";
 import { safeGithubRepositoryUrl, type UpdateStatus } from "../services/UpdateChecker.js";
 import type { ModelDeploymentSelectionView } from "../services/ModelSelectionService.js";
@@ -77,7 +77,7 @@ export function layout(title: string, user: AuthenticatedUser | undefined, body:
     .drawer-tree[open] summary::before { transform: rotate(90deg); }
     .drawer-tree summary:hover, .drawer-tree summary:focus-visible { background: #eef2f0; outline: none; }
     .drawer-branch { display: grid; gap: 2px; padding: 0 8px 8px 28px; }
-    .drawer-branch a, .drawer-action { display: block; width: 100%; color: #1f2933; text-align: left; text-decoration: none; border: 0; border-radius: 6px; padding: 8px 10px; background: transparent; font-weight: 700; }
+    .drawer-branch a, .drawer-action { display: block; width: 100%; color: #1f2933; text-align: left; text-decoration: none; border: 0; border-radius: 6px; padding: 8px 10px; background: transparent; font: inherit; font-weight: 700; }
     .drawer-branch a:hover, .drawer-branch a:focus-visible, .drawer-action:hover, .drawer-action:focus-visible { background: #eef2f0; outline: none; }
     main { max-width: 1180px; margin: 0 auto; padding: 24px; }
     a { color: #0f766e; } form { margin: 0; }
@@ -112,6 +112,8 @@ export function layout(title: string, user: AuthenticatedUser | undefined, body:
     label.option input { position: absolute; opacity: 0; pointer-events: none; }
     .model-body { min-width: 0; width: 100%; }
     .model-head { display: flex; justify-content: space-between; gap: 8px; align-items: start; }
+    .favorite-button { background: transparent; color: #a16207; border: 0; padding: 2px 5px; font-size: 22px; line-height: 1; vertical-align: middle; }
+    .favorite-button[aria-pressed="true"] { color: #ca8a04; }
     .pill { border-radius: 999px; padding: 2px 8px; background: #eef2f0; color: #334155; font-size: 12px; font-weight: 750; white-space: nowrap; }
     .pill.on, .pill.healthy { background: #dff7ed; color: #05603a; }
     .pill.off, .pill.stopped { background: #e8edf3; color: #334155; }
@@ -132,12 +134,19 @@ export function layout(title: string, user: AuthenticatedUser | undefined, body:
     .profile-guide { border: 1px solid #c7d9d3; border-radius: 8px; background: #f5fbf9; padding: 14px; margin: 14px 0; }
     .profile-guide h3 { margin-top: 0; }
     .selection-filter-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 10px; }
-    .preference-grid { display: grid; grid-template-columns: minmax(220px, 320px) minmax(220px, 1fr); gap: 16px; align-items: center; margin-top: 14px; }
+    .preference-grid { display: grid; grid-template-columns: minmax(220px, 360px) minmax(220px, 1fr); gap: 16px; align-items: center; margin-top: 14px; }
     .preference-triangle { width: 100%; height: auto; touch-action: none; cursor: crosshair; }
     .preference-triangle polygon { fill: #e7f5f2; stroke: #5a9488; stroke-width: 2; }
     .preference-triangle circle { fill: #0f766e; stroke: white; stroke-width: 3; filter: drop-shadow(0 2px 3px rgba(23, 32, 42, 0.25)); }
-    .preference-sliders { display: grid; gap: 9px; }
-    .preference-sliders label { display: grid; grid-template-columns: 92px minmax(100px, 1fr) 44px; gap: 8px; align-items: center; }
+    .triangle-leaders { display: grid; gap: 10px; }
+    .category-leader { border: 1px solid #d8ddd7; border-radius: 8px; padding: 10px; background: #fbfcfb; }
+    .category-leader strong, .category-leader span { display: block; }
+    .requirement-tags { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 6px; }
+    .requirement-tags label { display: inline-flex; gap: 6px; align-items: center; border: 1px solid #aab4ad; border-radius: 999px; padding: 7px 10px; background: #fbfcfb; cursor: pointer; }
+    .requirement-tags label:has(input:checked) { border-color: #0f766e; background: #e7f5f2; }
+    .context-slider { width: min(100%, 360px); }
+    button.choice.duration-too-short { border-color: #c75b50; background: #fff0ee; color: #7a271a; }
+    button.choice.duration-long { border-color: #d6a742; background: #fff8df; color: #6b4f00; }
     .recommendation-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 8px; margin-top: 12px; }
     .recommendation-card { display: grid; gap: 5px; text-align: left; border: 1px solid #86b8ad; background: white; color: #1f2933; }
     .recommendation-card strong { color: #0f766e; }
@@ -163,9 +172,10 @@ export function layout(title: string, user: AuthenticatedUser | undefined, body:
     .chip-row { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
     input[type="number"], input[type="text"], input[type="password"], select, textarea { padding: 8px; border: 1px solid #aab4ad; border-radius: 6px; min-width: 140px; max-width: 100%; }
     textarea { width: min(100%, 720px); min-height: 92px; font: 13px ui-monospace, SFMono-Regular, Menlo, monospace; }
-    button { border: 0; border-radius: 6px; padding: 9px 13px; background: #0f766e; color: white; font-weight: 650; cursor: pointer; }
+    button, a.button { border: 0; border-radius: 6px; padding: 9px 13px; background: #0f766e; color: white; font-weight: 650; cursor: pointer; font: inherit; font-weight: 650; }
+    a.button { display: inline-block; text-decoration: none; }
     button.choice { border: 1px solid #aab4ad; background: #fbfcfb; color: #1f2933; }
-    button.secondary { background: #334155; }
+    button.secondary, a.button.secondary { background: #334155; }
     button.danger { background: #b42318; }
     button.large { font-size: 18px; padding: 14px 18px; }
     .badge { display: inline-block; border-radius: 999px; padding: 2px 8px; font-size: 12px; font-weight: 700; background: #e7ebe6; color: #334155; }
@@ -237,7 +247,8 @@ export function layout(title: string, user: AuthenticatedUser | undefined, body:
         <div class="drawer-branch">
           <a href="/">Home</a>
           <a href="/profiles">Profiles</a>
-          <a href="/help">How NeurOn works</a>
+          <a href="/help">Guide</a>
+          <a href="/client-setup">Client setup</a>
           <a href="/api-keys">API keys</a>
           ${user ? `<form method="post" action="/logout"><button class="drawer-action" type="submit">Sign out</button></form>` : ""}
         </div>
@@ -256,6 +267,7 @@ export function layout(title: string, user: AuthenticatedUser | undefined, body:
           <a href="/admin/auth">Auth</a>
           <a href="/admin/providers">Providers</a>
           <a href="/admin/targets">Targets</a>
+          <a href="/admin/models">Model data</a>
         </div>
       </details>
       <details class="drawer-tree">
@@ -263,6 +275,7 @@ export function layout(title: string, user: AuthenticatedUser | undefined, body:
         <div class="drawer-branch">
           <a href="/admin/reservations">Reservations</a>
           <a href="/admin/activations">Activations</a>
+          <a href="/admin/usage">Usage</a>
         </div>
       </details>` : ""}
     </nav>
@@ -336,7 +349,7 @@ export function loginPage(error = "", methods: Array<Pick<AuthMethod, "id" | "di
 }
 
 export function welcomePage(user: AuthenticatedUser, hasProfiles: boolean, helpMode: boolean): string {
-  const nextHref = hasProfiles ? "/" : "/profiles?create=1&onboarding=1";
+  const nextHref = hasProfiles ? "/" : "/profiles/new?onboarding=1";
   const nextLabel = hasProfiles ? "Return home" : "Create your first profile";
   return layout(helpMode ? "How NeurOn works" : "Welcome to NeurOn", user, `<section class="panel">
     <p class="pill">${helpMode ? "Guide" : "Getting started"}</p>
@@ -376,7 +389,7 @@ export function startPage(user: AuthenticatedUser, targets: Array<{ target: Capa
       ${profilePicker(profiles, targets)}
       <div class="profile-actions below">
         <button class="secondary" type="button" data-review-profile>Review selected</button>
-        <button class="secondary" type="button" data-open-modal="profile-modal">Create profile</button>
+        <a class="button secondary" href="/profiles/new">Create profile</a>
       </div>
       <p id="profile-selection-error" class="status" hidden></p>
       ${durationControls()}
@@ -592,11 +605,11 @@ export function startPage(user: AuthenticatedUser, targets: Array<{ target: Capa
       return '<div class="reservation-card compact"><div><div class="reservation-meta">' + statusBadge(reservation.status) + '<strong>' + escapeText(reservation.displayUsername ?? reservation.username) + '</strong><span class="muted">' + reservationTimeHtml(reservation) + '</span>' + (reservation.synthetic ? '<span class="pill" title="Recent observed traffic is temporarily keeping this already-needed target available.">traffic reservation</span>' : '') + '</div><div class="muted">' + escapeText(reservationTargets(reservation)) + ' | ' + (models.length ? models.length + ' models' : 'All models') + '</div></div></div>';
     };
     const orderTargetsForStatus = (capacityTargets, reservations) => {
-      const reservedTargetIds = new Set(reservations.flatMap(reservation => reservation.targets.map(target => target.id)));
+      const reservedTargetIds = new Set(reservations.filter(reservation => reservation.username === currentUser).flatMap(reservation => reservation.targets.map(target => target.id)));
       const priority = (target) => reservedTargetIds.has(target.id) ? 0 : target.desired === 'on' ? 1 : 2;
       return capacityTargets
         .map((target, index) => ({ target, index, priority: priority(target) }))
-        .sort((left, right) => left.priority - right.priority || left.index - right.index)
+        .sort((left, right) => left.priority - right.priority || (new Date(right.target.lastUsedAt ?? 0).getTime() - new Date(left.target.lastUsedAt ?? 0).getTime()) || left.index - right.index)
         .map(({ target }) => target);
     };
     const targetStatusCard = (target, reservations) => {
@@ -607,9 +620,9 @@ export function startPage(user: AuthenticatedUser, targets: Array<{ target: Capa
       const summary = '<span class="muted">' + relevant.length + ' active reservations</span><span class="muted">' + (target.activeUsers?.length ?? 0) + ' users</span><span class="muted">' + (modelCount || 'All') + ' models</span>';
       const userLine = target.activeUsers?.length ? '<span class="muted">Users: ' + escapeText(target.activeUsers.join(', ')) + '</span>' : '<span class="muted">No active users</span>';
       const mineRows = mine.length ? mine.map(reservation => reservationCard(reservation, false, target.id)).join('') : '';
-      const otherRows = others.length ? '<details class="status-details"><summary>' + others.length + ' other reservations</summary><div class="reservation-list">' + others.map(reservation => compactReservationCard(reservation, target.id)).join('') + '</div></details>' : '';
+      const otherRows = others.length ? '<details class="status-details" data-status-details="' + escapeText(target.id) + ':others"><summary>' + others.length + ' other reservations</summary><div class="reservation-list">' + others.map(reservation => compactReservationCard(reservation, target.id)).join('') + '</div></details>' : '';
       const rows = relevant.length ? mineRows + otherRows : '<p class="muted">No reservations for this server</p>';
-      return '<section class="target-status-card"><div class="target-status-head"><div><h3>' + escapeText(target.displayName) + '</h3><div class="target-status-meta">' + statusPill(target.desired) + statusPill(target.observed) + summary + startupEstimate(target) + '</div></div><div class="muted">' + escapeText(target.provider) + '</div></div><p class="muted">' + escapeText(target.message) + '</p><div class="target-status-meta">' + userLine + '</div><div class="reservation-list">' + rows + '</div></section>';
+      return '<section class="target-status-card" data-status-target="' + escapeText(target.id) + '"><div class="target-status-head"><div><h3>' + escapeText(target.displayName) + '</h3><div class="target-status-meta">' + statusPill(target.desired) + statusPill(target.observed) + summary + startupEstimate(target) + '</div></div><div class="muted">' + escapeText(target.provider) + '</div></div><p class="muted">' + escapeText(target.message) + '</p><div class="target-status-meta">' + userLine + '</div><div class="reservation-list">' + rows + '</div></section>';
     };
     const selectDuration = (button, focus = true) => {
       durationButtons.forEach(candidate => candidate.setAttribute('aria-pressed', candidate === button ? 'true' : 'false'));
@@ -642,7 +655,7 @@ export function startPage(user: AuthenticatedUser, targets: Array<{ target: Capa
       selectKeepalive(document.querySelector('[data-custom-keepalive]'), false);
     };
     profileTargetInputs.forEach(input => input.addEventListener('change', syncProfileSelections));
-    profileSelectInput?.addEventListener('change', () => applyProfile(selectedProfile()));
+    profileSelectInput?.addEventListener('change', () => { applyProfile(selectedProfile()); updateDurationGuidance(); });
     document.querySelector('[data-review-profile]')?.addEventListener('click', () => {
       const modal = document.querySelector('#profile-review-modal');
       document.querySelector('#profile-review-body').innerHTML = profileDetailHtml(selectedProfile());
@@ -686,18 +699,37 @@ export function startPage(user: AuthenticatedUser, targets: Array<{ target: Capa
     if (profilePickerSummary) profilePickerSummary.innerHTML = profileSummaryHtml(selectedProfile());
     syncProfileSelections();
     syncProfileDefaultsFromStart();
+    let latestTargets = [];
+    const updateDurationGuidance = () => {
+      const targetIds = selectedProfileTargetIds();
+      const startupMinutes = targetIds.map(id => latestTargets.find(target => target.id === id)?.startupEstimate?.avgSeconds).filter(value => typeof value === 'number').map(value => value / 60);
+      const recommended = startupMinutes.length ? Math.ceil(Math.max(...startupMinutes) + 2) : undefined;
+      durationButtons.forEach(button => {
+        const value = Number(button.dataset.duration);
+        const tooShort = recommended !== undefined && Number.isFinite(value) && value < recommended;
+        button.classList.toggle('duration-too-short', tooShort);
+        if (tooShort) button.title = 'Below the usual startup time plus two minutes; little useful reservation time may remain.';
+        else if (button.classList.contains('duration-long')) button.title = 'Longer reservation; review the estimated cost.';
+        else button.removeAttribute('title');
+      });
+    };
     async function refreshServerStatus() {
+      const statusRoot = document.querySelector('#server-status');
+      const openDetails = new Set([...statusRoot.querySelectorAll('details[open][data-status-details]')].map(details => details.dataset.statusDetails));
       const res = await fetch('/api/status');
       if (!res.ok) return;
       const data = await res.json();
+      latestTargets = data.capacityTargets;
       const current = data.activeReservations.filter(reservation => reservation.username === currentUser);
       document.querySelector('#current-reservation').innerHTML = current.length
         ? '<div class="reservation-list">' + current.map(reservation => reservationCard(reservation, true)).join('') + '</div>'
         : '<p class="muted">No active reservations. Choose a profile below, adjust the timing if needed, then select Reserve capacity.</p>';
       const orderedTargets = orderTargetsForStatus(data.capacityTargets, data.reservations);
-      document.querySelector('#server-status').innerHTML = orderedTargets.length
+      statusRoot.innerHTML = orderedTargets.length
         ? '<div class="status-grid">' + orderedTargets.map(target => targetStatusCard(target, data.reservations)).join('') + '</div>'
         : '<p class="muted">No targets configured</p>';
+      statusRoot.querySelectorAll('details[data-status-details]').forEach(details => { details.open = openDetails.has(details.dataset.statusDetails); });
+      updateDurationGuidance();
       updateCountdowns();
     }
     function updateCountdowns() {
@@ -757,6 +789,75 @@ export function reservationPage(user: AuthenticatedUser, reservation: Reservatio
   </script>`);
 }
 
+export function clientSetupPage(
+  user: AuthenticatedUser,
+  profiles: ReservationProfile[],
+  targets: CapacityTarget[],
+  deployments: ModelDeploymentSelectionView[]
+): string {
+  const targetsById = new Map(targets.map((target) => [target.id, target]));
+  const rows = deployments.flatMap((deployment) => {
+    const target = targetsById.get(deployment.targetId);
+    if (!target) return [];
+    const aliases = litellmAliases(target, deployment.modelId, deployment.aliases);
+    const profileIds = profiles
+      .filter((profile) => profile.selections.some((selection) => selection.targetId === deployment.targetId && selection.modelIds.includes(deployment.modelId)))
+      .map((profile) => profile.id);
+    return aliases.global.map((globalAlias, index) => ({
+      targetId: deployment.targetId,
+      targetDisplayName: deployment.targetDisplayName,
+      modelId: deployment.modelId,
+      modelDisplayName: deployment.modelDisplayName,
+      globalAlias,
+      scopedAlias: aliases.scoped[index],
+      priority: target.aliasPriority ?? 100,
+      contextWindowTokens: deployment.contextWindowTokens,
+      profileIds
+    }));
+  }).sort((left, right) => left.globalAlias.localeCompare(right.globalAlias) || left.priority - right.priority || left.targetDisplayName.localeCompare(right.targetDisplayName));
+  const serialized = JSON.stringify(rows).replace(/</gu, "\\u003c");
+  const options = profiles.map((profile) => `<option value="${escapeHtml(profile.id)}">${escapeHtml(profile.name)}</option>`).join("");
+  return layout("Client setup", user, `<section class="panel">
+    <div class="target-status-head"><div><h1>Client setup</h1><p class="muted">Copy a complete OpenCode model catalog or inspect the LiteLLM routes NeurOn publishes. Global aliases use target priority and fall back in numeric order; target-scoped aliases pin one deployment.</p></div><a class="button secondary" href="/api-keys">Create API key</a></div>
+    <p><label>Configuration scope<br><select id="client-profile"><option value="">All models (global fallback aliases)</option>${options}</select></label></p>
+  </section>
+  <section class="panel"><h2>OpenCode provider</h2><p class="muted">Replace the endpoint placeholder and keep secrets in environment variables. The NeurOn plugin reserves and waits for the selected route before OpenCode sends the request.</p><div class="inline-actions"><button type="button" data-copy-client="opencode-config">Copy config</button><button class="secondary" type="button" data-copy-client="opencode-env">Copy plugin environment</button><span class="muted" id="client-copy-status"></span></div><pre id="opencode-config"></pre><pre id="opencode-env">NEURON_API_BASE_URL=&lt;NEURON_BASE_URL&gt;
+NEURON_API_KEY=sk-neuron-...
+NEURON_ALLOWED_PROVIDERS=litellm</pre></section>
+  <section class="panel"><h2>Available aliases</h2><p class="muted">Use the global alias when you want automatic fallback. Use the scoped alias when a profile or workload must stay on a particular target.</p><div style="overflow:auto"><table><thead><tr><th>Model</th><th>Global route</th><th>Target-scoped route</th><th>Target priority</th></tr></thead><tbody id="client-aliases"></tbody></table></div></section>
+  <script>
+    (() => {
+      const routes = ${serialized};
+      const profile = document.querySelector('#client-profile');
+      const table = document.querySelector('#client-aliases');
+      const config = document.querySelector('#opencode-config');
+      const escapeText = (value) => String(value).replace(/[&<>"']/g, character => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[character]));
+      const visibleRoutes = () => profile.value ? routes.filter(route => route.profileIds.includes(profile.value)) : routes;
+      const render = () => {
+        const visible = visibleRoutes();
+        table.innerHTML = visible.map(route => '<tr><td><strong>' + escapeText(route.modelDisplayName) + '</strong><br><code>' + escapeText(route.modelId) + '</code></td><td><button class="copy-chip" type="button" data-copy-value="' + escapeText(route.globalAlias) + '">' + escapeText(route.globalAlias) + '</button></td><td><button class="copy-chip primary" type="button" data-copy-value="' + escapeText(route.scopedAlias) + '">' + escapeText(route.scopedAlias) + '</button><br><span class="muted">' + escapeText(route.targetDisplayName) + '</span></td><td>' + route.priority + '</td></tr>').join('') || '<tr><td colspan="4" class="muted">This profile has no model routes.</td></tr>';
+        const chosen = new Map();
+        visible.forEach(route => {
+          const modelID = profile.value ? route.scopedAlias : route.globalAlias;
+          if (!chosen.has(modelID)) chosen.set(modelID, { name: route.modelDisplayName + (profile.value ? ' · ' + route.targetDisplayName : ''), ...(route.contextWindowTokens ? { limit: { context: route.contextWindowTokens } } : {}) });
+        });
+        const body = { '$schema': 'https://opencode.ai/config.json', plugin: ['opencode-neuron'], provider: { litellm: { npm: '@ai-sdk/openai-compatible', name: 'LiteLLM through NeurOn', options: { baseURL: '<LITELLM_BASE_URL>/v1', apiKey: '{env:LITELLM_API_KEY}' }, models: Object.fromEntries(chosen) } } };
+        config.textContent = JSON.stringify(body, null, 2);
+      };
+      profile.addEventListener('change', render);
+      document.addEventListener('click', async (event) => {
+        const direct = event.target.closest('[data-copy-value]');
+        const block = event.target.closest('[data-copy-client]');
+        const value = direct?.dataset.copyValue ?? (block ? document.querySelector('#' + block.dataset.copyClient)?.textContent : undefined);
+        if (!value) return;
+        await navigator.clipboard?.writeText(value);
+        document.querySelector('#client-copy-status').textContent = 'Copied.';
+      });
+      render();
+    })();
+  </script>`);
+}
+
 export function apiKeysPage(user: AuthenticatedUser, apiKeys: ApiKey[], createdToken = ""): string {
   return layout("NeurOn API Keys", user, `<section class="panel">
     <h1>API keys</h1>
@@ -805,7 +906,7 @@ export function profilesPage(
   return layout("NeurOn Profiles", user, `<section class="panel">
     ${options.onboarding ? `<p class="pill">Getting started</p><h1>Create your first profile</h1><p class="muted">A profile connects the servers and models you use together. NeurOn will select the only model automatically on single-model targets.</p>` : ""}
     ${options.error ? `<p class="status">${escapeHtml(options.error)}</p>` : ""}
-    <div class="target-status-head"><h1>Profiles</h1><button type="button" data-open-modal="profile-modal">New profile</button></div>
+    <div class="target-status-head"><h1>Profiles</h1><a class="button" href="/profiles/new">New profile</a></div>
     <div class="summary-list">${rows}</div>
   </section>
   ${profileCreateModal(targets, initialTargetId, options.onboarding ? "/" : "/profiles", selectionDeployments, profileAdvisorEnabled, selectionCosts)}
@@ -872,6 +973,19 @@ export function profilesPage(
   </script>`);
 }
 
+export function profileEditorPage(
+  user: AuthenticatedUser,
+  targets: Array<{ target: CapacityTarget; models: ModelDefinition[] }>,
+  deployments: ModelDeploymentSelectionView[],
+  advisorEnabled: boolean,
+  costs: Record<string, { hourlyUsd: number }>,
+  options: { profile?: ReservationProfile; onboarding?: boolean; error?: string } = {}
+): string {
+  const initialTargetId = options.profile?.selections[0]?.targetId ?? targets[0]?.target.id ?? "";
+  const heading = options.profile ? `Edit ${options.profile.name}` : "New reservation profile";
+  return layout(heading, user, `${options.onboarding ? `<section class="panel"><p class="pill">Getting started</p><h1>Create your first profile</h1><p class="muted">Choose the target and model combinations used by this workflow. Nothing starts until you make a reservation.</p></section>` : ""}${options.error ? `<p class="status">${escapeHtml(options.error)}</p>` : ""}${profileCreateModal(targets, initialTargetId, options.onboarding ? "/" : "/profiles", deployments, advisorEnabled, costs, options.profile, true)}`);
+}
+
 function profileListCard(profile: ReservationProfile, targets: Array<{ target: CapacityTarget; models: ModelDefinition[] }>): string {
   const targetLookup = targetLookupForTargets(targets);
   const modelLookup = modelLookupForTargets(targets);
@@ -881,7 +995,7 @@ function profileListCard(profile: ReservationProfile, targets: Array<{ target: C
     const modelSummary = aliases.length ? aliases.map((alias) => `<span class="copy-chip">${escapeHtml(alias)}</span>`).join("") : `<span class="pill">All models</span>`;
     return `<div class="target-status-card"><div class="target-status-head"><strong>${escapeHtml(targetLookup[selection.targetId]?.displayName ?? selection.targetId)}</strong><span class="muted"><code>${escapeHtml(selection.targetId)}</code></span></div><div class="chip-row">${modelSummary}</div></div>`;
   }).join("");
-  return `<details class="drilldown"><summary><div><strong>${escapeHtml(profile.name)}</strong>${profile.description ? `<div class="muted">${escapeHtml(profile.description)}</div>` : ""}<div class="target-status-meta">${defaults ? `<span class="pill">${escapeHtml(defaults)}</span>` : ""}<span class="muted">${profile.selections.length} target selection${profile.selections.length === 1 ? "" : "s"}</span></div></div><form method="post" action="/reservation-profiles/${escapeHtml(profile.id)}/delete"><button class="danger" type="submit">Delete</button></form></summary><div class="drilldown-body">${selections}</div></details>`;
+  return `<details class="drilldown"><summary><div><strong>${escapeHtml(profile.name)}</strong>${profile.description ? `<div class="muted">${escapeHtml(profile.description)}</div>` : ""}<div class="target-status-meta">${defaults ? `<span class="pill">${escapeHtml(defaults)}</span>` : ""}<span class="muted">${profile.selections.length} target selection${profile.selections.length === 1 ? "" : "s"}</span></div></div><div class="inline-actions"><a class="button secondary" href="/profiles/${escapeHtml(profile.id)}/edit">Edit</a><form method="post" action="/reservation-profiles/${escapeHtml(profile.id)}/delete"><button class="danger" type="submit">Delete</button></form></div></summary><div class="drilldown-body">${selections}</div></details>`;
 }
 
 export function reservationHistoryPage(user: AuthenticatedUser): string {
@@ -952,6 +1066,67 @@ export function activationPage(user: AuthenticatedUser): string {
       document.querySelector('#activation-list').innerHTML = data.activations.length ? '<div class="summary-list">' + data.activations.map(activationCard).join('') + '</div>' : '<p class="muted">No activations recorded yet.</p>';
     }
     refresh();
+  </script>`);
+}
+
+export function usagePage(user: AuthenticatedUser): string {
+  return layout("Usage", user, `<section class="panel"><div class="target-status-head"><div><h1>Daily usage</h1><p class="muted">Cost and activated time are derived from durable activation allocations. Times are grouped by UTC day.</p></div><select id="usage-window"><option value="7">7 days</option><option value="30" selected>30 days</option><option value="90">90 days</option></select></div><div id="usage-report"><p class="muted">Loading…</p></div></section>
+  <script type="module">
+    const root = document.querySelector('#usage-report');
+    const escapeText = value => String(value ?? '').replace(/[&<>"']/g, character => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' }[character]));
+    const money = value => '$' + Number(value ?? 0).toFixed(2);
+    const table = (title, rows, date = false) => '<section class="panel"><h2>' + title + '</h2>' + (rows.length ? '<table><thead><tr><th>' + (date ? 'Date' : 'Name') + '</th><th>Reservations</th><th>Activated</th><th>Estimated cost</th></tr></thead><tbody>' + rows.map(row => '<tr><td>' + escapeText(row.label) + '</td><td>' + row.reservationCount + '</td><td>' + row.activatedMinutes.toFixed(1) + ' min</td><td>' + money(row.estimatedCostUsd) + '</td></tr>').join('') + '</tbody></table>' : '<p class="muted">No allocated usage in this window.</p>') + '</section>';
+    async function load() {
+      root.innerHTML = '<p class="muted">Loading…</p>';
+      const response = await fetch('/api/admin/usage?days=' + document.querySelector('#usage-window').value);
+      if (!response.ok) { root.textContent = 'Could not load usage.'; return; }
+      const data = await response.json();
+      root.innerHTML = '<div class="field-grid">' + table('By user', data.users) + table('By provider', data.providers) + table('By target', data.targets) + table('By model', data.models) + '</div>' + table('Daily', [...data.daily].sort((a,b) => b.key.localeCompare(a.key)), true);
+    }
+    document.querySelector('#usage-window').addEventListener('change', load); load();
+  </script>`);
+}
+
+export function modelMetadataPage(user: AuthenticatedUser, deployments: ModelDeploymentSelectionView[], stored: ModelSelectionCatalogConfig): string {
+  const capabilityByModel = new Map(stored.models.map((value) => [value.modelId, value]));
+  const deploymentByKey = new Map(stored.deployments.map((value) => [`${value.targetId}::${value.modelId}`, value]));
+  const models = Array.from(new Map(deployments.map((deployment) => [deployment.modelId, deployment])).values());
+  const capabilityForms = models.map((model) => {
+    const value = capabilityByModel.get(model.modelId);
+    const domains = Object.entries(value?.domains ?? {}).map(([name, score]) => `${name}=${score}`).join(", ");
+    return `<details class="drilldown"><summary><div><strong>${escapeHtml(model.modelDisplayName)}</strong><div class="muted"><code>${escapeHtml(model.modelId)}</code></div></div><span class="pill">${value?.intelligence === undefined ? "Not rated" : `Good ${formatMetric(value.intelligence)}`}</span></summary><div class="drilldown-body"><form data-model-metadata data-model-id="${escapeHtml(model.modelId)}"><div class="field-grid"><label>Good / intelligence (0–100)<br><input name="intelligence" type="number" min="0" max="100" step="0.1" value="${value?.intelligence ?? ""}"></label><label>Capabilities (<code>tag=score</code>)<br><input name="domains" value="${escapeHtml(domains)}" placeholder="coding=92, reasoning=88"></label><label>Source<br><input name="source" value="${escapeHtml(value?.provenance?.source ?? "")}" placeholder="Manual benchmark"></label><label>Version<br><input name="version" value="${escapeHtml(value?.provenance?.version ?? "")}"></label></div><button type="submit">Save model data</button><span class="muted" data-save-status></span></form></div></details>`;
+  }).join("");
+  const deploymentForms = deployments.map((deployment) => {
+    const value = deploymentByKey.get(deployment.key);
+    return `<details class="drilldown"><summary><div><strong>${escapeHtml(deployment.modelDisplayName)}</strong><div class="muted">${escapeHtml(deployment.targetDisplayName)} · <code>${escapeHtml(deployment.key)}</code></div></div><span class="pill">${value?.performance?.decodeTokensPerSecond ? `${formatMetric(value.performance.decodeTokensPerSecond)} decode t/s` : "Not benchmarked"}</span></summary><div class="drilldown-body"><form data-deployment-metadata data-target-id="${escapeHtml(deployment.targetId)}" data-model-id="${escapeHtml(deployment.modelId)}"><div class="field-grid"><label>LiteLLM aliases (comma-separated)<br><input name="aliases" value="${escapeHtml(deployment.aliases.join(", "))}"></label><label>Per-request context<br><input name="context" type="number" min="1" step="1" value="${value?.contextWindowTokens ?? ""}"></label><label>Quantization/artifact<br><input name="quantization" value="${escapeHtml(value?.quantization?.format ?? "")}"></label><label>Estimated quality retained (%)<br><input name="retention" type="number" min="0" max="100" step="0.1" value="${value?.quantization?.qualityRetentionPercent ?? ""}"></label><label>Reference artifact<br><input name="reference" value="${escapeHtml(value?.quantization?.reference ?? "")}"></label><label>Decode tokens/s<br><input name="decode" type="number" min="0" step="0.01" value="${value?.performance?.decodeTokensPerSecond ?? ""}"></label><label>Prefill tokens/s<br><input name="prefill" type="number" min="0" step="0.01" value="${value?.performance?.prefillTokensPerSecond ?? ""}"></label><label>Source<br><input name="source" value="${escapeHtml(value?.provenance?.source ?? value?.performance?.provenance?.source ?? "")}" placeholder="NeurOn benchmark"></label><label>Version<br><input name="version" value="${escapeHtml(value?.provenance?.version ?? value?.performance?.provenance?.version ?? "")}"></label></div><button type="submit">Save deployment data and aliases</button><span class="muted" data-save-status></span></form></div></details>`;
+  }).join("");
+  return layout("Model data", user, `<section class="panel"><h1>Model data</h1><p>Store model quality and deployment measurements in NeurOn. These durable records—not environment variables—drive profile guidance.</p><p class="muted">Only enter benchmark values you are permitted to store. Every rating should name its source and version.</p></section><section class="panel"><h2>Model quality and capabilities</h2><div class="summary-list">${capabilityForms || `<p class="muted">No models are known.</p>`}</div></section><section class="panel"><h2>Target/model deployments</h2><div class="summary-list">${deploymentForms || `<p class="muted">No deployments are known.</p>`}</div></section>
+  <script type="module">
+    const number = (form, name) => form.elements[name].value === '' ? undefined : Number(form.elements[name].value);
+    const provenance = form => form.elements.source.value.trim() ? { source: form.elements.source.value.trim(), ...(form.elements.version.value.trim() ? { version: form.elements.version.value.trim() } : {}) } : undefined;
+    document.addEventListener('submit', async event => {
+      const form = event.target.closest('[data-model-metadata], [data-deployment-metadata]'); if (!form) return;
+      event.preventDefault(); const status = form.querySelector('[data-save-status]'); status.textContent = ' Saving…';
+      try {
+        let path; let body;
+        if (form.matches('[data-model-metadata]')) {
+          const domains = Object.fromEntries(form.elements.domains.value.split(',').map(value => value.trim()).filter(Boolean).map(value => { const [key, score] = value.split('='); return [key.trim(), Number(score)]; }));
+          path = '/api/admin/model-metadata/models/' + encodeURIComponent(form.dataset.modelId);
+          body = { intelligence: number(form, 'intelligence'), ...(Object.keys(domains).length ? { domains } : {}), provenance: provenance(form) };
+        } else {
+          const aliases = form.elements.aliases.value.split(',').map(value => value.trim()).filter(Boolean);
+          const aliasResponse = await fetch('/api/admin/targets/' + encodeURIComponent(form.dataset.targetId) + '/models/' + encodeURIComponent(form.dataset.modelId) + '/aliases', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ aliases }) });
+          if (!aliasResponse.ok) throw new Error((await aliasResponse.json()).error || 'Alias save failed');
+          const format = form.elements.quantization.value.trim();
+          const retention = number(form, 'retention'); const reference = form.elements.reference.value.trim();
+          const decode = number(form, 'decode'); const prefill = number(form, 'prefill');
+          path = '/api/admin/model-metadata/deployments/' + encodeURIComponent(form.dataset.targetId) + '/' + encodeURIComponent(form.dataset.modelId);
+          body = { contextWindowTokens: number(form, 'context'), ...(format ? { quantization: { format, ...(retention === undefined ? {} : { qualityRetentionPercent: retention }), ...(reference ? { reference } : {}) } } : {}), ...((decode || prefill) ? { performance: { ...(decode ? { decodeTokensPerSecond: decode } : {}), ...(prefill ? { prefillTokensPerSecond: prefill } : {}), measuredAt: new Date().toISOString(), sampleCount: 1 } } : {}), provenance: provenance(form) };
+        }
+        const response = await fetch(path, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+        if (!response.ok) throw new Error((await response.json()).error || 'Save failed'); status.textContent = ' Saved';
+      } catch (error) { status.textContent = ' ' + (error instanceof Error ? error.message : 'Save failed'); }
+    });
   </script>`);
 }
 
@@ -1247,7 +1422,8 @@ export function targetAdminPage(user: AuthenticatedUser, targets: TargetView[], 
     : `<a href="/admin/providers">Add a provider first</a>`;
   const modal = providers.length > 0 ? targetCreateModal(providers, runtimeProfiles) : "";
   return layout("NeurOn Targets", user, `<section class="panel">
-    <div class="target-status-head"><h1>Targets</h1>${addTarget}</div>
+    <div class="target-status-head"><h1>Targets</h1><div class="inline-actions"><button class="secondary" type="button" data-rediscover-all>Rediscover and benchmark all</button>${addTarget}</div></div>
+    <p class="muted" data-rediscover-all-status>Runs targets one at a time. Each target is discovered, briefly benchmarked, and returned through the normal demand controller before the next target begins.</p>
     ${error ? `<p class="status">${escapeHtml(error)}</p>` : ""}
     ${createdTargetId ? `<div class="secret-box"><span>Target <code>${escapeHtml(createdTargetId)}</code> was created.</span><button type="button" data-provision-target="${escapeHtml(createdTargetId)}">Provision target</button></div>` : ""}
     <div class="summary-list">${rows}</div>
@@ -1301,6 +1477,9 @@ function targetCreateModal(providers: ProviderView[], runtimeProfiles: RuntimePr
         <p><label>Health URL override<br><input name="healthUrl" type="text" placeholder="http://runtime.internal:8080/health"></label></p>
         <p><label>Hourly cost override (USD)<br><input name="estimatedHourlyCostUsd" type="number" min="0" step="0.000001" placeholder="leave empty for provider discovery"></label></p>
         <p><label>Configured model IDs<br><input name="modelIds" type="text" placeholder="qwen-3.6,gemma-4"></label></p>
+        <p><label>Hosting mode<br><select name="hostingMode"><option value="">Unknown</option><option value="dedicated">Dedicated model host</option><option value="multi-model">Multi-model host</option></select></label></p>
+        <p><label>LiteLLM alias priority<br><input name="aliasPriority" type="number" min="1" step="1" value="100"></label></p>
+        <p class="muted">Lower priorities are tried first; later targets become ordered fallbacks for colliding aliases.</p>
         <p><label>LiteLLM model route prefixes<br><input name="trafficModelPrefixes" type="text" placeholder="defaults to &lt;target-id&gt;/"></label></p>
         <p class="muted">Comma-separated prefixes link matching LiteLLM model names and traffic to this target. When omitted, NeurOn uses <code>&lt;target-id&gt;/</code>.</p>
         <p><label>LiteLLM credential name override<br><input name="litellmCredentialName" type="text" placeholder="neuron/&lt;target-id&gt;"></label></p>
@@ -1376,6 +1555,19 @@ function targetAdminScript(providers: ProviderView[], runtimeProfiles: RuntimePr
       const previous = button.textContent;
       button.textContent = 'Copied';
       setTimeout(() => { button.textContent = previous; }, 900);
+    });
+    document.addEventListener('click', async (event) => {
+      const button = event.target.closest('[data-rediscover-all]');
+      if (!button) return;
+      event.preventDefault(); button.disabled = true;
+      const status = document.querySelector('[data-rediscover-all-status]'); status.textContent = 'Rediscovery is running one target at a time…';
+      try {
+        const response = await fetch('/api/admin/targets/rediscover-all', { method: 'POST' });
+        const result = await response.json();
+        const failures = result.results?.filter(item => !item.ok) ?? [];
+        status.textContent = failures.length ? (result.results.length - failures.length) + ' succeeded; ' + failures.length + ' failed. ' + failures.map(item => item.targetId + ': ' + item.error).join(' | ') : 'All targets were rediscovered and benchmarked.';
+      } catch { status.textContent = 'Rediscovery failed before a result was returned.'; }
+      finally { button.disabled = false; await refreshTargetStatus(); }
     });
     document.addEventListener('click', async (event) => {
       const button = event.target.closest('[data-provision-target]');
@@ -1667,6 +1859,9 @@ function targetEditPanel(target: TargetView, providers: ProviderView[], runtimeP
       <p><label>Health URL override<br><input name="healthUrl" type="text" value="${escapeHtml(target.healthUrl ?? "")}"></label></p>
       <p><label>Hourly cost override (USD)<br><input name="estimatedHourlyCostUsd" type="number" min="0" step="0.000001" value="${escapeHtml(String(target.costEstimate?.hourlyUsd ?? ""))}" placeholder="leave empty for provider discovery"></label></p>
       <p><label>Configured model IDs<br><input name="modelIds" type="text" value="${escapeHtml(target.modelIds.join(","))}"></label></p>
+      <p><label>Hosting mode<br><select name="hostingMode"><option value="" ${target.hostingMode ? "" : "selected"}>Unknown</option><option value="dedicated" ${target.hostingMode === "dedicated" ? "selected" : ""}>Dedicated model host</option><option value="multi-model" ${target.hostingMode === "multi-model" ? "selected" : ""}>Multi-model host</option></select></label></p>
+      <p><label>LiteLLM alias priority<br><input name="aliasPriority" type="number" min="1" step="1" value="${target.aliasPriority ?? 100}"></label></p>
+      <p class="muted">Lower priorities are preferred; matching aliases on higher-numbered targets are fallbacks.</p>
       <p><label>LiteLLM model route prefixes<br><input name="trafficModelPrefixes" type="text" value="${escapeHtml(target.trafficModelPrefixes?.join(",") ?? "")}" placeholder="defaults to ${escapeHtml(target.id)}/"></label></p>
       <p class="muted">Comma-separated prefixes link matching LiteLLM model names and traffic to this target. When omitted, NeurOn uses <code>${escapeHtml(target.id)}/</code>.</p>
       <p><label>LiteLLM credential name override<br><input name="litellmCredentialName" type="text" value="${escapeHtml(target.litellm?.credentialName ?? "")}" placeholder="neuron/${escapeHtml(target.id)}"></label></p>
@@ -2242,9 +2437,7 @@ function durationControls(): string {
       <button class="choice" type="button" data-duration="2" aria-pressed="true">2 min</button>
       <button class="choice" type="button" data-duration="5" aria-pressed="false">5 min</button>
       <button class="choice" type="button" data-duration="15" aria-pressed="false">15 min</button>
-      <button class="choice" type="button" data-duration="30" aria-pressed="false">30 min</button>
-      <button class="choice" type="button" data-duration="60" aria-pressed="false">1 hour</button>
-      <button class="choice" type="button" data-duration="120" aria-pressed="false">2 hours</button>
+      <button class="choice duration-long" type="button" data-duration="30" aria-pressed="false">30 min</button>
     </div>
     <div class="row" style="margin-top: 12px;">
       <button class="choice" type="button" data-custom-duration="true" aria-pressed="false">Custom</button>
@@ -2269,35 +2462,30 @@ function keepaliveControls(): string {
   </div>`;
 }
 
-function profileDefaultControls(): string {
+function profileDefaultControls(durationMinutes = 2, keepaliveMinutes = 2): string {
+  const durationChoices = [1, 2, 5, 15, 30];
+  const keepaliveChoices = [1, 2, 5, 15];
+  const durationIsCustom = !durationChoices.includes(durationMinutes);
+  const keepaliveIsCustom = !keepaliveChoices.includes(keepaliveMinutes);
   return `<div class="field-grid">
     <div>
       <h2>Default duration</h2>
       <div class="row" aria-label="Profile default duration">
-        <button class="choice" type="button" data-profile-duration="1" aria-pressed="false">1 min</button>
-        <button class="choice" type="button" data-profile-duration="2" aria-pressed="true">2 min</button>
-        <button class="choice" type="button" data-profile-duration="5" aria-pressed="false">5 min</button>
-        <button class="choice" type="button" data-profile-duration="15" aria-pressed="false">15 min</button>
-        <button class="choice" type="button" data-profile-duration="30" aria-pressed="false">30 min</button>
-        <button class="choice" type="button" data-profile-duration="60" aria-pressed="false">1 hour</button>
-        <button class="choice" type="button" data-profile-duration="120" aria-pressed="false">2 hours</button>
+        ${durationChoices.map((value) => `<button class="choice${value >= 30 ? " duration-long" : ""}" type="button" data-profile-duration="${value}" aria-pressed="${String(!durationIsCustom && durationMinutes === value)}">${value} min</button>`).join("")}
       </div>
       <div class="row" style="margin-top: 12px;">
-        <button class="choice" type="button" data-profile-custom-duration="true" aria-pressed="false">Custom</button>
-        <label id="profile-custom-duration-wrap" class="hidden">Minutes <input id="profile-custom-duration" type="number" min="1" max="720" value="2"></label>
+        <button class="choice" type="button" data-profile-custom-duration="true" aria-pressed="${String(durationIsCustom)}">Custom</button>
+        <label id="profile-custom-duration-wrap" class="${durationIsCustom ? "" : "hidden"}">Minutes <input id="profile-custom-duration" type="number" min="1" max="720" value="${durationMinutes}"></label>
       </div>
     </div>
     <div>
       <h2>Default keepalive</h2>
       <div class="row" aria-label="Profile default keepalive">
-        <button class="choice" type="button" data-profile-keepalive="1" aria-pressed="false">1 min</button>
-        <button class="choice" type="button" data-profile-keepalive="2" aria-pressed="true">2 min</button>
-        <button class="choice" type="button" data-profile-keepalive="5" aria-pressed="false">5 min</button>
-        <button class="choice" type="button" data-profile-keepalive="15" aria-pressed="false">15 min</button>
+        ${keepaliveChoices.map((value) => `<button class="choice" type="button" data-profile-keepalive="${value}" aria-pressed="${String(!keepaliveIsCustom && keepaliveMinutes === value)}">${value} min</button>`).join("")}
       </div>
       <div class="row" style="margin-top: 12px;">
-        <button class="choice" type="button" data-profile-custom-keepalive="true" aria-pressed="false">Custom</button>
-        <label id="profile-custom-keepalive-wrap" class="hidden">Minutes <input id="profile-custom-keepalive" type="number" min="1" max="60" value="2"></label>
+        <button class="choice" type="button" data-profile-custom-keepalive="true" aria-pressed="${String(keepaliveIsCustom)}">Custom</button>
+        <label id="profile-custom-keepalive-wrap" class="${keepaliveIsCustom ? "" : "hidden"}">Minutes <input id="profile-custom-keepalive" type="number" min="1" max="60" value="${keepaliveMinutes}"></label>
       </div>
     </div>
   </div>`;
@@ -2309,43 +2497,57 @@ function profileCreateModal(
   returnTo = "/",
   deployments: ModelDeploymentSelectionView[] = [],
   advisorEnabled = false,
-  costs: Record<string, { hourlyUsd: number }> = {}
+  costs: Record<string, { hourlyUsd: number }> = {},
+  profile?: ReservationProfile,
+  standalone = false
 ): string {
   const deploymentByKey = new Map(deployments.map((deployment) => [deployment.key, deployment]));
-  return `<div id="profile-modal" class="modal" hidden>
-    <div class="modal-dialog profile-builder-dialog">
-      <div class="target-status-head"><h2>New reservation profile</h2><button class="secondary" type="button" data-close-modal>Close</button></div>
-      <form id="profile-form" method="post" action="/reservation-profiles">
+  const selections = new Map((profile?.selections ?? []).map((selection) => [selection.targetId, selection.modelIds]));
+  const durationMinutes = profile?.defaultDurationMinutes ?? 2;
+  const keepaliveMinutes = profile?.defaultKeepaliveMinutes ?? 2;
+  const rootClass = standalone ? "profile-builder-page" : "modal";
+  const dialogClass = standalone ? "panel profile-builder-dialog" : "modal-dialog profile-builder-dialog";
+  return `<div id="profile-modal" class="${rootClass}"${standalone ? "" : " hidden"}>
+    <div class="${dialogClass}">
+      <div class="target-status-head"><h1>${profile ? "Edit" : "New"} reservation profile</h1>${standalone ? `<a href="/profiles">Back to profiles</a>` : `<button class="secondary" type="button" data-close-modal>Close</button>`}</div>
+      <form id="profile-form" method="post" action="${profile ? `/reservation-profiles/${escapeHtml(profile.id)}` : "/reservation-profiles"}">
         <input type="hidden" name="returnTo" value="${escapeHtml(returnTo)}">
-        <input id="profile-duration-minutes" type="hidden" name="defaultDurationMinutes" value="2">
-        <input id="profile-keepalive-minutes" type="hidden" name="defaultKeepaliveMinutes" value="2">
+        <input id="profile-duration-minutes" type="hidden" name="defaultDurationMinutes" value="${durationMinutes}">
+        <input id="profile-keepalive-minutes" type="hidden" name="defaultKeepaliveMinutes" value="${keepaliveMinutes}">
         <div class="profile-builder-layout">
           <div>
             <div class="field-grid">
-              <p><label>Name<br><input name="name" type="text" placeholder="Daily coding" required></label></p>
-              <p><label>Description<br><input name="description" type="text" placeholder="Target and models for this workflow"></label></p>
+              <p><label>Name<br><input name="name" type="text" placeholder="Daily coding" value="${escapeHtml(profile?.name ?? "")}" required></label></p>
+              <p><label>Description<br><input name="description" type="text" placeholder="Target and models for this workflow" value="${escapeHtml(profile?.description ?? "")}"></label></p>
             </div>
-            ${profileDefaultControls()}
+            ${profileDefaultControls(durationMinutes, keepaliveMinutes)}
             ${profileSelectionGuide(deployments)}
             <h2>Targets and models</h2>
             <p class="muted">Add every server this workflow needs, then choose the models to prepare on each one. Recommendations select one starting point; you can still add other targets.</p>
-            <div class="profile-target-selections">${targets.map(({ target, models }, index) => profileTargetSelection(target, models, target.id === initialTargetId || (index === 0 && !initialTargetId), deploymentByKey, costs[target.id]?.hourlyUsd)).join("")}</div>
+            <div class="profile-target-selections">${targets.map(({ target, models }, index) => {
+              const existingModels = selections.get(target.id);
+              const selected = existingModels !== undefined || (!profile && (target.id === initialTargetId || (index === 0 && !initialTargetId)));
+              return profileTargetSelection(target, models, selected, deploymentByKey, costs[target.id]?.hourlyUsd, existingModels ?? []);
+            }).join("")}</div>
           </div>
           ${profileAdvisorPanel(advisorEnabled)}
         </div>
-        <div class="actions"><button type="submit">Save profile</button></div>
+        <div class="actions"><button type="submit">${profile ? "Save changes" : "Save profile"}</button></div>
       </form>
     </div>
     ${profileSelectionClientScript(deployments, advisorEnabled)}
+    ${standalone ? profileEditorClientScript() : ""}
   </div>`;
 }
 
 function profileSelectionGuide(deployments: ModelDeploymentSelectionView[]): string {
   const domains = Array.from(new Set(deployments.flatMap((deployment) => Object.keys(deployment.domains)))).sort();
   const domainOptions = domains.map((domain) => `<option value="${escapeHtml(domain)}">${escapeHtml(domainLabel(domain))}</option>`).join("");
+  const contexts = Array.from(new Set(deployments.map((deployment) => deployment.contextWindowTokens).filter((value): value is number => typeof value === "number" && value > 0))).sort((left, right) => left - right);
+  const contextStops = contexts.map((value, index) => `<option value="${index + 1}" label="${escapeHtml(formatTokenCount(value))}"></option>`).join("");
   return `<section class="profile-guide" aria-labelledby="profile-guide-title">
     <h3 id="profile-guide-title">Find the best fit</h3>
-    <p class="muted">Requirements remove deployments that cannot work. The quality, speed, and cost preferences rank what remains.</p>
+    <p class="muted">Requirements remove deployments that cannot work. The Good, Fast, and Cheap triangle ranks what remains.</p>
     <details>
       <summary><strong>Quick profile wizard</strong></summary>
       <div class="selection-filter-grid" style="margin-top: 10px;">
@@ -2357,21 +2559,22 @@ function profileSelectionGuide(deployments: ModelDeploymentSelectionView[]): str
       <button id="profile-wizard-run" type="button" style="margin-top: 10px;">Find a fit</button>
     </details>
     <div class="selection-filter-grid" style="margin-top: 14px;">
-      <label>Minimum context<br><select id="profile-min-context"><option value="0">Any known size</option><option value="8000">8K+</option><option value="32000">32K+</option><option value="64000">64K+</option><option value="128000">128K+</option><option value="256000">256K+</option><option value="1000000">1M+</option></select></label>
-      <label>Domain strength<br><select id="profile-domain"><option value="">General intelligence</option>${domainOptions}</select></label>
+      <label>Minimum context<br><input id="profile-min-context" class="context-slider" type="range" min="0" max="${contexts.length}" step="1" value="0" list="profile-context-stops" data-context-values="${escapeHtml(JSON.stringify(contexts))}"><datalist id="profile-context-stops"><option value="0" label="Any"></option>${contextStops}</datalist><output id="profile-min-context-output">No minimum</output></label>
+      <label>Hosting mode<br><select id="profile-hosting-mode"><option value="">Dedicated or multi-model</option><option value="dedicated">Dedicated model host</option><option value="multi-model">Multi-model host</option></select></label>
       <label>Maximum target cost ($/hr)<br><input id="profile-max-cost" type="number" min="0" step="0.01" placeholder="No maximum"></label>
-      <label>Minimum measured retention (%)<br><input id="profile-min-retention" type="number" min="0" max="100" step="0.1" placeholder="Not required"></label>
     </div>
+    ${domains.length ? `<fieldset><legend>Required capabilities</legend><p class="muted">A deployment must have measurements for every selected capability.</p><div id="profile-domains" class="requirement-tags">${domains.map((domain) => `<label><input type="checkbox" value="${escapeHtml(domain)}" data-profile-domain> ${escapeHtml(domainLabel(domain))}</label>`).join("")}</div></fieldset>` : ""}
     <div class="preference-grid">
-      <svg id="profile-preference-triangle" class="preference-triangle" viewBox="0 0 320 280" role="img" aria-label="Quality, speed, and cost preference triangle. Use the synchronized sliders to make keyboard adjustments.">
+      <svg id="profile-preference-triangle" class="preference-triangle" viewBox="0 0 320 280" role="img" tabindex="0" aria-label="Good, Fast, and Cheap ranking preference. Center balances all three; corners favor one category.">
         <polygon points="160,28 24,244 296,244"></polygon>
-        <text x="160" y="18" text-anchor="middle">Quality</text><text x="16" y="266">Cheap</text><text x="304" y="266" text-anchor="end">Fast</text>
+        <text x="160" y="18" text-anchor="middle">Good</text><text x="16" y="266">Cheap</text><text x="304" y="266" text-anchor="end">Fast</text>
         <circle id="profile-preference-point" cx="160" cy="172" r="9"></circle>
       </svg>
-      <div class="preference-sliders">
-        <label>Quality <input id="profile-weight-intelligence" type="range" min="0" max="100" value="34"><output id="profile-weight-intelligence-output">34%</output></label>
-        <label>Speed <input id="profile-weight-speed" type="range" min="0" max="100" value="33"><output id="profile-weight-speed-output">33%</output></label>
-        <label>Cost <input id="profile-weight-cost" type="range" min="0" max="100" value="33"><output id="profile-weight-cost-output">33%</output></label>
+      <div class="triangle-leaders">
+        <p class="muted">Drag toward a corner to emphasize it. The center gives Good, Fast, and Cheap equal priority. Nearby center, edge, and corner presets snap into place.</p>
+        <div id="profile-leader-good" class="category-leader"><strong>Good leader</strong><span class="muted">Not measured</span></div>
+        <div id="profile-leader-fast" class="category-leader"><strong>Fast leader</strong><span class="muted">Not measured</span></div>
+        <div id="profile-leader-cheap" class="category-leader"><strong>Cheap leader</strong><span class="muted">Not measured</span></div>
       </div>
     </div>
     <div id="profile-filter-status" class="muted filter-status" aria-live="polite"></div>
@@ -2402,20 +2605,26 @@ function profileSelectionClientScript(deployments: ModelDeploymentSelectionView[
       const byKey = new Map(deployments.map(deployment => [deployment.key, deployment]));
       const form = root.querySelector('#profile-form');
       const contextInput = root.querySelector('#profile-min-context');
-      const domainInput = root.querySelector('#profile-domain');
+      const contextOutput = root.querySelector('#profile-min-context-output');
+      const contextValues = JSON.parse(contextInput?.dataset.contextValues ?? '[]');
+      const domainInputs = [...root.querySelectorAll('[data-profile-domain]')];
+      const hostingInput = root.querySelector('#profile-hosting-mode');
       const maxCostInput = root.querySelector('#profile-max-cost');
-      const minRetentionInput = root.querySelector('#profile-min-retention');
-      const intelligenceInput = root.querySelector('#profile-weight-intelligence');
-      const speedInput = root.querySelector('#profile-weight-speed');
-      const costInput = root.querySelector('#profile-weight-cost');
       const point = root.querySelector('#profile-preference-point');
       const triangle = root.querySelector('#profile-preference-triangle');
       const recommendations = root.querySelector('#profile-recommendations');
       const filterStatus = root.querySelector('#profile-filter-status');
+      let weights = { intelligence: 1, speed: 1, cost: 1 };
       const escapeText = (value) => String(value ?? '').replace(/[&<>"']/g, character => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' }[character]));
       const numberValue = (input) => input?.value === '' ? undefined : Number(input?.value);
       const isNumber = (value) => typeof value === 'number' && Number.isFinite(value);
-      const qualityValue = (deployment) => domainInput.value ? deployment.domains?.[domainInput.value] : deployment.intelligence;
+      const selectedDomains = () => domainInputs.filter(input => input.checked).map(input => input.value);
+      const qualityValue = (deployment) => {
+        const domains = selectedDomains();
+        if (!domains.length) return deployment.intelligence;
+        const values = domains.map(domain => deployment.domains?.[domain]).filter(isNumber);
+        return values.length === domains.length ? Math.min(...values) : undefined;
+      };
       const percentile = (value, values, higherIsBetter) => {
         if (values.length <= 1 || values.every(candidate => candidate === values[0])) return 1;
         const better = values.filter(candidate => higherIsBetter ? candidate < value : candidate > value).length;
@@ -2427,19 +2636,19 @@ function profileSelectionClientScript(deployments: ModelDeploymentSelectionView[
         return total ? parts.reduce((sum, part) => sum + part.score * part.weight, 0) / total : 0;
       };
       const currentWeights = () => {
-        const values = { intelligence: Number(intelligenceInput.value), speed: Number(speedInput.value), cost: Number(costInput.value) };
-        const total = values.intelligence + values.speed + values.cost || 1;
-        return { intelligence: values.intelligence / total, speed: values.speed / total, cost: values.cost / total };
+        const total = weights.intelligence + weights.speed + weights.cost || 1;
+        return { intelligence: weights.intelligence / total, speed: weights.speed / total, cost: weights.cost / total };
       };
       const eligibleDeployments = () => {
-        const minimumContext = Number(contextInput.value) || 0;
+        const contextIndex = Number(contextInput.value) || 0;
+        const minimumContext = contextIndex ? contextValues[contextIndex - 1] : 0;
         const maximumCost = numberValue(maxCostInput);
-        const minimumRetention = numberValue(minRetentionInput);
+        const domains = selectedDomains();
         return deployments.filter(deployment => {
           if (minimumContext && (!isNumber(deployment.contextWindowTokens) || deployment.contextWindowTokens < minimumContext)) return false;
           if (maximumCost !== undefined && (!isNumber(deployment.hourlyUsd) || deployment.hourlyUsd > maximumCost)) return false;
-          if (domainInput.value && !isNumber(deployment.domains?.[domainInput.value])) return false;
-          if (minimumRetention !== undefined && (!isNumber(deployment.quantization?.qualityRetentionPercent) || deployment.quantization.qualityRetentionPercent < minimumRetention)) return false;
+          if (hostingInput.value && deployment.hostingMode !== hostingInput.value) return false;
+          if (domains.some(domain => !isNumber(deployment.domains?.[domain]))) return false;
           return true;
         });
       };
@@ -2448,7 +2657,6 @@ function profileSelectionClientScript(deployments: ModelDeploymentSelectionView[
         const qualityValues = eligible.map(qualityValue).filter(isNumber);
         const decodeValues = eligible.map(item => item.performance?.decodeTokensPerSecond).filter(isNumber);
         const prefillValues = eligible.map(item => item.performance?.prefillTokensPerSecond).filter(isNumber);
-        const latencyValues = eligible.map(item => item.performance?.timeToFirstTokenSeconds).filter(isNumber);
         const costValues = eligible.map(item => item.hourlyUsd).filter(isNumber);
         const weights = currentWeights();
         return eligible.map(deployment => {
@@ -2456,24 +2664,30 @@ function profileSelectionClientScript(deployments: ModelDeploymentSelectionView[
           const qualityScore = isNumber(rawQuality) ? percentile(rawQuality, qualityValues, true) : undefined;
           const decodeScore = isNumber(deployment.performance?.decodeTokensPerSecond) ? percentile(deployment.performance.decodeTokensPerSecond, decodeValues, true) : undefined;
           const prefillScore = isNumber(deployment.performance?.prefillTokensPerSecond) ? percentile(deployment.performance.prefillTokensPerSecond, prefillValues, true) : undefined;
-          const latencyScore = isNumber(deployment.performance?.timeToFirstTokenSeconds) ? percentile(deployment.performance.timeToFirstTokenSeconds, latencyValues, false) : undefined;
-          const speedParts = [isNumber(decodeScore) ? { score: decodeScore, weight: 0.7 } : undefined, isNumber(prefillScore) ? { score: prefillScore, weight: 0.2 } : undefined, isNumber(latencyScore) ? { score: latencyScore, weight: 0.1 } : undefined].filter(Boolean);
+          const speedParts = [isNumber(decodeScore) ? { score: decodeScore, weight: 0.75 } : undefined, isNumber(prefillScore) ? { score: prefillScore, weight: 0.25 } : undefined].filter(Boolean);
           const speedScore = speedParts.length ? weightedAverage(speedParts) : undefined;
           const costScore = isNumber(deployment.hourlyUsd) ? percentile(deployment.hourlyUsd, costValues, false) : undefined;
           const dimensions = [isNumber(qualityScore) ? { score: qualityScore, weight: weights.intelligence } : undefined, isNumber(speedScore) ? { score: speedScore, weight: weights.speed } : undefined, isNumber(costScore) ? { score: costScore, weight: weights.cost } : undefined].filter(Boolean);
           return { ...deployment, fitScore: dimensions.length ? weightedAverage(dimensions) : 0, coverage: Math.round(dimensions.reduce((sum, dimension) => sum + dimension.weight, 0) * 100), qualityScore, speedScore, costScore };
-        }).sort((left, right) => right.fitScore - left.fitScore || right.coverage - left.coverage || left.targetDisplayName.localeCompare(right.targetDisplayName));
+        }).sort((left, right) => right.fitScore - left.fitScore || Number(Boolean(right.favorite)) - Number(Boolean(left.favorite)) || (right.popularityScore ?? 0) - (left.popularityScore ?? 0) || right.coverage - left.coverage || left.targetDisplayName.localeCompare(right.targetDisplayName));
       };
       const metricSummary = (deployment) => {
         const pieces = [];
         const quality = qualityValue(deployment);
-        if (isNumber(quality)) pieces.push((domainInput.value ? escapeText(domainInput.options[domainInput.selectedIndex].text) : 'Intelligence') + ' ' + quality.toFixed(1));
+        if (isNumber(quality)) pieces.push((selectedDomains().length ? 'Required capabilities' : 'Good') + ' ' + quality.toFixed(1));
         if (isNumber(deployment.performance?.decodeTokensPerSecond)) pieces.push(deployment.performance.decodeTokensPerSecond.toFixed(1) + ' t/s');
         if (isNumber(deployment.hourlyUsd)) pieces.push('$' + deployment.hourlyUsd.toFixed(2) + '/hr');
         if (isNumber(deployment.contextWindowTokens)) pieces.push(Math.round(deployment.contextWindowTokens / 1000) + 'K context');
         return pieces.join(' · ') || 'Selection measurements unavailable';
       };
       const bestBy = (items, value, lower = false) => items.filter(item => isNumber(value(item))).sort((left, right) => lower ? value(left) - value(right) : value(right) - value(left))[0];
+      const setLeader = (id, label, deployment, metric) => {
+        const container = root.querySelector(id);
+        if (!container) return;
+        container.innerHTML = '<strong>' + label + '</strong>' + (deployment
+          ? '<span>' + escapeText(deployment.modelDisplayName) + '</span><span class="muted">' + escapeText(deployment.targetDisplayName) + ' · ' + escapeText(metric(deployment)) + '</span>'
+          : '<span class="muted">Not measured</span>');
+      };
       const render = () => {
         const ranked = rankedDeployments();
         const matchingKeys = new Set(ranked.map(deployment => deployment.key));
@@ -2490,53 +2704,51 @@ function profileSelectionClientScript(deployments: ModelDeploymentSelectionView[
           card.querySelectorAll('.family').forEach(family => { family.hidden = [...family.querySelectorAll('[data-deployment-key]')].every(option => option.hidden); });
         });
         filterStatus.textContent = ranked.length + ' of ' + deployments.length + ' target-model deployments meet the current requirements. Missing values never satisfy a hard requirement.';
+        const goodLeader = bestBy(ranked, qualityValue);
+        const fastLeader = bestBy(ranked, item => item.speedScore);
+        const cheapLeader = bestBy(ranked, item => item.hourlyUsd, true);
+        setLeader('#profile-leader-good', 'Good leader', goodLeader, item => qualityValue(item).toFixed(1));
+        setLeader('#profile-leader-fast', 'Fast leader', fastLeader, item => item.performance?.decodeTokensPerSecond ? item.performance.decodeTokensPerSecond.toFixed(1) + ' decode t/s' : 'Measured speed leader');
+        setLeader('#profile-leader-cheap', 'Cheap leader', cheapLeader, item => '$' + item.hourlyUsd.toFixed(2) + '/hr');
         if (!ranked.length) {
           recommendations.innerHTML = '<p class="muted">No deployment satisfies every requirement. Relax a hard filter to see choices.</p>';
           return;
         }
         const winners = [
           ['Best fit', ranked[0]],
-          ['Smartest', bestBy(ranked, qualityValue)],
-          ['Fastest', bestBy(ranked, item => item.speedScore)],
-          ['Cheapest', bestBy(ranked, item => item.hourlyUsd, true)]
+          ['Good leader', goodLeader],
+          ['Fast leader', fastLeader],
+          ['Cheap leader', cheapLeader]
         ].filter(entry => entry[1]);
         recommendations.innerHTML = winners.map(entry => '<button class="recommendation-card" type="button" data-use-deployment="' + escapeText(entry[1].key) + '"><span class="pill">' + escapeText(entry[0]) + '</span><strong>' + escapeText(entry[1].modelDisplayName) + '</strong><span>' + escapeText(entry[1].targetDisplayName) + '</span><span class="muted">' + metricSummary(entry[1]) + '</span><span class="muted">' + entry[1].coverage + '% preference data coverage</span></button>').join('');
       };
-      const syncOutputsAndTriangle = () => {
-        const values = [Number(intelligenceInput.value), Number(speedInput.value), Number(costInput.value)];
-        root.querySelector('#profile-weight-intelligence-output').value = values[0] + '%';
-        root.querySelector('#profile-weight-speed-output').value = values[1] + '%';
-        root.querySelector('#profile-weight-cost-output').value = values[2] + '%';
-        const quality = values[0] / 100;
-        const speed = values[1] / 100;
-        const cheap = values[2] / 100;
-        point.setAttribute('cx', String(quality * 160 + cheap * 24 + speed * 296));
-        point.setAttribute('cy', String(quality * 28 + (cheap + speed) * 244));
-      };
       const setWeights = (intelligence, speed, cost) => {
-        const safe = [Math.max(0, intelligence), Math.max(0, speed), Math.max(0, cost)];
-        const total = safe.reduce((sum, value) => sum + value, 0) || 1;
-        const rounded = safe.map(value => Math.round(value / total * 100));
-        rounded[2] += 100 - rounded.reduce((sum, value) => sum + value, 0);
-        intelligenceInput.value = String(rounded[0]); speedInput.value = String(rounded[1]); costInput.value = String(rounded[2]);
-        syncOutputsAndTriangle(); render();
+        weights = { intelligence: Math.max(0, intelligence), speed: Math.max(0, speed), cost: Math.max(0, cost) };
+        const total = weights.intelligence + weights.speed + weights.cost || 1;
+        const goodShare = weights.intelligence / total;
+        const speedShare = weights.speed / total;
+        const cheapShare = weights.cost / total;
+        point.setAttribute('cx', String(goodShare * 160 + cheapShare * 24 + speedShare * 296));
+        point.setAttribute('cy', String(goodShare * 28 + (cheapShare + speedShare) * 244));
+        render();
       };
-      const rebalance = (changed) => {
-        const inputs = [intelligenceInput, speedInput, costInput];
-        const selected = Number(changed.value);
-        const others = inputs.filter(input => input !== changed);
-        const otherTotal = others.reduce((sum, input) => sum + Number(input.value), 0);
-        const remaining = Math.max(0, 100 - selected);
-        if (!otherTotal) { others[0].value = String(Math.round(remaining / 2)); others[1].value = String(remaining - Number(others[0].value)); }
-        else { others[0].value = String(Math.round(Number(others[0].value) / otherTotal * remaining)); others[1].value = String(remaining - Number(others[0].value)); }
-        syncOutputsAndTriangle(); render();
+      const updateContextOutput = () => {
+        const index = Number(contextInput.value) || 0;
+        const value = index ? contextValues[index - 1] : 0;
+        contextOutput.value = value ? new Intl.NumberFormat(undefined, { notation: 'compact' }).format(value) + ' minimum' : 'No minimum';
       };
-      [intelligenceInput, speedInput, costInput].forEach(input => input.addEventListener('input', () => rebalance(input)));
-      [contextInput, domainInput, maxCostInput, minRetentionInput].forEach(input => input.addEventListener('input', render));
+      [contextInput, hostingInput, maxCostInput, ...domainInputs].forEach(input => input?.addEventListener('input', () => { updateContextOutput(); render(); }));
+      const snaps = [
+        { x: 160, y: 28, weights: [1, 0, 0] }, { x: 296, y: 244, weights: [0, 1, 0] }, { x: 24, y: 244, weights: [0, 0, 1] },
+        { x: 228, y: 136, weights: [1, 1, 0] }, { x: 92, y: 136, weights: [1, 0, 1] }, { x: 160, y: 244, weights: [0, 1, 1] },
+        { x: 160, y: 172, weights: [1, 1, 1] }
+      ];
       const updateFromPointer = (event) => {
         const bounds = triangle.getBoundingClientRect();
         const x = (event.clientX - bounds.left) / bounds.width * 320;
         const y = (event.clientY - bounds.top) / bounds.height * 280;
+        const snapped = snaps.map(snap => ({ snap, distance: Math.hypot(snap.x - x, snap.y - y) })).sort((left, right) => left.distance - right.distance)[0];
+        if (snapped && snapped.distance <= 24) { setWeights(...snapped.snap.weights); return; }
         const quality = Math.max(0, Math.min(1, (244 - y) / 216));
         const left = 24 + 136 * quality;
         const right = 296 - 136 * quality;
@@ -2546,6 +2758,13 @@ function profileSelectionClientScript(deployments: ModelDeploymentSelectionView[
       triangle.addEventListener('pointerdown', event => { triangle.setPointerCapture(event.pointerId); updateFromPointer(event); });
       triangle.addEventListener('pointermove', event => { if (triangle.hasPointerCapture(event.pointerId)) updateFromPointer(event); });
       triangle.addEventListener('pointerup', event => triangle.releasePointerCapture(event.pointerId));
+      let keyboardSnap = snaps.length - 1;
+      triangle.addEventListener('keydown', event => {
+        if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(event.key)) return;
+        event.preventDefault();
+        keyboardSnap = (keyboardSnap + (event.key === 'ArrowLeft' || event.key === 'ArrowUp' ? -1 : 1) + snaps.length) % snaps.length;
+        setWeights(...snaps[keyboardSnap].weights);
+      });
       recommendations.addEventListener('click', event => {
         const button = event.target.closest('[data-use-deployment]');
         if (!button) return;
@@ -2556,12 +2775,32 @@ function profileSelectionClientScript(deployments: ModelDeploymentSelectionView[
         const option = [...form.querySelectorAll('[data-deployment-key]')].find(candidate => candidate.dataset.deploymentKey === deployment.key);
         option?.scrollIntoView({ behavior: 'smooth', block: 'center' });
       });
+      root.addEventListener('click', async event => {
+        const button = event.target.closest('[data-model-favorite]');
+        if (!button) return;
+        event.preventDefault(); event.stopPropagation();
+        const key = button.dataset.targetId + '::' + button.dataset.modelId;
+        const deployment = byKey.get(key);
+        if (!deployment) return;
+        button.disabled = true;
+        try {
+          const active = button.getAttribute('aria-pressed') === 'true';
+          const response = await fetch(active ? '/api/model-favorites/' + encodeURIComponent(button.dataset.targetId) + '/' + encodeURIComponent(button.dataset.modelId) : '/api/model-favorites', active
+            ? { method: 'DELETE' }
+            : { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ targetId: button.dataset.targetId, modelId: button.dataset.modelId }) });
+          if (!response.ok) throw new Error('Could not update favorite');
+          deployment.favorite = !active;
+          button.setAttribute('aria-pressed', String(!active)); button.textContent = active ? '☆' : '★';
+          button.title = active ? 'Favorite this deployment' : 'Remove favorite';
+          render();
+        } finally { button.disabled = false; }
+      });
       root.querySelector('#profile-wizard-run').addEventListener('click', () => {
         const domain = root.querySelector('#profile-wizard-domain').value;
         const response = root.querySelector('#profile-wizard-response').value;
         const priority = root.querySelector('#profile-wizard-priority').value;
         const budget = root.querySelector('#profile-wizard-budget').value;
-        domainInput.value = domain;
+        domainInputs.forEach(input => { input.checked = Boolean(domain) && input.value === domain; });
         maxCostInput.value = budget;
         const presets = { balanced: [40, response === 'long' ? 45 : 35, response === 'short' ? 25 : 15], intelligence: [70, 20, 10], speed: [20, 70, 10], cost: [25, 20, 55] };
         const selected = presets[priority] ?? presets.balanced;
@@ -2569,10 +2808,10 @@ function profileSelectionClientScript(deployments: ModelDeploymentSelectionView[
         recommendations.scrollIntoView({ behavior: 'smooth', block: 'center' });
       });
       const setMinimumContext = (value) => {
-        if (!isNumber(value) || value <= 0) { contextInput.value = '0'; return; }
-        const candidates = [...contextInput.options].map(option => Number(option.value)).filter(candidate => candidate >= value).sort((left, right) => left - right);
-        if (candidates.length) contextInput.value = String(candidates[0]);
-        else { const option = new Option(Math.round(value / 1000) + 'K+', String(value)); contextInput.add(option); contextInput.value = String(value); }
+        if (!isNumber(value) || value <= 0) { contextInput.value = '0'; updateContextOutput(); return; }
+        const index = contextValues.findIndex(candidate => candidate >= value);
+        contextInput.value = String(index >= 0 ? index + 1 : contextValues.length);
+        updateContextOutput();
       };
       ${advisorEnabled ? `
       const advisorButton = root.querySelector('#profile-advisor-submit');
@@ -2589,54 +2828,127 @@ function profileSelectionClientScript(deployments: ModelDeploymentSelectionView[
           const guidance = body.guidance;
           setMinimumContext(guidance.requirements.minimumContextTokens);
           maxCostInput.value = guidance.requirements.maximumHourlyUsd ?? '';
-          minRetentionInput.value = guidance.requirements.minimumQualityRetentionPercent ?? '';
-          if (guidance.requirements.domain && [...domainInput.options].some(option => option.value === guidance.requirements.domain)) domainInput.value = guidance.requirements.domain;
-          else domainInput.value = '';
-          const weights = guidance.requirements.weights;
-          setWeights(weights.intelligence, weights.speed, weights.cost);
+          const advisedDomains = guidance.requirements.domains ?? (guidance.requirements.domain ? [guidance.requirements.domain] : []);
+          domainInputs.forEach(input => { input.checked = advisedDomains.includes(input.value); });
+          const advisedWeights = guidance.requirements.weights;
+          setWeights(advisedWeights.intelligence, advisedWeights.speed, advisedWeights.cost);
           advisorOutput.textContent = 'Interpreted as: ' + guidance.useCase + '. ' + (guidance.requirements.minimumContextTokens ? 'Minimum context ' + Math.round(guidance.requirements.minimumContextTokens / 1000) + 'K. ' : '') + 'Review the highlighted best fits, then choose or adjust the profile.';
         } catch (error) {
           advisorOutput.textContent = error instanceof Error ? error.message : 'Profile advisor failed';
         } finally { advisorButton.disabled = false; }
       });` : ""}
-      syncOutputsAndTriangle();
-      render();
+      updateContextOutput();
+      setWeights(1, 1, 1);
     })();
   </script>`;
 }
 
-function profileTargetSelection(target: CapacityTarget, models: ModelDefinition[], selected: boolean, deploymentByKey: Map<string, ModelDeploymentSelectionView>, resolvedTargetCost?: number): string {
+function profileEditorClientScript(): string {
+  return `<script type="module">
+    (() => {
+      const form = document.querySelector('#profile-form');
+      if (!form) return;
+      const targetInputs = [...form.querySelectorAll('[data-profile-target]')];
+      const durationInput = form.querySelector('#profile-duration-minutes');
+      const keepaliveInput = form.querySelector('#profile-keepalive-minutes');
+      const durationButtons = [...form.querySelectorAll('[data-profile-duration], [data-profile-custom-duration]')];
+      const keepaliveButtons = [...form.querySelectorAll('[data-profile-keepalive], [data-profile-custom-keepalive]')];
+      const customDuration = form.querySelector('#profile-custom-duration');
+      const customKeepalive = form.querySelector('#profile-custom-keepalive');
+      const customDurationWrap = form.querySelector('#profile-custom-duration-wrap');
+      const customKeepaliveWrap = form.querySelector('#profile-custom-keepalive-wrap');
+      const syncTargets = () => targetInputs.forEach(input => {
+        const card = input.closest('[data-profile-target-card]');
+        card?.classList.toggle('selected', input.checked);
+        const models = [...card.querySelectorAll('[data-profile-model]')];
+        models.forEach(model => { model.disabled = !input.checked; });
+        if (input.checked && models.length === 1) models[0].checked = true;
+      });
+      const selectDuration = (button, focus = true) => {
+        const custom = Boolean(button?.dataset.profileCustomDuration);
+        durationButtons.forEach(candidate => candidate.setAttribute('aria-pressed', String(candidate === button)));
+        customDurationWrap.classList.toggle('hidden', !custom);
+        durationInput.value = custom ? customDuration.value : button?.dataset.profileDuration ?? durationInput.value;
+        if (custom && focus) customDuration.focus();
+      };
+      const selectKeepalive = (button, focus = true) => {
+        const custom = Boolean(button?.dataset.profileCustomKeepalive);
+        keepaliveButtons.forEach(candidate => candidate.setAttribute('aria-pressed', String(candidate === button)));
+        customKeepaliveWrap.classList.toggle('hidden', !custom);
+        keepaliveInput.value = custom ? customKeepalive.value : button?.dataset.profileKeepalive ?? keepaliveInput.value;
+        if (custom && focus) customKeepalive.focus();
+      };
+      targetInputs.forEach(input => input.addEventListener('change', syncTargets));
+      durationButtons.forEach(button => button.addEventListener('click', () => selectDuration(button)));
+      keepaliveButtons.forEach(button => button.addEventListener('click', () => selectKeepalive(button)));
+      customDuration.addEventListener('input', () => selectDuration(form.querySelector('[data-profile-custom-duration]'), false));
+      customKeepalive.addEventListener('input', () => selectKeepalive(form.querySelector('[data-profile-custom-keepalive]'), false));
+      form.addEventListener('submit', event => {
+        const selectedTargets = targetInputs.filter(input => input.checked);
+        const invalid = selectedTargets.find(input => {
+          const models = [...input.closest('[data-profile-target-card]').querySelectorAll('[data-profile-model]')];
+          return models.length > 0 && !models.some(model => model.checked);
+        });
+        if (!selectedTargets.length || invalid) {
+          event.preventDefault();
+          const message = !selectedTargets.length ? 'Choose at least one target.' : 'Choose at least one model for every selected target.';
+          window.alert(message);
+          invalid?.closest('[data-profile-target-card]')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+      });
+      document.addEventListener('click', async event => {
+        const copy = event.target.closest('[data-copy]');
+        if (!copy) return;
+        event.preventDefault(); event.stopPropagation();
+        if (!copy.dataset.copy) return;
+        await navigator.clipboard?.writeText(copy.dataset.copy);
+        const previous = copy.textContent; copy.textContent = 'copied';
+        setTimeout(() => { copy.textContent = previous; }, 900);
+      });
+      syncTargets();
+    })();
+  </script>`;
+}
+
+function profileTargetSelection(target: CapacityTarget, models: ModelDefinition[], selected: boolean, deploymentByKey: Map<string, ModelDeploymentSelectionView>, resolvedTargetCost?: number, selectedModelIds: string[] = []): string {
   const targetCost = resolvedTargetCost ?? models.map((model) => deploymentByKey.get(`${target.id}::${model.id}`)?.hourlyUsd).find((value) => value !== undefined);
   const modelContent = models.length === 0
     ? `<p class="muted">No models are known yet. This reserves the target and leaves its full discovered runtime available.</p>`
     : models.length === 1
-      ? `<p class="muted">This target has one model, so NeurOn selects it automatically.</p><div class="models">${profileModelOption(target.id, models[0], true, deploymentByKey.get(`${target.id}::${models[0].id}`))}</div>`
-      : `<p class="muted">Choose at least one model for this target.</p>${groupModelsByFamily(models).map(([family, familyModels]) => `<section class="family"><h3>${escapeHtml(family)}</h3><div class="models">${familyModels.map((model) => profileModelOption(target.id, model, false, deploymentByKey.get(`${target.id}::${model.id}`))).join("")}</div></section>`).join("")}`;
+      ? `<p class="muted">This target has one model, so NeurOn selects it automatically.</p><div class="models">${profileModelOption(target, models[0], selected, deploymentByKey.get(`${target.id}::${models[0].id}`))}</div>`
+      : `<p class="muted">Choose at least one model for this target.</p>${groupModelsByFamily(models).map(([family, familyModels]) => `<section class="family"><h3>${escapeHtml(family)}</h3><div class="models">${familyModels.map((model) => profileModelOption(target, model, selectedModelIds.includes(model.id), deploymentByKey.get(`${target.id}::${model.id}`))).join("")}</div></section>`).join("")}`;
   return `<section class="target-status-card profile-target-selection" data-profile-target-card data-target-id="${escapeHtml(target.id)}">
     <div class="target-status-head"><label class="profile-target-toggle"><input type="checkbox" name="selectionTargetIds" value="${escapeHtml(target.id)}" data-profile-target ${selected ? "checked" : ""}><span><strong>${escapeHtml(target.displayName)}</strong><span class="muted"><code>${escapeHtml(target.id)}</code></span></span></label><span class="target-price">${targetCost === undefined ? "Cost unavailable" : `$${targetCost.toFixed(2)}/hr`}</span></div>
     <div data-profile-target-models>${modelContent}</div>
   </section>`;
 }
 
-function profileModelOption(targetId: string, model: ModelDefinition, selected: boolean, deployment?: ModelDeploymentSelectionView): string {
-  const value = JSON.stringify({ targetId, modelId: model.id });
-  const aliases = aliasesForDisplay(model);
-  const recommendedAlias = aliases[0];
+function profileModelOption(target: CapacityTarget, model: ModelDefinition, selected: boolean, deployment?: ModelDeploymentSelectionView): string {
+  const value = JSON.stringify({ targetId: target.id, modelId: model.id });
+  const aliases = litellmAliases(target, model.id, deployment?.aliases ?? aliasesForDisplay(model));
+  const globalAlias = aliases.global[0];
+  const scopedAlias = aliases.scoped[0];
   const contextTokens = deployment?.contextWindowTokens ?? model.contextWindowTokens;
-  const context = contextTokens ? `<span class="pill" title="Configured or runtime-reported context window">${escapeHtml(formatTokenCount(contextTokens))}</span>` : "";
+  const contextTitle = deployment?.contextSource === "runtime-shared"
+    ? `Per-request context; runtime reported one context pool shared across ${deployment.contextConcurrency} concurrent sequences`
+    : deployment?.contextSource === "operator" ? "Operator-set per-request context" : "Per-request context reported by configuration or runtime";
+  const context = contextTokens ? `<span class="pill" title="${escapeHtml(contextTitle)}">${escapeHtml(formatTokenCount(contextTokens))} context</span>` : "";
   const description = model.description ? `<div class="muted">${escapeHtml(model.description)}</div>` : "";
   const metrics = deployment ? profileModelMetrics(deployment) : "";
-  return `<label class="option" data-deployment-key="${escapeHtml(`${targetId}::${model.id}`)}"><input type="checkbox" name="selectionModels" value="${escapeHtml(value)}" data-profile-model ${selected ? "checked" : ""}><span class="model-body"><span class="model-head"><strong>${escapeHtml(model.displayName)}</strong>${context}</span>${description}${metrics}<span class="copy-row">${recommendedAlias ? copyChip(recommendedAlias, "primary") : ""}</span></span></label>`;
+  const favorite = deployment ? `<button class="favorite-button" type="button" data-model-favorite data-target-id="${escapeHtml(target.id)}" data-model-id="${escapeHtml(model.id)}" aria-pressed="${String(Boolean(deployment.favorite))}" title="${deployment.favorite ? "Remove favorite" : "Favorite this deployment"}">${deployment.favorite ? "★" : "☆"}</button>` : "";
+  return `<label class="option" data-deployment-key="${escapeHtml(`${target.id}::${model.id}`)}"><input type="checkbox" name="selectionModels" value="${escapeHtml(value)}" data-profile-model ${selected ? "checked" : ""}><span class="model-body"><span class="model-head"><strong>${escapeHtml(model.displayName)}</strong><span>${context}${favorite}</span></span>${description}${metrics}<span class="copy-row">${scopedAlias ? copyChip(scopedAlias, "primary") : ""}${globalAlias && globalAlias !== scopedAlias ? copyChip(globalAlias) : ""}</span><span class="model-meta">Scoped route pins this target; the global route follows alias priority and fallback.</span></span></label>`;
 }
 
 function profileModelMetrics(deployment: ModelDeploymentSelectionView): string {
   const metrics = [
-    deployment.intelligence === undefined ? "" : `<span class="metric">Intelligence ${formatMetric(deployment.intelligence)}</span>`,
+    deployment.intelligence === undefined ? "" : `<span class="metric">Good ${formatMetric(deployment.intelligence)}</span>`,
     deployment.performance?.decodeTokensPerSecond === undefined ? "" : `<span class="metric">Decode ${formatMetric(deployment.performance.decodeTokensPerSecond)} t/s</span>`,
     deployment.performance?.prefillTokensPerSecond === undefined ? "" : `<span class="metric">Prefill ${formatMetric(deployment.performance.prefillTokensPerSecond)} t/s</span>`,
     deployment.performance?.timeToFirstTokenSeconds === undefined ? "" : `<span class="metric">First token ${formatMetric(deployment.performance.timeToFirstTokenSeconds)}s</span>`,
     deployment.quantization?.format ? `<span class="metric">${escapeHtml(deployment.quantization.format)}</span>` : "",
-    deployment.quantization?.qualityRetentionPercent === undefined ? "" : `<span class="metric">${formatMetric(deployment.quantization.qualityRetentionPercent)}% retention</span>`
+    deployment.quantization?.qualityRetentionPercent === undefined ? "" : `<span class="metric">Estimated quality retained ${formatMetric(deployment.quantization.qualityRetentionPercent)}%</span>`,
+    deployment.profileCount === undefined ? "" : `<span class="metric">${deployment.profileCount} profile${deployment.profileCount === 1 ? "" : "s"}</span>`,
+    deployment.reservationCount ? `<span class="metric">${deployment.reservationCount} recent reservation${deployment.reservationCount === 1 ? "" : "s"}</span>` : ""
   ].filter(Boolean).join("");
   const observed = deployment.performance?.source === "observed"
     ? `<span class="muted">Observed locally${deployment.performance.sampleCount ? ` from ${deployment.performance.sampleCount} requests` : ""}</span>`

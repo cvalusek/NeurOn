@@ -176,7 +176,7 @@ stored; it does not wait for provider startup.
 
 ## Storage
 
-All nine durable repository families use the same configured driver. Storage
+All eleven durable repository families use the same configured driver. Storage
 defaults to memory for direct local runs:
 
 ```env
@@ -200,11 +200,12 @@ POSTGRES_POOL_MAX=10
 
 Local Compose defaults to SQLite at `/app/data/neuron.db` and mounts the
 repository `./data` directory into `/app/data`. SQLite and Postgres persist
-active reservations, reservation profiles, `sk-neuron-...` API keys, configured providers, persisted
-targets, target provisioning jobs, target model discovery results, target
-activations, and reservation cost allocation records across NeurOn restarts. Target status and
-startup estimates remain in memory because they are observational and rebuilt by
-reconciliation.
+active reservations, reservation profiles, `sk-neuron-...` API keys, configured
+providers, persisted targets, target provisioning jobs, target model discovery
+results, model capability/deployment metadata, user model favorites, target
+activations, and reservation cost allocation records across NeurOn restarts.
+Target status and startup estimates remain in memory because they are
+observational and rebuilt by reconciliation.
 
 PostgreSQL repositories share the bounded pool. Schema creation and upgrades
 run transactionally through `neuron_schema_migrations`; repository classes do
@@ -456,24 +457,18 @@ The override still takes precedence and requires no pricing permissions.
 
 ## Guided Model Selection
 
-The profile builder always works from the configured NeurOn model catalog. An
-optional private catalog can add overall/domain capability scores and exact
-target-model context, quantization, measured quality retention, and baseline
-performance:
+The profile builder always works from the configured NeurOn target/model
+catalog. Capability scores and exact target-model context, quantization,
+quality-retention, and speed measurements are durable application data managed
+at **Admin > Model data**. They are not environment configuration. Keep source,
+version, and retrieval provenance with every licensed or deployment-private
+value and never put those values in tracked examples or release notes.
 
-```env
-MODEL_SELECTION_CATALOG_FILE=/run/secrets/model-selection.local.private.json
-```
-
-Use `MODEL_SELECTION_CATALOG_JSON` instead when an external secret manager
-injects JSON directly; setting both fails startup. The checked-in
-`examples/model-selection-catalog.example.json` is synthetic and documents
-schema version 1. Keep licensed or deployment-private values in an untracked
-file. Unknown values stay unknown and cannot satisfy a corresponding hard
-filter. Passive LiteLLM observations can refine target-specific speed without
-starting capacity or recording prompts. See
-[Guided Model Selection](model-selection.md) for ranking, provenance, and
-quantization rules.
+Unknown values stay unknown and cannot satisfy a corresponding hard filter.
+Explicit discovery can measure target-specific prefill and decode speed against
+an already-activated runtime; it is never an application-start side effect. See
+[Guided Model Selection](model-selection.md) for ranking, benchmarking,
+provenance, and quantization rules.
 
 An optional OpenAI-compatible advisor turns a user's workload description into
 validated selector controls:
@@ -617,6 +612,18 @@ configured. Set
 `CAPACITY_TARGET_<KEY>_LITELLM_DISPLAY_PREFIX=__empty__` to publish an empty
 prefix from environment config when LiteLLM aliases the prefix away. JSON config
 can use `"litellmDisplayPrefix": ""` directly.
+
+Set the hosting shape and alias priority when they are known:
+
+```env
+CAPACITY_TARGET_G6_XLARGE_GENERAL_HOSTING_MODE=dedicated
+CAPACITY_TARGET_G6_XLARGE_GENERAL_ALIAS_PRIORITY=10
+```
+
+`HOSTING_MODE` is `dedicated` or `multi-model` and is used by the profile
+builder's hard filter. Lower positive `ALIAS_PRIORITY` values win collisions
+for global LiteLLM aliases. Scoped `<target>/<alias>` names remain available for
+every target, and LiteLLM deployments carry the same numeric order for fallback.
 
 ## NeurOn Provider Env Fields
 
@@ -772,19 +779,28 @@ CAPACITY_TARGET_G6_XLARGE_GENERAL_LITELLM_SYNC_DISCOVERED_MODELS=false
 NeurOn records `neuron_target_id` and `neuron_target_display_name` in LiteLLM
 credential/deployment metadata. Credential metadata also identifies the provider
 as `openai`; a non-empty `noapikey` placeholder keeps LiteLLM's OpenAI-compatible
-client usable for unauthenticated runtimes. NeurOn does not block, unblock, or
-delete LiteLLM deployments when capacity stops or a model is absent from a later
-discovery.
-This keeps routes available for LiteLLM queueing while capacity starts and does
-not override operator-managed block state. Runtime aliases are retained in
-NeurOn discovery metadata but are not yet published as LiteLLM aliases.
+client usable for unauthenticated runtimes. Primary IDs and configured/runtime
+aliases are published as scoped `<target>/<alias>` routes. The lowest target
+`aliasPriority` also publishes each unscoped alias; ties fail closed instead of
+making routing nondeterministic. The LiteLLM deployment `order` carries this
+priority, allowing a global alias to fall through to a later target when
+LiteLLM pre-call checks and ordered fallback are enabled.
+
+NeurOn does not change deployment block state when capacity stops. Deployments
+that disappear from later discovery are retired non-destructively under a
+`neuron-retired/...` name, preserving their LiteLLM database record while
+removing the stale callable alias. This keeps current routes available for
+LiteLLM queueing while capacity starts and does not override operator-managed
+block state.
 
 LiteLLM must have database-backed model storage enabled. Its global API key must
 be allowed to manage models and reusable credentials. Because target API keys
 are sent to LiteLLM during credential upsert, use TLS for the NeurOn-to-LiteLLM
 connection outside an explicitly accepted trusted-network setup. LiteLLM marks
 its reusable-credentials endpoint as beta, so pin and test the LiteLLM version
-used by the deployment.
+used by the deployment. Ordered fallback also depends on LiteLLM version and
+router configuration; enable pre-call checks and verify the chosen version with
+a disposable routing test before relying on fallback in production.
 
 ## Model Warmup
 

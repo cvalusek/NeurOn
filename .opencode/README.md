@@ -54,9 +54,18 @@ never create NeurOn reservations.
 
 ## Model Mapping
 
-OpenCode model names are LiteLLM-facing names. NeurOn maps those names through
-configured model IDs, aliases, backend IDs, runtime IDs, and target
-`litellmDisplayPrefix` metadata.
+OpenCode model names are LiteLLM-facing names. The plugin reads NeurOn's
+`/api/client-models` map and resolves global aliases, scoped
+`<target>/<alias>` names, canonical IDs, backend IDs, runtime IDs, and legacy
+display-prefix names to the exact target-model pair. It falls back to the
+older `/api/status` and `/api/models` surfaces when talking to an older NeurOn.
+
+Use NeurOn's **Client setup** page to copy an OpenCode provider configuration
+that includes every currently published name. When two targets publish the
+same global alias, NeurOn assigns the alias to the lower numeric target
+priority and retains scoped aliases for both targets. LiteLLM can try those
+same deployments in priority order when its pre-call checks and ordered
+fallback behavior are enabled.
 
 Aliases for the same target and canonical model refresh one reservation. Models
 that share a target retain separate reservations because each can require its

@@ -1,9 +1,9 @@
 ---
 type: Guide
 title: User Guide
-description: How profiles, reservations, keepalive, status, and cost work in NeurOn.
-tags: [users, profiles, reservations, cost]
-timestamp: 2026-08-13T00:00:00Z
+description: How profiles, reservations, keepalive, status, model selection, and client setup work in NeurOn.
+tags: [users, profiles, reservations, models, cost]
+timestamp: 2026-08-14T00:00:00Z
 ---
 
 # User guide
@@ -15,40 +15,49 @@ off only when nobody or no recent traffic still needs it.
 
 ## First login
 
-If you have no reservation profiles, Home takes you through a short explanation
-before profile creation. **How NeurOn works** remains available in the
+If you have no reservation profiles or active reservations, Home opens a short
+explanation before profile creation. **Guide** remains available in the
 navigation afterward.
 
 ![First-login explanation of profiles, duration, and keepalive](images/welcome.png)
 
-## Create a profile
+## Create or edit a profile
 
 A profile is a reusable reservation shape. Give it a recognizable name, choose
 one or more targets, and select the models you expect to use on each target.
+Creation and editing use dedicated pages rather than a modal.
 
-Use the profile guide when the model list is unfamiliar:
+Use the selector when the model list is unfamiliar:
 
 - Set minimum context first when it is a real workload requirement. An unknown
   context does not pass the filter.
-- Add a domain, budget ceiling, or measured quantization-retention minimum only
-  when required.
-- Move the **quality**, **speed**, and **cost** controls—or the synchronized
-  triangle—to express preferences among the remaining choices.
-- The quick wizard sets those same controls. If the optional workload advisor
-  is available, it also fills only the controls; it does not choose or save for
-  you.
-- Review the best-fit, smartest, fastest, and cheapest cards, then apply one to
-  fill an exact target-model choice.
+- Add every required capability tag, a budget ceiling, or a dedicated versus
+  multi-model host requirement only when it is truly mandatory.
+- Move the **Good**, **Fast**, and **Cheap** point to express preferences among
+  the choices that remain. The center means maximum, equal preference for all
+  three. Useful balanced positions and category corners snap into place.
+- The quick wizard sets requirements and internal preferences. If the optional
+  workload advisor is available, it also fills only the controls; it does not
+  choose or save for you.
+- Review the ranked cards and category leaders, then select the exact
+  target-model choices the profile needs.
 
-Speed is target-specific and favors decode throughput while still considering
-prefill throughput and first-token latency. Missing measurements reduce displayed data coverage rather
-than counting as a poor score. Quantization retention appears only when an
-operator supplied a measured result for the exact artifact.
+Speed is target-specific: decode throughput carries 75% of its score and
+prefill throughput carries 25%. Time to first token is diagnostic only and does
+not affect ranking. Missing measurements reduce displayed data coverage rather
+than counting as a poor score. **Estimated quality retained** appears only when
+an operator supplied a measured result for the exact artifact and is not a
+filter.
+
+The context slider uses effective per-request context. If a runtime shares one
+context across concurrent sequences, the card identifies that concurrency and
+does not advertise the entire shared context to every request. Model cards also
+show favorites, profile use, recent reservation use, intelligence, speed, cost,
+and LiteLLM aliases when those facts are known.
 
 - If a target exposes one model, NeurOn selects it automatically.
 - If a target exposes several models, choose at least one. This prevents a
-  reservation from waking an expensive target without recording the intended
-  models.
+  reservation from waking an expensive target without recording its intent.
 - A profile may include several target/model combinations. Use that for a
   workflow that genuinely needs multiple backends together; otherwise keep the
   profile small so its cost and intent stay obvious.
@@ -57,6 +66,8 @@ The profile also stores default duration and keepalive values. You can override
 both immediately before making any reservation.
 
 ![Creating a profile with target-specific model choices](images/profile-create.png)
+
+![Filtering and ranking exact target-model deployments](images/model-selection.png)
 
 ## Reserve capacity
 
@@ -72,9 +83,14 @@ Changing profiles immediately updates both controls to that profile's defaults.
   their configured or provider-reported hourly estimates. It is an operational
   estimate, not a cloud-provider invoice.
 
-The reserve action stays at the bottom of the reservation panel with the cost
-summary. Once submitted, your reservation appears at the top of Home with
-extend and end controls.
+Duration choices shorter than the target's average startup time plus two minutes
+are shown in red because little useful time may remain after startup. Thirty
+minutes is shown in amber as a visual reminder that it is a longer commitment;
+there is no confirmation popup. Keepalive is not part of that warning.
+
+The reserve action stays visible in the reservation panel with the cost summary.
+Once submitted, your reservation appears at the top of Home with extend and end
+controls.
 
 ![Home showing an active reservation, profile controls, and target status](images/home-reservation.png)
 
@@ -85,9 +101,21 @@ profile, models, projected cost, quick extensions, and **I'm done** action.
 Ending one reservation does not stop capacity still required by another user or
 reservation.
 
-The Server status area is grouped by target. It shows aggregate demand and then
-the reservations contributing to that target. A multi-target reservation can
-therefore appear under more than one target while remaining one reservation.
+Server status is grouped by target. Personally reserved targets come first,
+followed by other activated targets and then off targets. Within those groups,
+recently used targets appear first. A multi-target reservation can appear under
+more than one target while remaining one reservation. Expanding a target stays
+expanded across polling, so controls and traffic help text remain usable.
+
+## Configure OpenCode and other clients
+
+Open **Client setup** to see every callable LiteLLM name. A global alias points
+to the lowest-priority-number target. The scoped `<target>/<alias>` form always
+selects that exact target/model deployment. Choose a profile to limit the list,
+then copy the generated OpenCode provider JSON and use the displayed model names
+instead of manually reconstructing them.
+
+![Client setup with global and scoped LiteLLM aliases](images/client-setup.png)
 
 ## Traffic reservation and cost
 

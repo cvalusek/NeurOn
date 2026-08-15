@@ -13,3 +13,8 @@ export function litellmDisplayPrefix(target: CapacityTarget): string {
 export function litellmModelName(target: CapacityTarget, runtimeModelId: string): string {
   return `${litellmDisplayPrefix(target)}${runtimeModelId}`;
 }
+
+export function litellmAliases(target: CapacityTarget, modelId: string, aliases: string[] = []): { global: string[]; scoped: string[] } {
+  const global = Array.from(new Set((aliases.length ? aliases : [modelId]).map((value) => value.trim()).filter(Boolean)));
+  return { global, scoped: global.map((alias) => litellmModelName(target, alias)) };
+}

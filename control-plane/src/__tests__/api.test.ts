@@ -70,7 +70,7 @@ describe("model selection guidance", () => {
     process.env.USE_FAKE_PROVIDER = "true";
     const fetchMock = vi.fn(async () => jsonResponse({ choices: [{ message: { content: JSON.stringify({
       useCase: "long coding sessions",
-      domain: "coding",
+          domains: ["coding"],
       minimumContextTokens: 128_000,
       maximumHourlyUsd: null,
       minimumQualityRetentionPercent: null,
@@ -91,12 +91,88 @@ describe("model selection guidance", () => {
       expect(response.json().guidance).toMatchObject({
         useCase: "long coding sessions",
         responseLength: "long",
-        requirements: { domain: "coding", minimumContextTokens: 128_000, weights: { intelligence: 0.5, speed: 0.4, cost: 0.1 } }
+        requirements: { domains: ["coding"], minimumContextTokens: 128_000, weights: { intelligence: 0.5, speed: 0.4, cost: 0.1 } }
       });
       expect(fetchMock).toHaveBeenCalledTimes(1);
     } finally {
       await app.close();
       vi.unstubAllGlobals();
+    }
+  });
+
+  it("persists model facts and favorites and publishes priority-aware client routes", async () => {
+    process.env.USE_FAKE_PROVIDER = "true";
+    const { app } = await buildApp({
+      ...config,
+      capacityTargets: [{
+        ...config.capacityTargets[0],
+        aliasPriority: 10,
+        models: [{ id: "m1", displayName: "M1", aliases: ["fast"] }]
+      }]
+    }, models);
+    const auth = { authorization: `Basic ${Buffer.from("actual:secret").toString("base64")}` };
+    try {
+      const profile = await app.inject({
+        method: "POST",
+        url: "/api/reservation-profiles",
+        headers: auth,
+        payload: { name: "Coding", selections: [{ targetId: "t1", modelIds: ["m1"] }] }
+      });
+      expect(profile.statusCode).toBe(201);
+
+      expect((await app.inject({
+        method: "PUT",
+        url: "/api/admin/model-metadata/models/m1",
+        headers: auth,
+        payload: { intelligence: 82, domains: { coding: 91 }, provenance: { source: "test fixture", version: "2026-08" } }
+      })).statusCode).toBe(200);
+      expect((await app.inject({
+        method: "PUT",
+        url: "/api/admin/model-metadata/deployments/t1/m1",
+        headers: auth,
+        payload: { contextWindowTokens: 65_536, quantization: { format: "Q6_K", qualityRetentionPercent: 99 }, provenance: { source: "test fixture", version: "2026-08" } }
+      })).statusCode).toBe(200);
+      expect((await app.inject({
+        method: "POST",
+        url: "/api/model-favorites",
+        headers: auth,
+        payload: { targetId: "t1", modelId: "m1" }
+      })).statusCode).toBe(201);
+
+      const selection = await app.inject({ method: "GET", url: "/api/model-selection", headers: auth });
+      expect(selection.json().deployments).toMatchObject([{
+        key: "t1::m1",
+        intelligence: 82,
+        domains: { coding: 91 },
+        contextWindowTokens: 65_536,
+        quantization: { format: "Q6_K", qualityRetentionPercent: 99 },
+        favorite: true,
+        aliases: ["fast"]
+      }]);
+
+      const clientModels = await app.inject({ method: "GET", url: "/api/client-models", headers: auth });
+      expect(clientModels.json()).toMatchObject({
+        profiles: [{ id: profile.json().id, name: "Coding" }],
+        models: [{
+          targetId: "t1",
+          modelId: "m1",
+          aliases: { global: ["fast"], scoped: ["t1/fast"] },
+          aliasPriority: 10,
+          profileIds: [profile.json().id]
+        }]
+      });
+      const clientPage = await app.inject({ method: "GET", url: "/client-setup", headers: auth });
+      expect(clientPage.statusCode).toBe(200);
+      expect(clientPage.body).toContain("Global aliases use target priority");
+      expect(clientPage.body).toContain("t1/fast");
+      expect(clientPage.body).not.toContain("sk-neuron-test");
+
+      const removed = await app.inject({ method: "DELETE", url: "/api/model-favorites/t1/m1", headers: auth });
+      expect(removed.json()).toEqual({ removed: true });
+      const refreshed = await app.inject({ method: "GET", url: "/api/model-selection", headers: auth });
+      expect(refreshed.json().deployments[0].favorite).toBe(false);
+    } finally {
+      await app.close();
     }
   });
 });
@@ -305,7 +381,7 @@ describe("API authentication context", () => {
     process.env.USE_FAKE_PROVIDER = "true";
     const { app } = await buildApp(config, models);
     const auth = { authorization: `Basic ${Buffer.from("actual:secret").toString("base64")}` };
-    await app.inject({
+    const created = await app.inject({
       method: "POST",
       url: "/api/reservation-profiles",
       headers: auth,
@@ -313,6 +389,23 @@ describe("API authentication context", () => {
     });
 
     const page = await app.inject({ method: "GET", url: "/profiles", headers: auth });
+    const newPage = await app.inject({ method: "GET", url: "/profiles/new", headers: auth });
+    const onboardingPage = await app.inject({ method: "GET", url: "/profiles/new?onboarding=1", headers: auth });
+    const editPage = await app.inject({ method: "GET", url: `/profiles/${created.json().id}/edit`, headers: auth });
+    const updated = await app.inject({
+      method: "POST",
+      url: `/reservation-profiles/${created.json().id}`,
+      headers: { ...auth, "content-type": "application/x-www-form-urlencoded" },
+      payload: new URLSearchParams({
+        name: "Daily coding updated",
+        selectionTargetIds: "t1",
+        selectionModels: JSON.stringify({ targetId: "t1", modelId: "m1" }),
+        defaultDurationMinutes: "15",
+        defaultKeepaliveMinutes: "5",
+        returnTo: "/profiles"
+      }).toString()
+    });
+    const refreshed = await app.inject({ method: "GET", url: "/api/reservation-profiles", headers: auth });
     await app.close();
 
     expect(page.statusCode).toBe(200);
@@ -321,7 +414,22 @@ describe("API authentication context", () => {
     expect(page.body).toContain("T1");
     expect(page.body).toContain("m1");
     expect(page.body).toContain("New profile");
-    expect(page.body).toContain('name="returnTo" value="/profiles"');
+    expect(page.body).toContain(`/profiles/${created.json().id}/edit`);
+    expect(newPage.statusCode).toBe(200);
+    expect(newPage.body).toContain("New reservation profile");
+    expect(newPage.body).toContain('name="returnTo" value="/profiles"');
+    expect(onboardingPage.body).toContain('name="returnTo" value="/"');
+    expect(editPage.statusCode).toBe(200);
+    expect(editPage.body).toContain("Edit Daily coding");
+    expect(editPage.body).toContain(`action="/reservation-profiles/${created.json().id}"`);
+    expect(updated.statusCode).toBe(302);
+    expect(updated.headers.location).toBe("/profiles");
+    expect(refreshed.json().reservationProfiles).toMatchObject([{
+      name: "Daily coding updated",
+      selections: [{ targetId: "t1", modelIds: ["m1"] }],
+      defaultDurationMinutes: 15,
+      defaultKeepaliveMinutes: 5
+    }]);
   });
 
   it("creates reservation profiles from the profiles page and returns there", async () => {
@@ -954,6 +1062,21 @@ describe("API authentication context", () => {
     expect(page.body.match(/t1/g)?.length).toBeGreaterThan(1);
     expect(page.body).toContain("persisted");
     expect(page.body).toContain("Save target");
+
+    const aliases = await app.inject({
+      method: "PUT",
+      url: "/api/admin/targets/t1/models/m1/aliases",
+      headers: auth,
+      payload: { aliases: ["code", "general"] }
+    });
+    expect(aliases.statusCode).toBe(200);
+    expect(aliases.json()).toMatchObject({ targetId: "t1", modelId: "m1", aliases: ["code", "general"] });
+    const clientModels = await app.inject({ method: "GET", url: "/api/client-models", headers: auth });
+    expect(clientModels.json().models).toMatchObject([{
+      targetId: "t1",
+      modelId: "m1",
+      aliases: { global: ["code", "general"], scoped: ["t1/code", "t1/general"] }
+    }]);
 
     const updated = await app.inject({
       method: "POST",

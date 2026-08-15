@@ -33,8 +33,9 @@ configuration or in the external runtime project.
   `TargetStatusRepository`.
 - The selected storage driver supplies reservations, reservation profiles, API
   keys, auth methods, provider and target definitions, provisioning jobs,
-  runtime discovery records, and target activation/cost history. SQLite and
-  Postgres are durable; memory storage is process-local.
+  runtime discovery records, model capability/deployment metadata, user model
+  favorites, and target activation/cost history. SQLite and Postgres are
+  durable; memory storage is process-local.
 - Keep target status and startup estimates observational and in-memory unless a
   task is explicitly about persisting them.
 - PostgreSQL schema changes belong in the centralized versioned migration
@@ -56,10 +57,12 @@ configuration or in the external runtime project.
 - Reservation profiles may contain multiple target/model selections. Preserve
   the per-target mapping when storing a reservation; aggregate target/model
   arrays remain a compatibility surface for legacy records and clients.
-- Model-selection scores must retain source/version provenance. Licensed or
-  deployment-private benchmark values belong in ignored local configuration,
-  never tracked examples or release notes. Missing performance or quality data
-  must remain unknown rather than inferred from model names or quant formats.
+- Model-selection scores must retain source/version provenance. Capability,
+  performance, context, and quantization facts are durable model or exact
+  target-model records managed through the application, not environment
+  configuration. Never put licensed/private values in tracked examples or
+  release notes. Missing performance or quality data must remain unknown rather
+  than inferred from model names or quant formats.
 
 ## Integration Rules
 

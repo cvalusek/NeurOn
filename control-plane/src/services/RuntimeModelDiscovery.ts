@@ -4,6 +4,7 @@ import type { HealthChecker } from "../reconciler/HealthChecker.js";
 import { ModelCatalog } from "./ModelCatalog.js";
 import type { TargetOperationCoordinator } from "./TargetOperationCoordinator.js";
 import { withProviderRuntimeEndpoints } from "../capacity/providerRuntime.js";
+import { ModelBenchmarkError, type ModelBenchmarkService } from "./ModelBenchmarkService.js";
 
 interface OpenAiModelsResponse {
   data?: RuntimeModelInfo[];
@@ -31,8 +32,13 @@ export class RuntimeModelDiscovery {
     private readonly targetOperations?: TargetOperationCoordinator,
     private readonly statuses?: TargetStatusRepository,
     private readonly backendConfigSync?: BackendConfigSync,
-    private readonly reportBackendSyncError?: BackendSyncErrorReporter
+    private readonly reportBackendSyncError?: BackendSyncErrorReporter,
+    private benchmarkService?: ModelBenchmarkService
   ) {}
+
+  setBenchmarkService(benchmarkService: ModelBenchmarkService): void {
+    this.benchmarkService = benchmarkService;
+  }
 
   async hydrateCachedTargets(): Promise<void> {
     if (!this.repository) return;
@@ -58,10 +64,10 @@ export class RuntimeModelDiscovery {
     return outcome ? { ...outcome } : undefined;
   }
 
-  async refreshTarget(target: CapacityTarget): Promise<RuntimeDiscoveredModel[]> {
+  async refreshTarget(target: CapacityTarget, options: { benchmark?: boolean } = {}): Promise<RuntimeDiscoveredModel[]> {
     const existing = this.refreshes.get(target.id);
     if (existing) return existing;
-    const refresh = Promise.resolve().then(() => this.readTargetCatalog(target));
+    const refresh = Promise.resolve().then(() => this.readTargetCatalog(target, options));
     this.refreshes.set(target.id, refresh);
     try {
       return await refresh;
@@ -70,7 +76,7 @@ export class RuntimeModelDiscovery {
     }
   }
 
-  private async readTargetCatalog(target: CapacityTarget): Promise<RuntimeDiscoveredModel[]> {
+  private async readTargetCatalog(target: CapacityTarget, options: { benchmark?: boolean }): Promise<RuntimeDiscoveredModel[]> {
     const url = modelsUrlForTarget(target);
     if (!url) throw new Error(`Target ${target.id} is missing apiUrl, litellm.apiBaseUrl, or healthUrl for model discovery`);
     const response = await fetch(url, { signal: AbortSignal.timeout(5000) });
@@ -88,10 +94,11 @@ export class RuntimeModelDiscovery {
         this.reportBackendSyncError?.(target, error);
       }
     }
+    if (options.benchmark && this.benchmarkService) await this.benchmarkService.benchmarkTarget(target);
     return models;
   }
 
-  async bootstrapTarget(target: CapacityTarget, capacityProvider: CapacityProvider, healthChecker: HealthChecker): Promise<void> {
+  async bootstrapTarget(target: CapacityTarget, capacityProvider: CapacityProvider, healthChecker: HealthChecker, options: { benchmark?: boolean } = {}): Promise<void> {
     if (!this.targetOperations) throw new Error("Target operation coordinator is not configured for runtime model discovery");
     const timeoutMs = (target.modelDiscovery?.bootstrapTimeoutSeconds ?? 600) * 1000;
     const startedAt = Date.now();
@@ -111,9 +118,10 @@ export class RuntimeModelDiscovery {
               const health = await healthChecker.check(runtimeTarget);
               if (health.ok) {
                 try {
-                  await this.refreshTarget(runtimeTarget);
+                  await this.refreshTarget(runtimeTarget, options);
                   return;
                 } catch (error) {
+                  if (error instanceof ModelBenchmarkError) throw error;
                   // Runtime may be running before the OpenAI-compatible API is ready.
                   lastError = error instanceof Error ? error.message : String(error);
                 }

@@ -282,7 +282,11 @@ export interface CapacityTarget {
   modelWarmup?: ModelWarmupConfig;
   trafficModelPrefixes?: string[];
   litellmDisplayPrefix?: string;
+  /** Lower values are preferred by LiteLLM's ordered deployment fallback. */
+  aliasPriority?: number;
   modelsMax?: number;
+  /** Operator-owned scheduling shape. modelsMax remains display/debug metadata. */
+  hostingMode?: "dedicated" | "multi-model";
   aws?: AwsTargetConfig;
   docker?: DockerContainerTargetConfig;
   dockerCompose?: DockerComposeTargetConfig;
@@ -360,6 +364,7 @@ export interface ModelDeploymentPerformance {
   timeToFirstTokenSeconds?: number;
   measuredAt?: string;
   sampleCount?: number;
+  provenance?: ModelMetricProvenance;
 }
 
 export interface ModelDeploymentMetadata {
@@ -381,6 +386,21 @@ export interface ModelSelectionCatalogConfig {
   deployments: ModelDeploymentMetadata[];
 }
 
+export interface StoredModelCapabilityMetadata extends ModelCapabilityMetadata {
+  updatedAt: Date;
+}
+
+export interface StoredModelDeploymentMetadata extends ModelDeploymentMetadata {
+  updatedAt: Date;
+}
+
+export interface ModelFavorite {
+  username: string;
+  targetId: string;
+  modelId: string;
+  createdAt: Date;
+}
+
 export interface ProfileAdvisorConfig {
   apiBaseUrl: string;
   apiKey?: string;
@@ -397,6 +417,10 @@ export interface RuntimeModelMeta {
   vocab_type?: number;
   n_vocab?: number;
   n_ctx?: number;
+  /** Explicit effective context per concurrent sequence when the runtime reports it. */
+  n_ctx_per_sequence?: number;
+  /** Concurrent sequences sharing n_ctx. */
+  n_parallel?: number;
   n_ctx_train?: number;
   n_embd?: number;
   n_params?: number;
