@@ -160,11 +160,12 @@ Model choices are configuration-first. Put the user-facing choices in each
 target's `models` array with display names, aliases, backend model IDs, context,
 and optional technical-capability flags. Admins add durable intelligence,
 scored-strength, quantization, and exact target-model performance facts at
-**Admin > Model data**. The profile builder filters by context, cost, required
-technical capabilities, and dedicated versus multi-model hosting, then ranks
-the eligible choices with the Good/Fast/Cheap triangle. Scored strengths refine
-Intelligence; quality-retention estimates remain display-only. No PreFer
-manifest is required.
+**Admin > Model data**. The profile builder searches and sorts the catalog and
+filters by context, cost, required technical capabilities, and dedicated versus
+multi-model hosting. Users can optionally open the Good/Fast/Cheap triangle
+wizard to rank eligible choices by Intelligence, Speed, and Cost. Scored
+strengths refine Intelligence; quality-retention estimates remain display-only.
+No PreFer manifest is required.
 See [Guided Model Selection](docs/model-selection.md).
 
 When a target becomes healthy, NeurOn polls the target's OpenAI-compatible

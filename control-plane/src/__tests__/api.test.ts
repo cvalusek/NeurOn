@@ -82,6 +82,9 @@ describe("model selection guidance", () => {
       const response = await app.inject({ method: "POST", url: "/api/profile-advisor", headers: auth, payload: { request: "Long coding sessions with 128K context" } });
       expect(response.statusCode).toBe(503);
       expect(response.json().error).toMatch(/maintenance mode/);
+      const asyncResponse = await app.inject({ method: "POST", url: "/api/profile-advisor/requests", headers: auth, payload: { request: "Long coding sessions with 128K context" } });
+      expect(asyncResponse.statusCode).toBe(503);
+      expect(asyncResponse.json().error).toMatch(/maintenance mode/);
       expect(fetchMock).not.toHaveBeenCalled();
     } finally {
       await app.close();
@@ -95,8 +98,9 @@ describe("model selection guidance", () => {
     const auth = { authorization: `Basic ${Buffer.from("actual:secret").toString("base64")}` };
     try {
       expect((await app.inject({ method: "GET", url: "/api/profile-advisor/status", headers: auth })).json()).toMatchObject({ enabled: false, backend: null });
-      const saved = await app.inject({ method: "PUT", url: "/api/admin/assistant-config", headers: auth, payload: { targetId: "t1", modelId: "m1", reservationMinutes: 12, keepaliveMinutes: 5, requestTimeoutSeconds: 90 } });
+      const saved = await app.inject({ method: "PUT", url: "/api/admin/assistant-config", headers: auth, payload: { targetId: "t1", modelId: "m1", reservationMinutes: 12, keepaliveMinutes: 5, requestTimeoutSeconds: 90, additionalInstructions: "Use our internal team terminology." } });
       expect(saved.statusCode).toBe(200);
+      expect((await app.inject({ method: "GET", url: "/api/admin/assistant-config", headers: auth })).json()).toMatchObject({ backend: { additionalInstructions: "Use our internal team terminology." } });
       expect((await app.inject({ method: "GET", url: "/api/profile-advisor/status", headers: auth })).json()).toMatchObject({ enabled: true, backend: { targetId: "t1", modelId: "m1" } });
       const modelPage = await app.inject({ method: "GET", url: "/admin/models", headers: auth });
       expect(modelPage.body).not.toContain("Profile assistant backend");
@@ -104,6 +108,8 @@ describe("model selection guidance", () => {
       expect(assistantPage.body).toContain("Save assistant settings");
       expect(assistantPage.body).toContain("Reservation duration");
       expect(assistantPage.body).toContain("Keepalive");
+      expect(assistantPage.body).toContain("Additional system guidance");
+      expect(assistantPage.body).toContain("Use our internal team terminology.");
       expect(modelPage.body).toContain("Confirm save profile");
       expect(modelPage.body).toContain("Confirm start reservation");
 

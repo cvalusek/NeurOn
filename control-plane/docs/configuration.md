@@ -477,9 +477,10 @@ The optional profile assistant uses an existing NeurOn target/model deployment,
 selected at **Admin > Assistant**. Its singleton selection is durable and
 independent of target definitions and Model data; it is not configured through
 environment variables. The stored selection includes reservation duration,
-keep-alive, and model-response timeout. Reservation duration is also the
-maximum cold-start wait. Runtime credentials continue to use the selected
-target's existing secret reference.
+keep-alive, warm-model response timeout, and optional administrator-supplied
+system guidance. Reservation duration is the maximum cold-start wait. The
+response timeout applies only after the target is healthy. Runtime credentials
+continue to use the selected target's existing secret reference.
 
 Asking the assistant creates or refreshes a synthetic system reservation for
 that deployment and waits for the normal reconciler and health path. The model

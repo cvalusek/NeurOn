@@ -72,10 +72,12 @@ choices live on dedicated create/edit pages so the main page can remain compact
 and the selector has enough room. The builder shows target hourly cost,
 effective per-request context, durable capability metadata, target-specific
 performance, estimated quantization retention, favorites, usage, and LiteLLM
-aliases. Hard filters remove deployments with missing or insufficient facts.
-The Good/Fast/Cheap triangle is the profile wizard. It ranks the remainder,
-shows Intelligence/Speed/Cost leaders, updates each card's fit score, and
-reorders both models and targets. Binary technical capabilities are hard
+aliases. The default Browse & filter view searches names, IDs, aliases, and
+capabilities and offers ordinary sort choices. Hard filters remove deployments
+with missing or insufficient facts. The separately-invoked Good/Fast/Cheap
+triangle is the optional profile wizard. Its visible snap points rank the
+remainder, show Intelligence/Speed/Cost leaders, update each card's fit score,
+and reorder both models and targets. Binary technical capabilities are hard
 filters; scored strengths refine Intelligence without filtering. Applying
 guidance only fills controls; saving remains explicit.
 Selecting a profile immediately updates the visible duration and keepalive
@@ -89,10 +91,15 @@ target-specific selection snapshot so each target warms only its own models.
 The collapsible NeurOn assistant is available throughout authenticated pages.
 It receives structured page identity and profile state—not raw DOM contents—and
 can fill filters, defaults, and exact target/model choices. Drafts created away
-from the builder carry into it through session storage. Save-profile and
-start-reservation are separate tool proposals with separate UI confirmations;
-admin rediscovery proposals are confirmed as well. The builder remains complete
-without an assistant backend or PreFer release manifest.
+from the builder carry into it through session storage. The per-user chat and a
+pending confirmation also survive full-page navigation until **Clear** is used.
+Enter sends; Shift+Enter adds a line break. Sleeping/waking and warm-model
+thinking appear as spinner bubbles in the conversation. Guided navigation
+points to and pulses the ordinary link before following it, while form actions
+highlight the controls they change. Save-profile and start-reservation are
+separate tool proposals with separate UI confirmations; admin rediscovery
+proposals are confirmed as well. The builder remains complete without an
+assistant backend or PreFer release manifest.
 
 The reserve action is held in a bottom action bar alongside the current cost
 estimate so it remains visually connected to the form after profile review.

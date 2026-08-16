@@ -11,7 +11,7 @@ describePostgres("PostgreSQL schema and repositories", () => {
     try {
       await migratePostgresSchema(database.pool);
       await migratePostgresSchema(database.pool);
-      expect(await readPostgresSchemaState(database.pool)).toEqual({ currentVersion: POSTGRES_SCHEMA_VERSION, appliedVersions: [1, 2, 3, 4] });
+      expect(await readPostgresSchemaState(database.pool)).toEqual({ currentVersion: POSTGRES_SCHEMA_VERSION, appliedVersions: [1, 2, 3, 4, 5] });
 
       const first = await createReservationRepository({ driver: "postgres", connectionString: database.connectionString, maxConnections: 3 });
       const createdAt = new Date("2026-07-01T12:30:00-05:00");
@@ -108,7 +108,7 @@ describePostgres("PostgreSQL schema and repositories", () => {
       await first.modelMetadata.upsertCapability({ modelId: "model-1", intelligence: 88, domains: { coding: 93 }, quantization: { format: "Q6", qualityRetentionPercent: 98 }, provenance: { source: "manual", version: "2026-08" } }, createdAt);
       await first.modelMetadata.upsertDeployment({ targetId: "target-1", modelId: "model-1", performance: { decodeTokensPerSecond: 40, prefillTokensPerSecond: 900, sampleCount: 3 } }, endedAt);
       await first.modelFavorites.add({ username: "clint", targetId: "target-1", modelId: "model-1", createdAt });
-      await first.assistantConfig.save({ targetId: "target-1", modelId: "model-1", reservationMinutes: 12, keepaliveMinutes: 5, requestTimeoutSeconds: 90, updatedAt: endedAt });
+      await first.assistantConfig.save({ targetId: "target-1", modelId: "model-1", reservationMinutes: 12, keepaliveMinutes: 5, requestTimeoutSeconds: 90, additionalInstructions: "Use local pool names.", updatedAt: endedAt });
       await first.close();
 
       const second = await createReservationRepository({ driver: "postgres", connectionString: database.connectionString, maxConnections: 3 });
@@ -126,7 +126,7 @@ describePostgres("PostgreSQL schema and repositories", () => {
       expect(await second.modelMetadata.listCapabilities()).toMatchObject([{ modelId: "model-1", intelligence: 88, domains: { coding: 93 }, quantization: { format: "Q6", qualityRetentionPercent: 98 }, updatedAt: createdAt }]);
       expect(await second.modelMetadata.listDeployments()).toMatchObject([{ targetId: "target-1", modelId: "model-1", performance: { decodeTokensPerSecond: 40 }, updatedAt: endedAt }]);
       expect(await second.modelFavorites.listForUser("clint")).toEqual([{ username: "clint", targetId: "target-1", modelId: "model-1", createdAt }]);
-      expect(await second.assistantConfig.get()).toEqual({ id: "default", targetId: "target-1", modelId: "model-1", reservationMinutes: 12, keepaliveMinutes: 5, requestTimeoutSeconds: 90, updatedAt: endedAt });
+      expect(await second.assistantConfig.get()).toEqual({ id: "default", targetId: "target-1", modelId: "model-1", reservationMinutes: 12, keepaliveMinutes: 5, requestTimeoutSeconds: 90, additionalInstructions: "Use local pool names.", updatedAt: endedAt });
       await second.close();
     } finally {
       await database.cleanup();
@@ -163,18 +163,18 @@ describePostgres("PostgreSQL schema and repositories", () => {
     }
   });
 
-  it("moves an embedded legacy assistant selection into schema v4 without losing the model", async () => {
+  it("moves an embedded legacy assistant selection through schema v5 without losing the model", async () => {
     const database = await createPostgresTestSchema();
     try {
       await migratePostgresSchema(database.pool);
-      await database.pool.query("delete from neuron_schema_migrations where version = 4");
+      await database.pool.query("delete from neuron_schema_migrations where version in (4, 5)");
       await database.pool.query("drop table assistant_config");
       await database.pool.query(
         "insert into capacity_targets (id, target_json) values ($1, $2::jsonb)",
         ["advisor-target", JSON.stringify({ id: "advisor-target", displayName: "Advisor", provider: "docker", modelIds: ["advisor-model"], profileAdvisor: { modelId: "advisor-model", reservationMinutes: 12, startupTimeoutSeconds: 300, requestTimeoutSeconds: 90 } })]
       );
       const state = await migratePostgresSchema(database.pool);
-      expect(state.currentVersion).toBe(4);
+      expect(state.currentVersion).toBe(5);
       const handle = await createReservationRepository({ driver: "postgres", connectionString: database.connectionString, maxConnections: 2 });
       expect(await handle.assistantConfig.get()).toMatchObject({ targetId: "advisor-target", modelId: "advisor-model", reservationMinutes: 12, keepaliveMinutes: 12, requestTimeoutSeconds: 90 });
       expect(await handle.capacityTargets.get("advisor-target")).not.toHaveProperty("profileAdvisor");

@@ -27,7 +27,9 @@ A profile is a reusable reservation shape. Give it a recognizable name, choose
 one or more targets, and select the models you expect to use on each target.
 Creation and editing use dedicated pages rather than a modal.
 
-Use the selector when the model list is unfamiliar:
+Start in **Browse & filter** when you know roughly what you want. Search model
+or target names, IDs, aliases, and capabilities, then choose an ordinary sort
+order. Use **Help me choose** when the model list is unfamiliar:
 
 - Set minimum context first when it is a real workload requirement. An unknown
   context does not pass the filter.
@@ -37,13 +39,20 @@ Use the selector when the model list is unfamiliar:
   refine Intelligence ranking but do not filter models out.
 - Move the **Good**, **Fast**, and **Cheap** point to express preferences among
   the choices that remain. The center means maximum, equal preference for all
-  three. Useful balanced positions and category corners snap into place.
-- The triangle is the profile wizard. The collapsible NeurOn assistant can also
+  three. Visible balanced positions and category corners snap into place.
+- The triangle is the optional profile wizard. The collapsible NeurOn assistant can also
   fill the complete draft, including exact
-  target/model choices. Its save and start tools always present separate
+target/model choices. Its save and start tools always present separate
   confirmation cards before anything is persisted or capacity demand begins.
 - Review the ranked cards and category leaders, then select the exact
   target-model choices the profile needs.
+
+The Assistant conversation follows you across NeurOn pages during the browser
+session and can be removed with **Clear**. Enter sends; Shift+Enter inserts a
+new line. When its selected target is sleeping, a progress bubble distinguishes
+waking the target from waiting on the warm model. Guided navigation points to
+the ordinary link before following it, so the same workflow remains available
+without the Assistant.
 
 ![The collapsible NeurOn assistant alongside the profile builder](images/profile-assistant.png)
 

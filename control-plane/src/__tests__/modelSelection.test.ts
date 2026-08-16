@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { parseModelSelectionCatalog } from "../config/modelSelectionConfig.js";
-import type { CapacityTarget, ModelDefinition } from "../domain/types.js";
+import type { CapacityTarget, ModelDefinition, TargetStatus } from "../domain/types.js";
 import { ModelCatalog } from "../services/ModelCatalog.js";
 import { ModelSelectionService, rankModelDeployments } from "../services/ModelSelectionService.js";
 import { ProfileAdvisorService } from "../services/ProfileAdvisorService.js";
@@ -135,6 +135,7 @@ describe("profile advisor", () => {
     expect(String(init?.body)).toContain("I need a coding model with 32K context");
     expect(String(init?.body)).toContain("shared self-hosted LLM capacity");
     expect(String(init?.body)).toContain("synthetic traffic reservation");
+    expect(String(init?.body)).toContain("Call our internal GPU groups pools");
     expect(String(init?.body)).toContain('\\"surface\\":\\"profile_create\\"');
     expect(String(init?.body)).toContain('\\"minimumContextTokens\\":32000');
     expect(String(init?.body)).not.toContain("<main");
@@ -155,15 +156,57 @@ describe("profile advisor", () => {
     const tools = JSON.parse(String(fetchMock.mock.calls[0][1]?.body)).tools.map((entry: { function: { name: string } }) => entry.function.name);
     expect(tools).toContain("save_profile");
     expect(tools).toContain("start_reservation");
+    expect(tools).toContain("open_page");
+    expect(tools).not.toContain("open_admin_page");
     expect(tools).not.toContain("rediscover_target");
+  });
+
+  it("runs assistant requests asynchronously and scopes their status to the requesting user", async () => {
+    const { advisor, fetchMock } = profileAdvisorHarness([{ name: "answer_question", value: { message: "Use the profile builder." } }]);
+    const owner = { username: "owner", isAdmin: false };
+    const started = await advisor.startInterpret("Where do I begin?", {}, owner);
+    expect(started).toMatchObject({ phase: "thinking", message: "The Assistant is awake and thinking…" });
+    await expect(advisor.startInterpret("Start another request", {}, owner)).rejects.toThrow("already running");
+    expect(advisor.getInterpretRequest(started.id, { username: "other", isAdmin: false })).toBeUndefined();
+    await vi.waitFor(() => expect(advisor.getInterpretRequest(started.id, owner)).toMatchObject({
+      phase: "complete", result: { type: "answer", message: "Use the profile builder." }
+    }));
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows the waking state unless the assistant deployment is both healthy and desired on", async () => {
+    let statusReads = 0;
+    const { advisor } = profileAdvisorHarness(
+      [{ name: "answer_question", value: { message: "Ready." } }],
+      () => statusReads++ === 0
+        ? { targetId: "small", desired: "off", observed: "healthy", message: "Stopping" }
+        : { targetId: "small", desired: "on", observed: "healthy", message: "Ready" }
+    );
+    const started = await advisor.startInterpret("Are you awake?", {}, { username: "owner", isAdmin: false });
+    expect(started).toMatchObject({ phase: "waking", message: "The Assistant is sleeping. NeurOn is waking it…" });
+    await vi.waitFor(() => expect(advisor.getInterpretRequest(started.id, { username: "owner", isAdmin: false })).toMatchObject({ phase: "complete" }));
+  });
+
+  it("reports warm-model response timeouts separately from cold-start duration", async () => {
+    const { advisor, fetchMock } = profileAdvisorHarness([]);
+    fetchMock.mockRejectedValueOnce(Object.assign(new Error("timed out"), { name: "TimeoutError" }));
+    await expect(advisor.interpret("Help me choose a model")).rejects.toThrow("warm Assistant model did not respond within 5 seconds");
+  });
+
+  it("allows ordinary users to request only allowlisted guided navigation", async () => {
+    const { advisor } = profileAdvisorHarness([{ name: "open_page", value: { path: "/profiles", message: "Opening Profiles." } }]);
+    await expect(advisor.interpret("Show me my profiles")).resolves.toEqual({ type: "open_page", path: "/profiles", message: "Opening Profiles." });
   });
 });
 
-function profileAdvisorHarness(results: Array<{ name: string; value: unknown }>) {
+function profileAdvisorHarness(
+  results: Array<{ name: string; value: unknown }>,
+  assistantStatus: TargetStatus | (() => TargetStatus) = { targetId: "small", desired: "on", observed: "healthy", message: "Ready" }
+) {
   const target: CapacityTarget = { ...targets[0], apiUrl: "https://advisor.example.test/v1", modelWarmup: { apiKey: "private" } };
   const catalog = new ModelCatalog([models[0]], [target]);
   const assistantConfig = new InMemoryAssistantConfigRepository();
-  void assistantConfig.save({ targetId: "small", modelId: "fast", reservationMinutes: 10, keepaliveMinutes: 5, requestTimeoutSeconds: 5 });
+  void assistantConfig.save({ targetId: "small", modelId: "fast", reservationMinutes: 10, keepaliveMinutes: 5, requestTimeoutSeconds: 5, additionalInstructions: "Call our internal GPU groups pools." });
   const createForUser = vi.fn(async (_user: { username: string }, _input: { synthetic?: boolean }) => ({ id: "advisor-reservation" }));
   const queue = [...results];
   const fetchMock = vi.fn(async (_input: string | URL | Request, _init?: RequestInit) => {
@@ -175,7 +218,7 @@ function profileAdvisorHarness(results: Array<{ name: string; value: unknown }>)
     assistantConfig,
     catalog,
     reservationService: { listActiveOwned: async () => [], createForUser, markDone: vi.fn(), extend: vi.fn() } as never,
-    statuses: { get: () => ({ targetId: "small", desired: "on", observed: "healthy", message: "Ready" }), set: vi.fn(), list: () => [] },
+    statuses: { get: () => typeof assistantStatus === "function" ? assistantStatus() : assistantStatus, set: vi.fn(), list: () => [] },
     capacityProvider: { getTargetStatus: async () => ({ observed: "healthy", message: "Ready" }), provisionTarget: vi.fn(), ensureTargetOn: vi.fn(), ensureTargetOff: vi.fn(), forceStopTarget: vi.fn() },
     availableDomains: () => ["coding"],
     availableDeployments: () => [selectionService().listDeployments({ small: { hourlyUsd: 1.25 } }).find((deployment) => deployment.key === "small::fast")!],

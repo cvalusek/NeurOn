@@ -311,6 +311,7 @@ export interface AssistantConfig {
   reservationMinutes: number;
   keepaliveMinutes: number;
   requestTimeoutSeconds: number;
+  additionalInstructions?: string;
   updatedAt: Date;
 }
 

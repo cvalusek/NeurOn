@@ -139,6 +139,12 @@ restart clears that overlay but leaves durable measurements intact. The profile
 assistant reuses the selected target's existing runtime credential reference;
 there is no separate advisor secret. Its target/model and timing controls live
 in the independent **Admin > Assistant** screen and `assistant_config` record.
+Reservation duration bounds a cold-start wait; the separate response timeout
+applies only after the target is healthy. Optional administrator guidance is
+stored in that same independent record and cannot override authorization,
+confirmation, or lifecycle safety. Browser requests use short asynchronous
+polls so an ALB connection does not need to remain open for the whole cold
+start.
 Never commit runtime credentials or private/licensed model facts.
 
 ## Control-Plane Shutdown

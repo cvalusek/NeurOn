@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import type pg from "pg";
 
-export const POSTGRES_SCHEMA_VERSION = 4;
+export const POSTGRES_SCHEMA_VERSION = 5;
 
 export const POSTGRES_DATA_TABLES = [
   "reservations",
@@ -223,11 +223,16 @@ const schemaVersionFourSql = `
   where target_json ? 'profileAdvisor';
 `;
 
+const schemaVersionFiveSql = `
+  alter table assistant_config add column if not exists additional_instructions text;
+`;
+
 const migrations = [
   { version: 1, name: "initial-centralized-schema", sql: schemaVersionOneSql },
   { version: 2, name: "reservation-target-selections", sql: schemaVersionTwoSql },
   { version: 3, name: "model-selection-metadata-and-favorites", sql: schemaVersionThreeSql },
-  { version: 4, name: "independent-assistant-configuration", sql: schemaVersionFourSql }
+  { version: 4, name: "independent-assistant-configuration", sql: schemaVersionFourSql },
+  { version: 5, name: "assistant-operator-instructions", sql: schemaVersionFiveSql }
 ] as const;
 
 const expectedColumns: Record<string, Record<string, { type: string; nullable: boolean }>> = {
@@ -266,7 +271,7 @@ const expectedColumns: Record<string, Record<string, { type: string; nullable: b
   model_favorites: { username: required("text"), target_id: required("text"), model_id: required("text"), created_at: required("timestamptz") },
   assistant_config: {
     id: required("text"), target_id: required("text"), model_id: required("text"), reservation_minutes: required("int4"),
-    keepalive_minutes: required("int4"), request_timeout_seconds: required("int4"), updated_at: required("timestamptz")
+    keepalive_minutes: required("int4"), request_timeout_seconds: required("int4"), additional_instructions: optional("text"), updated_at: required("timestamptz")
   },
   neuron_schema_migrations: {
     version: required("int4"), name: required("text"), checksum: required("text"), applied_at: required("timestamptz")

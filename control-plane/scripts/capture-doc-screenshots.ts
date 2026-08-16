@@ -99,7 +99,7 @@ try {
 
   await page.getByRole("button", { name: "Create your first profile" }).click();
   const modal = page.locator("#profile-modal");
-  await modal.getByLabel("Name").fill("Daily coding");
+  await modal.getByLabel("Name", { exact: true }).fill("Daily coding");
   await modal.getByLabel("Description").fill("PreFer Smol for quick coding and review");
   await modal.getByLabel("Description").evaluate((element) => (element as HTMLInputElement).blur());
   await page.evaluate(() => window.scrollTo(0, 0));
@@ -107,6 +107,7 @@ try {
   await page.getByRole("button", { name: "Ask NeurOn" }).click();
   await page.screenshot({ path: path.join(outputDirectory, "profile-assistant.png") });
   await page.getByRole("button", { name: "Collapse assistant" }).click();
+  await modal.getByRole("button", { name: "Help me choose" }).click();
   await page.getByRole("img", { name: /Good, Fast, and Cheap ranking preference/ }).scrollIntoViewIfNeeded();
   await page.screenshot({ path: path.join(outputDirectory, "model-selection.png") });
 

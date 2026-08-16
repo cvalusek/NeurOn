@@ -163,7 +163,7 @@ into AWS, Docker, LiteLLM, or a concrete repository from unrelated code.
   target-model deployment facts, target cost, and performance observations. It
   applies hard requirements before deterministic weighted ranking and treats
   missing measurements as unknown.
-- `ModelBenchmarkService`: runs a small explicit warm-up-plus-three-sample suite
+- `ModelBenchmarkService`: runs an explicit 50K-class warm-up-plus-three-sample suite
   against an activated target and persists median prefill/decode measurements.
 - `ModelFavoriteService`: stores user favorites for exact target-model pairs.
 - `UsageAnalyticsService`: derives deployment popularity and UTC daily/user/
@@ -171,9 +171,11 @@ into AWS, Docker, LiteLLM, or a concrete repository from unrelated code.
 - `ProfileAdvisorService`: runs an operator-selected existing target/model
   through a synthetic system reservation and normal reconciliation, then
   converts a sanitized catalog and structured current-screen snapshot into a
-  validated allowlisted tool proposal. Reversible profile controls can be
-  filled immediately; profile saves, reservation starts, and capacity-affecting
-  admin proposals remain separate UI-confirmed actions.
+  validated allowlisted tool proposal. Its in-memory request coordinator
+  exposes owner-scoped waking/thinking/completed polling, while the browser
+  retains only session-scoped chat and pending UI state. Reversible profile
+  controls can be filled immediately; profile saves, reservation starts, and
+  capacity-affecting admin proposals remain separate UI-confirmed actions.
 - `Reconciler`: computes desired target state from aggregate reservations and
   applies that state through a capacity provider.
 - `HassleOffCapacityProvider`: decorates provider lifecycle calls with the

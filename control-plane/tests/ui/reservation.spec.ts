@@ -148,6 +148,19 @@ test("filters and recommends target-model deployments in the profile builder", a
   await expect(modal.locator("[data-deployment-key='prefer-smol::qwen-smol']")).toContainText("Decode 55 t/s");
   await expect(modal.locator("[data-deployment-key='prefer-smol::qwen-smol']")).toContainText("Tools");
   await expect(modal.locator("[data-profile-fit-score]")).toContainText("Fit 91");
+  await expect(modal.getByRole("button", { name: "Browse & filter" })).toHaveAttribute("aria-pressed", "true");
+  await expect(modal.locator("#profile-wizard")).toBeHidden();
+  await modal.locator("#profile-model-search").fill("tools qwen");
+  await expect(modal.locator("#profile-filter-status")).toContainText("1 of 1");
+  await modal.locator("#profile-model-search").fill("not-in-the-catalog");
+  await expect(modal.locator("#profile-filter-status")).toContainText("0 of 1");
+  await expect(modal.locator("[data-profile-model]")).toBeChecked();
+  await expect(modal.locator("[data-deployment-key='prefer-smol::qwen-smol']")).toHaveClass(/does-not-match/);
+  await modal.locator("#profile-model-search").fill("");
+  await modal.locator("#profile-model-sort").selectOption("cost");
+  await modal.getByRole("button", { name: "Help me choose" }).click();
+  await expect(modal.locator("#profile-wizard")).toBeVisible();
+  await expect(modal.locator(".triangle-snap")).toHaveCount(7);
   await expect(modal.getByRole("button", { name: /Best fit/ })).toBeVisible();
 
   await modal.locator("#profile-hosting-mode").selectOption("multi-model");
@@ -169,16 +182,30 @@ test("filters and recommends target-model deployments in the profile builder", a
 test("keeps the assistant available across the app and sends structured current-screen state", async ({ page }) => {
   await page.route("**/api/profile-advisor/status", async (route) => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ enabled: true, backend: { targetId: "prefer-smol", modelId: "qwen-smol" } }) }));
   let requestBody: Record<string, unknown> | undefined;
-  await page.route("**/api/profile-advisor", async (route) => {
+  let polls = 0;
+  const requestId = "9de0942a-364e-4e6c-8b4e-852cf583c7ad";
+  await page.route("**/api/profile-advisor/requests", async (route) => {
     requestBody = route.request().postDataJSON() as Record<string, unknown>;
-    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ result: { type: "answer", message: "I can see the profile builder controls." } }) });
+    await route.fulfill({ status: 202, contentType: "application/json", body: JSON.stringify({ id: requestId, phase: "waking", message: "The Assistant is sleeping. NeurOn is waking it…" }) });
+  });
+  await page.route("**/api/profile-advisor/requests/**", async (route) => {
+    polls += 1;
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(polls <= 4
+      ? { id: requestId, phase: "thinking", message: "The Assistant is awake and thinking…" }
+      : { id: requestId, phase: "complete", message: "The Assistant finished.", result: { type: "answer", message: "I can see the profile builder controls." } }) });
   });
   await signIn(page, "assistant-user");
   await page.getByRole("button", { name: "Create your first profile" }).click();
   await page.getByRole("button", { name: "Ask NeurOn" }).click();
-  await page.locator("[data-assistant-form] textarea").fill("What am I configuring on this screen?");
-  await page.locator("[data-assistant-form]").getByRole("button", { name: "Send" }).click();
+  const assistantInput = page.locator("[data-assistant-form] textarea");
+  await assistantInput.fill("What am I configuring on this screen?");
+  await assistantInput.press("Shift+Enter");
+  await expect(assistantInput).toHaveValue("What am I configuring on this screen?\n");
+  await assistantInput.press("Backspace");
+  await assistantInput.press("Enter");
 
+  await expect(page.locator("[data-assistant-messages]")).toContainText(/sleeping|thinking/);
+  await expect(page.locator(".assistant-spinner")).toBeVisible();
   await expect(page.locator("[data-assistant-messages]")).toContainText("I can see the profile builder controls.");
   expect(requestBody).toMatchObject({
     request: "What am I configuring on this screen?",
@@ -190,6 +217,27 @@ test("keeps the assistant available across the app and sends structured current-
   await page.goto(`${baseUrl}/api-keys`);
   await expect(page.locator("[data-assistant-toggle]")).toBeVisible();
   await expect(page.locator("[data-assistant-toggle]")).toHaveText("Assistant open");
+  await expect(page.locator("[data-assistant-messages]")).toContainText("I can see the profile builder controls.");
+  await page.getByRole("button", { name: "Clear assistant chat" }).click();
+  await expect(page.locator("[data-assistant-messages]")).not.toContainText("I can see the profile builder controls.");
+  await expect(page.locator("[data-assistant-messages]")).toContainText("I will always ask before saving or starting capacity.");
+});
+
+test("points to an ordinary navigation link before the assistant follows it", async ({ page }) => {
+  const requestId = "c9f0ce96-b2db-4bc8-b14b-6c6398a31b42";
+  await page.route("**/api/profile-advisor/status", async (route) => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ enabled: true }) }));
+  await page.route("**/api/profile-advisor/requests", async (route) => route.fulfill({ status: 202, contentType: "application/json", body: JSON.stringify({ id: requestId, phase: "thinking", message: "The Assistant is awake and thinking…" }) }));
+  await page.route("**/api/profile-advisor/requests/**", async (route) => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ id: requestId, phase: "complete", message: "Done", result: { type: "open_page", path: "/profiles", message: "Opening Profiles." } }) }));
+  await signIn(page, "guided-navigation-user");
+  await page.getByRole("button", { name: "Ask NeurOn" }).click();
+  await page.locator("[data-assistant-form] textarea").fill("Show me Profiles");
+  await page.locator("[data-assistant-form] textarea").press("Enter");
+
+  const destination = page.locator('a[href="/profiles"]');
+  await expect(destination).toHaveClass(/assistant-guided-target/);
+  await expect(destination.locator(".assistant-guide-arrow")).toHaveText("→");
+  await expect(page).toHaveURL(`${baseUrl}/profiles`);
+  await expect(page.locator("[data-assistant-messages]")).toContainText("Opening Profiles.");
 });
 
 test("updates visible timing choices when selecting a profile", async ({ page }) => {
@@ -541,7 +589,7 @@ async function createSmolProfile(page: Page) {
     await page.getByRole("button", { name: "Create profile" }).click();
   }
   const modal = page.locator("#profile-modal");
-  await modal.getByLabel("Name").fill("Smol profile");
+  await modal.getByLabel("Name", { exact: true }).fill("Smol profile");
   await modal.getByRole("button", { name: "Save profile" }).click();
   await expect(page).toHaveURL(`${baseUrl}/`);
   await expect(page.locator("#start-form")).toContainText("Smol profile");

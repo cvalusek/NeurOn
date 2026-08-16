@@ -133,11 +133,20 @@ export function layout(title: string, user: AuthenticatedUser | undefined, body:
     .profile-builder-layout { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; align-items: start; }
     .profile-guide { border: 1px solid #c7d9d3; border-radius: 8px; background: #f5fbf9; padding: 14px; margin: 14px 0; }
     .profile-guide h3 { margin-top: 0; }
+    .profile-guide-head { display: flex; justify-content: space-between; gap: 14px; align-items: start; flex-wrap: wrap; }
+    .profile-guide-mode { display: flex; gap: 7px; flex-wrap: wrap; }
+    .profile-guide-mode button.secondary { border: 1px solid #86b8ad; background: white; color: #0f5f59; }
+    .profile-guide-mode button[aria-pressed="true"] { border-color: #0f766e; background: #0f766e; color: white; }
+    .profile-guide-mode .wizard-callout[aria-pressed="false"] { border-color: #d6a742; background: #fff8df; color: #6b4f00; box-shadow: 0 0 0 2px rgba(214,167,66,.12); }
     .selection-filter-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 10px; }
+    .profile-browser-grid { display: grid; grid-template-columns: minmax(220px, 2fr) minmax(180px, 1fr); gap: 10px; margin-top: 14px; }
+    .profile-browser-grid input, .profile-browser-grid select { width: 100%; }
+    .profile-wizard[hidden] { display: none; }
     .preference-grid { display: grid; grid-template-columns: minmax(220px, 360px) minmax(220px, 1fr); gap: 16px; align-items: center; margin-top: 14px; }
     .preference-triangle { width: 100%; height: auto; touch-action: none; cursor: crosshair; }
     .preference-triangle polygon { fill: #e7f5f2; stroke: #5a9488; stroke-width: 2; }
-    .preference-triangle circle { fill: #0f766e; stroke: white; stroke-width: 3; filter: drop-shadow(0 2px 3px rgba(23, 32, 42, 0.25)); }
+    .preference-triangle .triangle-snap { fill: #a7cdc5; stroke: #f5fbf9; stroke-width: 2; }
+    .preference-triangle #profile-preference-point { fill: #0f766e; stroke: white; stroke-width: 3; filter: drop-shadow(0 2px 3px rgba(23, 32, 42, 0.25)); }
     .triangle-leaders { display: grid; gap: 10px; }
     .category-leader { border: 1px solid #d8ddd7; border-radius: 8px; padding: 10px; background: #fbfcfb; }
     .category-leader strong, .category-leader span { display: block; }
@@ -155,12 +164,21 @@ export function layout(title: string, user: AuthenticatedUser | undefined, body:
     .assistant-drawer[hidden] { display: none; }
     .assistant-head { display: flex; align-items: start; justify-content: space-between; gap: 12px; padding: 13px 14px; background: #17202a; color: white; }
     .assistant-head button { padding: 5px 9px; background: #334155; }
+    .assistant-head-actions { display: flex; gap: 6px; }
     .assistant-messages { display: grid; align-content: start; gap: 9px; padding: 12px; overflow: auto; background: #f7f8f6; }
     .assistant-message { border: 1px solid #d8ddd7; border-radius: 8px; padding: 9px 10px; background: white; white-space: pre-wrap; }
     .assistant-message.user { margin-left: 34px; background: #e7f5f2; border-color: #86b8ad; }
+    .assistant-message.system { display: flex; align-items: center; gap: 9px; margin-right: 34px; background: #f0f7ff; border-color: #93b8dc; color: #244a6a; }
+    .assistant-message.error { background: #fff1f0; border-color: #d99a96; color: #7a2e2a; }
+    .assistant-spinner { width: 16px; height: 16px; flex: 0 0 auto; border: 2px solid #b9ccdf; border-top-color: #0f766e; border-radius: 50%; animation: assistant-spin .8s linear infinite; }
+    .assistant-guided-target { position: relative; z-index: 30; animation: assistant-guide-pulse .45s ease-in-out 4 alternate; }
+    .assistant-guide-arrow { display: inline-block; margin-right: 5px; color: #d97706; font-size: 18px; font-weight: 900; }
     .assistant-confirm { display: grid; gap: 8px; border: 1px solid #d6a742; border-radius: 8px; padding: 10px; background: #fff8df; }
     .assistant-compose { display: grid; gap: 8px; padding: 12px; border-top: 1px solid #d8ddd7; background: white; }
     .assistant-compose textarea { width: 100%; min-height: 104px; font-family: inherit; }
+    .assistant-compose-hint { font-size: 11px; color: #6b7280; }
+    @keyframes assistant-spin { to { transform: rotate(360deg); } }
+    @keyframes assistant-guide-pulse { from { box-shadow: 0 0 0 2px rgba(217,119,6,.25); background-color: #fff8df; } to { box-shadow: 0 0 0 8px rgba(217,119,6,.08); background-color: #ffe8a3; } }
     .target-price { border-radius: 6px; padding: 5px 8px; background: #17202a; color: white; font-weight: 800; white-space: nowrap; }
     .model-metrics { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 7px; }
     .metric { border-radius: 5px; padding: 3px 6px; background: #eef2f0; color: #334155; font-size: 11px; font-weight: 750; }
@@ -229,7 +247,7 @@ export function layout(title: string, user: AuthenticatedUser | undefined, body:
       .profile-strip { grid-template-columns: 1fr; }
       .topbar { grid-template-columns: auto 1fr; gap: 12px; }
       .topbar .user { display: none; }
-      .profile-builder-layout, .preference-grid { grid-template-columns: 1fr; }
+      .profile-builder-layout, .preference-grid, .profile-browser-grid { grid-template-columns: 1fr; }
     }
     @media (prefers-reduced-motion: reduce) {
       body.nav-ready .drawer-scrim, body.nav-ready .nav-drawer, body.nav-ready main, body.nav-ready .system-banner { transition: none; }
@@ -291,9 +309,9 @@ export function layout(title: string, user: AuthenticatedUser | undefined, body:
   <main>${body}</main>
   ${user ? `<button class="assistant-toggle" type="button" data-assistant-toggle aria-controls="profile-assistant" aria-expanded="false">Ask NeurOn</button>
   <aside id="profile-assistant" class="assistant-drawer" hidden aria-label="NeurOn assistant">
-    <div class="assistant-head"><strong>NeurOn assistant</strong><button type="button" data-assistant-collapse aria-label="Collapse assistant">Collapse</button></div>
+    <div class="assistant-head"><strong>NeurOn assistant</strong><span class="assistant-head-actions"><button type="button" data-assistant-clear aria-label="Clear assistant chat">Clear</button><button type="button" data-assistant-collapse aria-label="Collapse assistant">Collapse</button></span></div>
     <div class="assistant-messages" data-assistant-messages></div>
-    <form class="assistant-compose" data-assistant-form><textarea maxlength="2000" placeholder="Ask about this screen, configure a profile, or manage a reservation."></textarea><button type="submit">Send</button><span class="muted" data-assistant-status></span></form>
+    <form class="assistant-compose" data-assistant-form><textarea maxlength="2000" placeholder="Ask about this screen, configure a profile, or manage a reservation."></textarea><span class="assistant-compose-hint">Enter to send · Shift+Enter for a new line</span><button type="submit">Send</button><span class="muted" data-assistant-status></span></form>
   </aside>` : ""}
   <script>
     (() => {
@@ -338,25 +356,50 @@ export function layout(title: string, user: AuthenticatedUser | undefined, body:
       refresh();
       setInterval(refresh, 300000);
     })();` : ""}
-    ${user ? assistantClientScript() : ""}
+    ${user ? assistantClientScript(user.username) : ""}
   </script>
 </body>
 </html>`;
 }
 
-function assistantClientScript(): string {
+function assistantClientScript(username: string): string {
+  const usernameJson = JSON.stringify(username).replace(/</gu, "\\u003c");
   return `(() => {
+      const namespace = ${usernameJson};
+      const chatKey = 'neuron-assistant-chat:' + namespace;
+      const requestKey = 'neuron-assistant-request:' + namespace;
+      const actionKey = 'neuron-assistant-action:' + namespace;
       const drawer = document.querySelector('#profile-assistant');
       const toggle = document.querySelector('[data-assistant-toggle]');
       const collapse = document.querySelector('[data-assistant-collapse]');
+      const clear = document.querySelector('[data-assistant-clear]');
       const form = document.querySelector('[data-assistant-form]');
       const messages = document.querySelector('[data-assistant-messages]');
       const status = document.querySelector('[data-assistant-status]');
-      if (!drawer || !toggle || !form || !messages || !status) return;
+      const textarea = form?.querySelector('textarea');
+      const send = form?.querySelector('button[type="submit"]');
+      if (!drawer || !toggle || !form || !messages || !status || !textarea || !send) return;
       const setOpen = open => { drawer.hidden = !open; toggle.setAttribute('aria-expanded', String(open)); toggle.textContent = open ? 'Assistant open' : 'Ask NeurOn'; localStorage.setItem('neuron-assistant-open', open ? '1' : '0'); };
       setOpen(localStorage.getItem('neuron-assistant-open') === '1');
       toggle.addEventListener('click', () => setOpen(drawer.hidden)); collapse.addEventListener('click', () => setOpen(false));
-      const addMessage = (text, kind = '') => { const node = document.createElement('div'); node.className = 'assistant-message' + (kind ? ' ' + kind : ''); node.textContent = text; messages.appendChild(node); messages.scrollTop = messages.scrollHeight; return node; };
+      let history = [];
+      try { const stored = JSON.parse(sessionStorage.getItem(chatKey) || '[]'); if (Array.isArray(stored)) history = stored; } catch {}
+      const persistHistory = () => sessionStorage.setItem(chatKey, JSON.stringify(history.slice(-100)));
+      const addMessage = (text, kind = '', persist = true) => {
+        const node = document.createElement('div'); node.className = 'assistant-message' + (kind ? ' ' + kind : ''); node.textContent = text; messages.appendChild(node); messages.scrollTop = messages.scrollHeight;
+        if (persist) { history.push({ text, kind }); persistHistory(); }
+        return node;
+      };
+      history.slice(-100).forEach(entry => { if (entry && typeof entry.text === 'string') addMessage(entry.text, typeof entry.kind === 'string' ? entry.kind : '', false); });
+      const showWelcome = () => { if (!messages.childElementCount) addMessage('Ask me to explain this screen, find a model, fill a profile, or guide you to the right page. I will always ask before saving or starting capacity.', '', false); };
+      showWelcome();
+      let progressNode;
+      const showProgress = text => {
+        if (!progressNode) { progressNode = document.createElement('div'); progressNode.className = 'assistant-message system'; progressNode.append(Object.assign(document.createElement('span'), { className: 'assistant-spinner' }), document.createElement('span')); messages.appendChild(progressNode); }
+        progressNode.lastElementChild.textContent = text; messages.scrollTop = messages.scrollHeight;
+      };
+      const clearProgress = () => { progressNode?.remove(); progressNode = undefined; };
+      clear.addEventListener('click', () => { history = []; persistHistory(); messages.replaceChildren(); progressNode = undefined; sessionStorage.removeItem(actionKey); sessionStorage.removeItem(requestKey); activeRequestId = undefined; setBusy(false); showWelcome(); });
       const currentDraft = () => {
         const profile = document.querySelector('#profile-form');
         if (!profile) { try { return JSON.parse(sessionStorage.getItem('neuron-profile-assistant-guidance') || 'null')?.draft; } catch { return undefined; } }
@@ -364,71 +407,73 @@ function assistantClientScript(): string {
         return { name: profile.elements.name?.value || undefined, description: profile.elements.description?.value || undefined, defaultDurationMinutes: Number(profile.elements.defaultDurationMinutes?.value) || undefined, defaultKeepaliveMinutes: Number(profile.elements.defaultKeepaliveMinutes?.value) || undefined, selections };
       };
       const screenSurface = path => {
-        if (path === '/') return 'home';
-        if (path === '/profiles' && document.querySelector('#profile-form')) return 'profile_create';
-        if (path === '/profiles') return 'profiles';
-        if (path === '/profiles/new') return 'profile_create';
-        if (path.startsWith('/profiles/') && path.endsWith('/edit')) return 'profile_edit';
-        if (path === '/help' || path === '/welcome') return 'guide';
-        if (path === '/client-setup') return 'client_setup';
-        if (path === '/api-keys') return 'api_keys';
-        if (path === '/admin/models') return 'admin_model_data';
-        if (path === '/admin/assistant') return 'admin_assistant';
-        if (path === '/admin/targets') return 'admin_targets';
-        if (path.startsWith('/admin/')) return 'admin_other';
-        return 'other';
+        if (path === '/') return 'home'; if (path === '/profiles' && document.querySelector('#profile-form')) return 'profile_create'; if (path === '/profiles') return 'profiles';
+        if (path === '/profiles/new') return 'profile_create'; if (path.startsWith('/profiles/') && path.endsWith('/edit')) return 'profile_edit'; if (path === '/help' || path === '/welcome') return 'guide';
+        if (path === '/client-setup') return 'client_setup'; if (path === '/api-keys') return 'api_keys'; if (path === '/admin/models') return 'admin_model_data'; if (path === '/admin/assistant') return 'admin_assistant';
+        if (path === '/admin/targets') return 'admin_targets'; if (path.startsWith('/admin/')) return 'admin_other'; return 'other';
       };
       const currentScreen = () => {
-        const path = location.pathname;
-        const screen = { path, title: document.title, surface: screenSurface(path) };
-        const start = document.querySelector('#start-form');
-        if (start) screen.startControls = {
-          selectedProfileId: start.elements.profileId?.value || undefined,
-          durationMinutes: Number(start.elements.durationMinutes?.value) || undefined,
-          keepaliveMinutes: Number(start.elements.keepaliveMinutes?.value) || undefined
-        };
-        const profileRoot = document.querySelector('#profile-modal');
-        if (profileRoot?.dataset.assistantRequirements) {
-          try { screen.profileRequirements = JSON.parse(profileRoot.dataset.assistantRequirements); } catch {}
-        }
-        const clientProfile = document.querySelector('#client-profile');
-        if (clientProfile?.value) screen.clientProfileId = clientProfile.value;
-        return screen;
+        const path = location.pathname; const screen = { path, title: document.title, surface: screenSurface(path) }; const start = document.querySelector('#start-form');
+        if (start) screen.startControls = { selectedProfileId: start.elements.profileId?.value || undefined, durationMinutes: Number(start.elements.durationMinutes?.value) || undefined, keepaliveMinutes: Number(start.elements.keepaliveMinutes?.value) || undefined };
+        const profileRoot = document.querySelector('#profile-modal'); if (profileRoot?.dataset.assistantRequirements) { try { screen.profileRequirements = JSON.parse(profileRoot.dataset.assistantRequirements); } catch {} }
+        const clientProfile = document.querySelector('#client-profile'); if (clientProfile?.value) screen.clientProfileId = clientProfile.value; return screen;
       };
-      const storeDraft = guidance => { sessionStorage.setItem('neuron-profile-assistant-guidance', JSON.stringify(guidance)); document.dispatchEvent(new CustomEvent('neuron:apply-profile-guidance', { detail: guidance })); };
+      const highlight = element => { if (!element) return; element.classList.add('assistant-guided-target'); element.scrollIntoView({ behavior: 'smooth', block: 'center' }); setTimeout(() => element.classList.remove('assistant-guided-target'), 2100); };
+      const storeDraft = guidance => { sessionStorage.setItem('neuron-profile-assistant-guidance', JSON.stringify(guidance)); document.dispatchEvent(new CustomEvent('neuron:apply-profile-guidance', { detail: guidance })); highlight(document.querySelector('#profile-form')); };
       const actionButton = (label, handler) => { const button = document.createElement('button'); button.type = 'button'; button.textContent = label; button.addEventListener('click', handler); return button; };
-      const confirmation = (message, label, handler) => { const card = document.createElement('div'); card.className = 'assistant-confirm'; const text = document.createElement('span'); text.textContent = message; card.append(text, actionButton(label, async event => { const button = event.currentTarget; button.disabled = true; try { await handler(); card.remove(); } catch (error) { addMessage(error instanceof Error ? error.message : 'The confirmed action failed.'); button.disabled = false; } })); messages.appendChild(card); messages.scrollTop = messages.scrollHeight; };
-      const jsonRequest = async (path, options) => { const response = await fetch(path, options); const body = await response.json().catch(() => ({})); if (!response.ok) throw new Error(body.error || 'NeurOn rejected the action'); return body; };
+      const clearPendingAction = () => sessionStorage.removeItem(actionKey);
+      const confirmation = (result, label, handler) => {
+        sessionStorage.setItem(actionKey, JSON.stringify(result)); const card = document.createElement('div'); card.className = 'assistant-confirm'; const text = document.createElement('span'); text.textContent = result.message;
+        const actions = document.createElement('span'); actions.className = 'row'; const confirm = actionButton(label, async event => { const button = event.currentTarget; button.disabled = true; button.textContent = 'Working…'; try { await handler(); clearPendingAction(); card.remove(); } catch (error) { addMessage(error instanceof Error ? error.message : 'The confirmed action failed.', 'error'); button.disabled = false; button.textContent = label; } });
+        const cancel = actionButton('Cancel', () => { clearPendingAction(); card.remove(); addMessage('Cancelled.'); }); cancel.className = 'secondary'; actions.append(confirm, cancel); card.append(text, actions); messages.appendChild(card); messages.scrollTop = messages.scrollHeight;
+      };
+      const jsonRequest = async (path, options) => {
+        const response = await fetch(path, options); const raw = await response.text(); let body = {}; try { body = raw ? JSON.parse(raw) : {}; } catch {}
+        if (!response.ok) throw new Error(body.error || ('NeurOn request failed with HTTP ' + response.status + (response.statusText ? ' ' + response.statusText : ''))); return body;
+      };
+      const guidedNavigate = (path, message) => {
+        addMessage(message); setOpen(true); const destination = new URL(path, location.href); const link = [...document.querySelectorAll('a[href]')].find(candidate => new URL(candidate.href, location.href).pathname === destination.pathname);
+        if (link) { document.body.classList.add('drawer-open'); const arrow = document.createElement('span'); arrow.className = 'assistant-guide-arrow'; arrow.textContent = '→'; link.prepend(arrow); highlight(link); }
+        setTimeout(() => { location.href = destination.pathname + destination.search; }, link ? 1900 : 500);
+      };
+      const teachControl = async (element, message) => {
+        if (!element) return;
+        addMessage(message); const arrow = document.createElement('span'); arrow.className = 'assistant-guide-arrow'; arrow.textContent = '→'; element.prepend(arrow); highlight(element);
+        await new Promise(resolve => setTimeout(resolve, 1300)); arrow.remove();
+      };
       const handleResult = result => {
-        if (result.type === 'answer') { addMessage(result.message); return; }
-        if (result.type === 'configure_profile') {
-          storeDraft(result.guidance); addMessage('I filled a profile draft for ' + result.guidance.useCase + '. Review the target and model selections before saving.');
-          if (!document.querySelector('#profile-form')) { const node = addMessage('The draft is ready to open in the profile builder.'); node.append(document.createElement('br'), actionButton('Open profile builder', () => { location.href = '/profiles/new?assistant=1'; })); }
-          return;
-        }
-        if (result.type === 'save_profile') {
-          storeDraft({ useCase: result.message, responseLength: 'mixed', requirements: { domains: [], weights: { intelligence: 1/3, speed: 1/3, cost: 1/3 } }, draft: result.draft });
-          confirmation(result.message, 'Confirm save profile', async () => { const profile = await jsonRequest('/api/reservation-profiles', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(result.draft) }); addMessage('Saved profile ' + profile.name + '. Nothing was started.'); });
-          return;
-        }
-        if (result.type === 'start_reservation') {
-          confirmation(result.message, 'Confirm start reservation', async () => { await jsonRequest('/api/reservations', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ profileId: result.profileId, modelIds: [], targetIds: [], durationMinutes: result.durationMinutes, keepaliveMinutes: result.keepaliveMinutes }) }); addMessage('Reservation created. NeurOn is reconciling the selected capacity.'); });
-          return;
-        }
-        if (result.type === 'open_admin_page') { addMessage(result.message); location.href = result.path; return; }
-        if (result.type === 'rediscover_target') confirmation(result.message, 'Confirm rediscovery', async () => { await jsonRequest('/api/admin/targets/' + encodeURIComponent(result.targetId) + '/discover', { method: 'POST' }); addMessage('Rediscovery and benchmark completed for ' + result.targetId + '.'); });
+        if (!result) return;
+        if (result.type === 'answer') { clearPendingAction(); addMessage(result.message); return; }
+        if (result.type === 'configure_profile') { clearPendingAction(); storeDraft(result.guidance); addMessage('I filled a profile draft for ' + result.guidance.useCase + '. Review the highlighted target and model selections before saving.'); if (!document.querySelector('#profile-form')) { const node = addMessage('The draft is ready to open in the profile builder.'); node.append(document.createElement('br'), actionButton('Open profile builder', () => guidedNavigate('/profiles/new?assistant=1', 'Opening the profile builder…'))); } return; }
+        if (result.type === 'save_profile') { storeDraft({ useCase: result.message, responseLength: 'mixed', requirements: { domains: [], technicalCapabilities: [], weights: { intelligence: 1/3, speed: 1/3, cost: 1/3 } }, draft: result.draft }); confirmation(result, 'Confirm save profile', async () => { await teachControl(document.querySelector('#profile-form button[type="submit"]'), 'This is the profile Save button NeurOn is using for the confirmed action.'); const profile = await jsonRequest('/api/reservation-profiles', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(result.draft) }); addMessage('Saved profile ' + profile.name + '. Nothing was started.'); }); return; }
+        if (result.type === 'start_reservation') { confirmation(result, 'Confirm start reservation', async () => { await teachControl(document.querySelector('#start-form button[type="submit"]'), 'This is the Reserve capacity button for the confirmed action.'); await jsonRequest('/api/reservations', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ profileId: result.profileId, modelIds: [], targetIds: [], durationMinutes: result.durationMinutes, keepaliveMinutes: result.keepaliveMinutes }) }); addMessage('Reservation created. NeurOn is reconciling the selected capacity.'); }); return; }
+        if (result.type === 'open_page' || result.type === 'open_admin_page') { clearPendingAction(); guidedNavigate(result.path, result.message); return; }
+        if (result.type === 'rediscover_target') confirmation(result, 'Confirm rediscovery', async () => { await jsonRequest('/api/admin/targets/' + encodeURIComponent(result.targetId) + '/discover', { method: 'POST' }); addMessage('Rediscovery and benchmark completed for ' + result.targetId + '.'); });
+      };
+      let activeRequestId;
+      let assistantEnabled = true;
+      const setBusy = busy => { send.disabled = busy || !assistantEnabled; textarea.disabled = busy || !assistantEnabled; };
+      const pollRequest = async id => {
+        if (activeRequestId === id) return; activeRequestId = id; sessionStorage.setItem(requestKey, id); setBusy(true);
+        try {
+          while (activeRequestId === id) {
+            const request = await jsonRequest('/api/profile-advisor/requests/' + encodeURIComponent(id)); showProgress(request.message || 'Assistant is working…');
+            if (request.phase === 'complete') { clearProgress(); sessionStorage.removeItem(requestKey); activeRequestId = undefined; setBusy(false); handleResult(request.result); return; }
+            if (request.phase === 'failed') { clearProgress(); sessionStorage.removeItem(requestKey); activeRequestId = undefined; setBusy(false); addMessage(request.message || 'Assistant failed.', 'error'); return; }
+            await new Promise(resolve => setTimeout(resolve, 900));
+          }
+        } catch (error) { clearProgress(); sessionStorage.removeItem(requestKey); activeRequestId = undefined; setBusy(false); addMessage(error instanceof Error ? error.message : 'The Assistant request could not be checked.', 'error'); }
       };
       form.addEventListener('submit', async event => {
-        event.preventDefault(); const textarea = form.querySelector('textarea'); const request = textarea.value.trim(); if (request.length < 3) return;
-        addMessage(request, 'user'); textarea.value = ''; form.querySelector('button').disabled = true; status.textContent = 'The configured Assistant model may start while I work…';
-        try {
-          const body = await jsonRequest('/api/profile-advisor', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ request, currentDraft: currentDraft(), screen: currentScreen() }) });
-          handleResult(body.result);
-        } catch (error) { addMessage(error instanceof Error ? error.message : 'The assistant failed.'); }
-        finally { form.querySelector('button').disabled = false; status.textContent = ''; }
+        event.preventDefault(); const request = textarea.value.trim(); if (request.length < 3 || activeRequestId) return; addMessage(request, 'user'); textarea.value = ''; setBusy(true); showProgress('Checking whether the Assistant is awake…');
+        try { const started = await jsonRequest('/api/profile-advisor/requests', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ request, currentDraft: currentDraft(), screen: currentScreen() }) }); activeRequestId = undefined; showProgress(started.message); await pollRequest(started.id); }
+        catch (error) { clearProgress(); setBusy(false); addMessage(error instanceof Error ? error.message : 'The Assistant failed.', 'error'); }
       });
-      fetch('/api/profile-advisor/status').then(response => response.json()).then(data => { if (!data.enabled) { form.querySelector('textarea').disabled = true; form.querySelector('button').disabled = true; status.textContent = data.reason === 'maintenance_mode' ? 'The assistant is paused while NeurOn is in maintenance mode.' : 'An administrator has not configured the Assistant target and model.'; } }).catch(() => undefined);
-      const pending = sessionStorage.getItem('neuron-profile-assistant-guidance'); if (pending && document.querySelector('#profile-form')) { try { document.dispatchEvent(new CustomEvent('neuron:apply-profile-guidance', { detail: JSON.parse(pending) })); } catch {} }
+      textarea.addEventListener('keydown', event => { if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) { event.preventDefault(); form.requestSubmit(); } });
+      fetch('/api/profile-advisor/status').then(response => response.json()).then(data => { if (!data.enabled) { assistantEnabled = false; setBusy(false); status.textContent = data.reason === 'maintenance_mode' ? 'The Assistant is paused while NeurOn is in maintenance mode.' : 'An administrator has not configured the Assistant target and model.'; } }).catch(() => undefined);
+      const pendingGuidance = sessionStorage.getItem('neuron-profile-assistant-guidance'); if (pendingGuidance && document.querySelector('#profile-form')) { try { document.dispatchEvent(new CustomEvent('neuron:apply-profile-guidance', { detail: JSON.parse(pendingGuidance) })); } catch {} }
+      const pendingAction = sessionStorage.getItem(actionKey); if (pendingAction) { try { handleResult(JSON.parse(pendingAction)); } catch { clearPendingAction(); } }
+      const pendingRequest = sessionStorage.getItem(requestKey); if (pendingRequest) void pollRequest(pendingRequest);
     })();`;
 }
 
@@ -1239,7 +1284,7 @@ export function assistantConfigPage(user: AuthenticatedUser, deployments: ModelD
   const reservationMinutes = config?.reservationMinutes ?? 15;
   const keepaliveMinutes = config?.keepaliveMinutes ?? 15;
   const choices = (kind: string, values: number[], selected: number) => values.map((value) => `<button class="choice" type="button" data-assistant-${kind}="${value}" aria-pressed="${String(value === selected)}">${value} min</button>`).join("");
-  return layout("Assistant", user, `${error ? `<p class="status">${escapeHtml(error)}</p>` : ""}<section class="panel"><h1>Assistant</h1><p>Select the existing NeurOn target and model that power the in-application assistant. The configuration is stored independently from targets and model-selection data.</p><p class="muted">The selected deployment must support OpenAI-compatible chat completions and function/tool calling. Asking a question may create a visible synthetic reservation and cold-start that target through normal reconciliation.</p></section><section class="panel"><form id="assistant-config-form"><input type="hidden" name="reservationMinutes" value="${reservationMinutes}"><input type="hidden" name="keepaliveMinutes" value="${keepaliveMinutes}"><label>Target and model${helpTip("The exact deployment NeurOn reserves and calls for assistant requests.")}<br><select name="deployment"><option value="">Disabled</option>${options}</select></label><div class="field-grid" style="margin-top:16px"><div><h2>Reservation duration${helpTip("How long the assistant reservation remains active. This is also the maximum cold-start wait for an individual request.")}</h2><div class="row">${choices("duration", [2, 5, 15, 30, 60], reservationMinutes)}</div></div><div><h2>Keepalive${helpTip("How long idle assistant capacity stays available after its reservation window, reducing repeated cold starts.")}</h2><div class="row">${choices("keepalive", [1, 2, 5, 15], keepaliveMinutes)}</div></div></div><details style="margin-top:16px"><summary><strong>Advanced</strong></summary><label>Model response timeout (seconds)${helpTip("Maximum time for the ready model to answer. This does not control target startup.")}<br><input name="requestTimeoutSeconds" type="number" min="1" max="600" value="${config?.requestTimeoutSeconds ?? 120}"></label></details><div class="actions"><button type="submit">Save assistant settings</button><span class="muted" data-assistant-config-status></span></div></form></section>
+  return layout("Assistant", user, `${error ? `<p class="status">${escapeHtml(error)}</p>` : ""}<section class="panel"><h1>Assistant</h1><p>Select the existing NeurOn target and model that power the in-application assistant. The configuration is stored independently from targets and model-selection data.</p><p class="muted">The selected deployment must support OpenAI-compatible chat completions and function/tool calling. Asking a question may create a visible synthetic reservation and cold-start that target through normal reconciliation.</p></section><section class="panel"><form id="assistant-config-form"><input type="hidden" name="reservationMinutes" value="${reservationMinutes}"><input type="hidden" name="keepaliveMinutes" value="${keepaliveMinutes}"><label>Target and model${helpTip("The exact deployment NeurOn reserves and calls for assistant requests.")}<br><select name="deployment"><option value="">Disabled</option>${options}</select></label><div class="field-grid" style="margin-top:16px"><div><h2>Reservation duration${helpTip("How long the assistant reservation remains active. This is also the maximum cold-start wait for an individual request.")}</h2><div class="row">${choices("duration", [2, 5, 15, 30, 60], reservationMinutes)}</div></div><div><h2>Keepalive${helpTip("How long idle assistant capacity stays available after its reservation window, reducing repeated cold starts.")}</h2><div class="row">${choices("keepalive", [1, 2, 5, 15], keepaliveMinutes)}</div></div></div><label style="display:block;margin-top:16px">Additional system guidance${helpTip("Trusted local terminology, priorities, or workflow guidance appended to NeurOn's built-in Assistant prompt. Tool validation, authorization, and confirmation rules still apply. Do not enter credentials or private source data.")}<br><textarea name="additionalInstructions" maxlength="8000" rows="5" placeholder="Optional organization-specific guidance">${escapeHtml(config?.additionalInstructions ?? "")}</textarea></label><details style="margin-top:16px"><summary><strong>Advanced</strong></summary><label>Warm-model response timeout (seconds)${helpTip("Maximum time for the already-ready model to answer. Cold-start waiting uses Reservation duration instead.")}<br><input name="requestTimeoutSeconds" type="number" min="1" max="600" value="${config?.requestTimeoutSeconds ?? 300}"></label></details><div class="actions"><button type="submit">Save assistant settings</button><span class="muted" data-assistant-config-status></span></div></form></section>
   <script type="module">
     const form = document.querySelector('#assistant-config-form');
     const select = (kind, button) => { form.querySelectorAll('[data-assistant-' + kind + ']').forEach(candidate => candidate.setAttribute('aria-pressed', String(candidate === button))); form.elements[kind === 'duration' ? 'reservationMinutes' : 'keepaliveMinutes'].value = button.dataset['assistant' + kind[0].toUpperCase() + kind.slice(1)]; };
@@ -1249,7 +1294,7 @@ export function assistantConfigPage(user: AuthenticatedUser, deployments: ModelD
       event.preventDefault(); const status = form.querySelector('[data-assistant-config-status]'); status.textContent = ' Saving…';
       try {
         const deployment = form.elements.deployment.value ? JSON.parse(form.elements.deployment.value) : { targetId: null, modelId: null }; const { targetId, modelId } = deployment;
-        const response = await fetch('/api/admin/assistant-config', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ targetId, modelId, reservationMinutes: Number(form.elements.reservationMinutes.value), keepaliveMinutes: Number(form.elements.keepaliveMinutes.value), requestTimeoutSeconds: Number(form.elements.requestTimeoutSeconds.value) }) });
+        const response = await fetch('/api/admin/assistant-config', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ targetId, modelId, reservationMinutes: Number(form.elements.reservationMinutes.value), keepaliveMinutes: Number(form.elements.keepaliveMinutes.value), requestTimeoutSeconds: Number(form.elements.requestTimeoutSeconds.value), additionalInstructions: form.elements.additionalInstructions.value }) });
         if (!response.ok) throw new Error((await response.json()).error || 'Save failed'); status.textContent = ' Saved'; setTimeout(() => location.reload(), 250);
       } catch (caught) { status.textContent = ' ' + (caught instanceof Error ? caught.message : 'Save failed'); }
     });
@@ -2672,8 +2717,12 @@ function profileSelectionGuide(deployments: ModelDeploymentSelectionView[]): str
   const costs = Array.from(new Set(deployments.map((deployment) => deployment.hourlyUsd).filter((value): value is number => typeof value === "number" && value >= 0))).sort((left, right) => left - right);
   const costStops = costs.map((value, index) => `<option value="${index + 1}" label="$${value.toFixed(2)}"></option>`).join("");
   return `<section class="profile-guide" aria-labelledby="profile-guide-title">
-    <h3 id="profile-guide-title">Find the best fit</h3>
-    <p class="muted">Requirements remove deployments that cannot work. The Good, Fast, and Cheap triangle ranks what remains.</p>
+    <div class="profile-guide-head"><div><h3 id="profile-guide-title">Choose models</h3><p class="muted">Search and sort the catalog, or let the Good, Fast, and Cheap wizard rank the choices.</p></div><div class="profile-guide-mode" role="group" aria-label="Model selection mode"><button id="profile-browse-mode" class="secondary" type="button" aria-pressed="true">Browse &amp; filter</button><button id="profile-wizard-mode" class="secondary wizard-callout" type="button" aria-pressed="false">Help me choose</button></div></div>
+    <div class="profile-browser-grid">
+      <label>Search models${helpTip("Searches model names, target names, IDs, aliases, and technical capabilities.")}<br><input id="profile-model-search" type="search" placeholder="Model, server, alias, or capability"></label>
+      <label>Sort results<br><select id="profile-model-sort"><option value="fit">Best overall fit</option><option value="favorite">Favorites first</option><option value="popular">Most used in profiles</option><option value="name">Model name</option><option value="cost">Cost: low to high</option><option value="intelligence">Intelligence: high to low</option><option value="speed">Speed: high to low</option></select></label>
+    </div>
+    <p class="muted">Requirements below remove deployments that cannot work. Missing measurements never pass a selected requirement.</p>
     <div class="selection-filter-grid" style="margin-top: 14px;">
       <label>Minimum context${helpTip("A hard per-request context requirement. Values come from target configuration or runtime discovery, including any concurrency sharing.")}<br><input id="profile-min-context" class="context-slider" type="range" min="0" max="${contexts.length}" step="1" value="0" list="profile-context-stops" data-context-values="${escapeHtml(JSON.stringify(contexts))}"><datalist id="profile-context-stops"><option value="0" label="Any"></option>${contextStops}</datalist><output id="profile-min-context-output">No minimum</output></label>
       <label>Hosting mode${helpTip("Dedicated targets serve one model deployment. Multi-model targets can keep several models available together.")}<br><select id="profile-hosting-mode"><option value="">Dedicated or multi-model</option><option value="dedicated">Dedicated model host</option><option value="multi-model">Multi-model host</option></select></label>
@@ -2681,10 +2730,13 @@ function profileSelectionGuide(deployments: ModelDeploymentSelectionView[]): str
     </div>
     ${technicalCapabilities.length ? `<fieldset><legend>Required technical capabilities${helpTip("Binary features advertised by the runtime or configured by an operator, such as vision or tool use. Selected features are hard requirements.")}</legend><div id="profile-technical-capabilities" class="requirement-tags">${technicalCapabilities.map((capability) => `<label><input type="checkbox" value="${escapeHtml(capability)}" data-profile-technical-capability> ${escapeHtml(domainLabel(capability))}</label>`).join("")}</div></fieldset>` : `<p class="muted">No runtime has advertised a recognized technical capability such as vision or tool use yet.</p>`}
     ${domains.length ? `<fieldset><legend>Desired strengths${helpTip("Curated, scored areas such as coding, math, or reasoning. These refine Intelligence ranking but never remove a model.")}</legend><div id="profile-domains" class="requirement-tags">${domains.map((domain) => `<label><input type="checkbox" value="${escapeHtml(domain)}" data-profile-domain> ${escapeHtml(domainLabel(domain))}</label>`).join("")}</div></fieldset>` : `<p class="muted">No scored model strengths have been entered yet; general Intelligence is used when available.</p>`}
+    <div id="profile-wizard" class="profile-wizard" hidden>
     <div class="preference-grid">
       <svg id="profile-preference-triangle" class="preference-triangle" viewBox="0 0 320 280" role="img" tabindex="0" aria-label="Good, Fast, and Cheap ranking preference. Center balances all three; corners favor one category.">
         <polygon points="160,28 24,244 296,244"></polygon>
         <text x="160" y="18" text-anchor="middle">Good</text><text x="16" y="266">Cheap</text><text x="304" y="266" text-anchor="end">Fast</text>
+        <circle class="triangle-snap" cx="160" cy="28" r="5"></circle><circle class="triangle-snap" cx="296" cy="244" r="5"></circle><circle class="triangle-snap" cx="24" cy="244" r="5"></circle>
+        <circle class="triangle-snap" cx="228" cy="136" r="5"></circle><circle class="triangle-snap" cx="92" cy="136" r="5"></circle><circle class="triangle-snap" cx="160" cy="244" r="5"></circle><circle class="triangle-snap" cx="160" cy="172" r="5"></circle>
         <circle id="profile-preference-point" cx="160" cy="172" r="9"></circle>
       </svg>
       <div class="triangle-leaders">
@@ -2694,8 +2746,9 @@ function profileSelectionGuide(deployments: ModelDeploymentSelectionView[]): str
         <div id="profile-leader-cheap" class="category-leader"><strong>Cost leader</strong><span class="muted">Not measured</span></div>
       </div>
     </div>
-    <div id="profile-filter-status" class="muted filter-status" aria-live="polite"></div>
     <div id="profile-recommendations" class="recommendation-grid" aria-live="polite"></div>
+    </div>
+    <div id="profile-filter-status" class="muted filter-status" aria-live="polite"></div>
   </section>`;
 }
 
@@ -2711,6 +2764,11 @@ function profileSelectionClientScript(deployments: ModelDeploymentSelectionView[
       const deployments = ${safeJson(deployments)};
       const byKey = new Map(deployments.map(deployment => [deployment.key, deployment]));
       const form = root.querySelector('#profile-form');
+      const browseModeButton = root.querySelector('#profile-browse-mode');
+      const wizardModeButton = root.querySelector('#profile-wizard-mode');
+      const wizardPanel = root.querySelector('#profile-wizard');
+      const searchInput = root.querySelector('#profile-model-search');
+      const sortInput = root.querySelector('#profile-model-sort');
       const contextInput = root.querySelector('#profile-min-context');
       const contextOutput = root.querySelector('#profile-min-context-output');
       const contextValues = JSON.parse(contextInput?.dataset.contextValues ?? '[]');
@@ -2724,6 +2782,7 @@ function profileSelectionClientScript(deployments: ModelDeploymentSelectionView[
       const triangle = root.querySelector('#profile-preference-triangle');
       const recommendations = root.querySelector('#profile-recommendations');
       const filterStatus = root.querySelector('#profile-filter-status');
+      let selectionMode = 'browse';
       let weights = { intelligence: 1, speed: 1, cost: 1 };
       const escapeText = (value) => String(value ?? '').replace(/[&<>"']/g, character => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' }[character]));
       const isNumber = (value) => typeof value === 'number' && Number.isFinite(value);
@@ -2755,7 +2814,7 @@ function profileSelectionClientScript(deployments: ModelDeploymentSelectionView[
         const total = weights.intelligence + weights.speed + weights.cost || 1;
         return { intelligence: weights.intelligence / total, speed: weights.speed / total, cost: weights.cost / total };
       };
-      const eligibleDeployments = () => {
+      const requirementEligibleDeployments = () => {
         const contextIndex = Number(contextInput.value) || 0;
         const minimumContext = contextIndex ? contextValues[contextIndex - 1] : 0;
         const costCeiling = maximumCost();
@@ -2768,13 +2827,20 @@ function profileSelectionClientScript(deployments: ModelDeploymentSelectionView[
           return true;
         });
       };
+      const eligibleDeployments = () => {
+        const terms = String(searchInput?.value ?? '').trim().toLocaleLowerCase().split(/\\s+/u).filter(Boolean);
+        return requirementEligibleDeployments().filter(deployment => {
+          const searchable = [deployment.modelDisplayName, deployment.modelId, deployment.targetDisplayName, deployment.targetId, ...(deployment.aliases ?? []), ...(deployment.technicalCapabilities ?? []).flatMap(capability => [capability.label, capability.title])].join(' ').toLocaleLowerCase();
+          return terms.every(term => searchable.includes(term));
+        });
+      };
       const rankedDeployments = () => {
         const eligible = eligibleDeployments();
         const decodeValues = eligible.map(item => item.performance?.decodeTokensPerSecond).filter(isNumber);
         const prefillValues = eligible.map(item => item.performance?.prefillTokensPerSecond).filter(isNumber);
         const costValues = eligible.map(item => item.hourlyUsd).filter(isNumber);
         const weights = currentWeights();
-        return eligible.map(deployment => {
+        const ranked = eligible.map(deployment => {
           const rawIntelligence = intelligenceValue(deployment);
           const intelligenceScore = isNumber(rawIntelligence) ? clamp01(rawIntelligence / 100) : undefined;
           const decodeScore = isNumber(deployment.performance?.decodeTokensPerSecond) ? relativeToMaximum(deployment.performance.decodeTokensPerSecond, decodeValues) : undefined;
@@ -2784,7 +2850,20 @@ function profileSelectionClientScript(deployments: ModelDeploymentSelectionView[
           const costScore = isNumber(deployment.hourlyUsd) ? relativeCost(deployment.hourlyUsd, costValues) : undefined;
           const dimensions = [isNumber(intelligenceScore) ? { score: intelligenceScore, weight: weights.intelligence } : undefined, isNumber(speedScore) ? { score: speedScore, weight: weights.speed } : undefined, isNumber(costScore) ? { score: costScore, weight: weights.cost } : undefined].filter(Boolean);
           return { ...deployment, fitScore: dimensions.length ? weightedAverage(dimensions) : 0, coverage: Math.round(dimensions.reduce((sum, dimension) => sum + dimension.weight, 0) * 100), intelligenceScore, speedScore, costScore };
-        }).sort((left, right) => right.fitScore - left.fitScore || Number(Boolean(right.favorite)) - Number(Boolean(left.favorite)) || (right.popularityScore ?? 0) - (left.popularityScore ?? 0) || right.coverage - left.coverage || left.targetDisplayName.localeCompare(right.targetDisplayName));
+        });
+        const measuredDescending = (left, right, value) => isNumber(value(right)) ? (isNumber(value(left)) ? value(right) - value(left) : 1) : (isNumber(value(left)) ? -1 : 0);
+        const measuredAscending = (left, right, value) => isNumber(value(left)) ? (isNumber(value(right)) ? value(left) - value(right) : -1) : (isNumber(value(right)) ? 1 : 0);
+        const selectedSort = selectionMode === 'wizard' ? 'fit' : sortInput?.value;
+        return ranked.sort((left, right) => {
+          const compared = selectedSort === 'name' ? left.modelDisplayName.localeCompare(right.modelDisplayName) || left.targetDisplayName.localeCompare(right.targetDisplayName)
+            : selectedSort === 'cost' ? measuredAscending(left, right, item => item.hourlyUsd)
+            : selectedSort === 'intelligence' ? measuredDescending(left, right, item => intelligenceValue(item))
+            : selectedSort === 'speed' ? measuredDescending(left, right, item => item.speedScore)
+            : selectedSort === 'favorite' ? Number(Boolean(right.favorite)) - Number(Boolean(left.favorite)) || (right.popularityScore ?? 0) - (left.popularityScore ?? 0)
+            : selectedSort === 'popular' ? (right.profileCount ?? 0) - (left.profileCount ?? 0) || (right.popularityScore ?? 0) - (left.popularityScore ?? 0)
+            : right.fitScore - left.fitScore;
+          return compared || Number(Boolean(right.favorite)) - Number(Boolean(left.favorite)) || (right.popularityScore ?? 0) - (left.popularityScore ?? 0) || right.coverage - left.coverage || left.targetDisplayName.localeCompare(right.targetDisplayName);
+        });
       };
       const metricSummary = (deployment) => {
         const pieces = [];
@@ -2816,13 +2895,15 @@ function profileSelectionClientScript(deployments: ModelDeploymentSelectionView[
         });
         const ranked = rankedDeployments();
         const matchingKeys = new Set(ranked.map(deployment => deployment.key));
+        const requirementKeys = new Set(requirementEligibleDeployments().map(deployment => deployment.key));
         const rankByKey = new Map(ranked.map((deployment, index) => [deployment.key, { deployment, index }]));
         root.querySelectorAll('[data-deployment-key]').forEach(option => {
           const matches = matchingKeys.has(option.dataset.deploymentKey);
+          const meetsRequirements = requirementKeys.has(option.dataset.deploymentKey);
           const input = option.querySelector('[data-profile-model]');
-          if (!matches && input?.checked) input.checked = false;
-          option.hidden = !matches;
-          option.classList.remove('does-not-match');
+          if (!meetsRequirements && input?.checked) input.checked = false;
+          option.hidden = !matches && !input?.checked;
+          option.classList.toggle('does-not-match', !matches && Boolean(input?.checked));
           option.style.order = String(rankByKey.get(option.dataset.deploymentKey)?.index ?? deployments.length);
           const score = option.querySelector('[data-profile-fit-score]');
           const rankedEntry = rankByKey.get(option.dataset.deploymentKey)?.deployment;
@@ -2832,11 +2913,12 @@ function profileSelectionClientScript(deployments: ModelDeploymentSelectionView[
           const options = [...card.querySelectorAll('[data-deployment-key]')];
           const input = card.querySelector('[data-profile-target]');
           const visible = options.filter(option => !option.hidden);
-          card.hidden = options.length > 0 && visible.length === 0;
-          if (card.hidden && input?.checked) { input.checked = false; input.dispatchEvent(new Event('change', { bubbles: true })); }
+          const selectable = options.some(option => requirementKeys.has(option.dataset.deploymentKey));
+          if (!selectable && input?.checked) { input.checked = false; input.dispatchEvent(new Event('change', { bubbles: true })); }
+          card.hidden = options.length > 0 && visible.length === 0 && !input?.checked;
           card.style.order = String(visible.length ? Math.min(...visible.map(option => Number(option.style.order))) : deployments.length);
         });
-        filterStatus.textContent = ranked.length + ' of ' + deployments.length + ' target-model deployments meet the current requirements. Missing values never satisfy a hard requirement.';
+        filterStatus.textContent = ranked.length + ' of ' + deployments.length + ' target-model deployments match the current search and requirements. ' + (selectionMode === 'wizard' ? 'The wizard ranks them by the Good, Fast, and Cheap balance.' : 'Results use the selected sort order.');
         const goodLeader = bestBy(ranked, intelligenceValue);
         const fastLeader = bestBy(ranked, item => item.speedScore);
         const cheapLeader = bestBy(ranked, item => item.hourlyUsd, true);
@@ -2865,6 +2947,15 @@ function profileSelectionClientScript(deployments: ModelDeploymentSelectionView[
         point.setAttribute('cy', String(goodShare * 28 + (cheapShare + speedShare) * 244));
         render();
       };
+      const setSelectionMode = mode => {
+        selectionMode = mode === 'wizard' ? 'wizard' : 'browse';
+        const wizard = selectionMode === 'wizard';
+        wizardPanel.hidden = !wizard;
+        browseModeButton.setAttribute('aria-pressed', String(!wizard));
+        wizardModeButton.setAttribute('aria-pressed', String(wizard));
+        sortInput.disabled = wizard;
+        render();
+      };
       const updateContextOutput = () => {
         const index = Number(contextInput.value) || 0;
         const value = index ? contextValues[index - 1] : 0;
@@ -2874,7 +2965,9 @@ function profileSelectionClientScript(deployments: ModelDeploymentSelectionView[
         const value = maximumCost();
         maxCostOutput.value = isNumber(value) ? '$' + value.toFixed(2) + '/hr maximum' : 'No maximum';
       };
-      [contextInput, hostingInput, maxCostInput, ...domainInputs, ...technicalInputs].forEach(input => input?.addEventListener('input', () => { updateContextOutput(); updateCostOutput(); render(); }));
+      [searchInput, sortInput, contextInput, hostingInput, maxCostInput, ...domainInputs, ...technicalInputs].forEach(input => input?.addEventListener('input', () => { updateContextOutput(); updateCostOutput(); render(); }));
+      browseModeButton.addEventListener('click', () => setSelectionMode('browse'));
+      wizardModeButton.addEventListener('click', () => setSelectionMode('wizard'));
       const snaps = [
         { x: 160, y: 28, weights: [1, 0, 0] }, { x: 296, y: 244, weights: [0, 1, 0] }, { x: 24, y: 244, weights: [0, 0, 1] },
         { x: 228, y: 136, weights: [1, 1, 0] }, { x: 92, y: 136, weights: [1, 0, 1] }, { x: 160, y: 244, weights: [0, 1, 1] },
@@ -2974,6 +3067,7 @@ function profileSelectionClientScript(deployments: ModelDeploymentSelectionView[
       updateContextOutput();
       updateCostOutput();
       setWeights(1, 1, 1);
+      setSelectionMode('browse');
     })();
   </script>`;
 }
@@ -3051,7 +3145,7 @@ function profileTargetSelection(target: CapacityTarget, models: ModelDefinition[
     ? `<p class="muted">No models are known yet. This reserves the target and leaves its full discovered runtime available.</p>`
     : models.length === 1
       ? `<p class="muted">This target has one model, so NeurOn selects it automatically.</p><div class="models">${profileModelOption(target, models[0], selected, deploymentByKey.get(`${target.id}::${models[0].id}`))}</div>`
-      : `<p class="muted">Choose at least one model for this target. Models reorder live as you move the triangle.</p><div class="models">${models.map((model) => profileModelOption(target, model, selectedModelIds.includes(model.id), deploymentByKey.get(`${target.id}::${model.id}`))).join("")}</div>`;
+      : `<p class="muted">Choose at least one model for this target. Matching models follow the active search, requirements, and sort or wizard ranking.</p><div class="models">${models.map((model) => profileModelOption(target, model, selectedModelIds.includes(model.id), deploymentByKey.get(`${target.id}::${model.id}`))).join("")}</div>`;
   return `<section class="target-status-card profile-target-selection" data-profile-target-card data-target-id="${escapeHtml(target.id)}">
     <div class="target-status-head"><label class="profile-target-toggle"><input type="checkbox" name="selectionTargetIds" value="${escapeHtml(target.id)}" data-profile-target ${selected ? "checked" : ""}><span><strong>${escapeHtml(target.displayName)}</strong><span class="muted"><code>${escapeHtml(target.id)}</code></span></span></label><span class="target-price">${targetCost === undefined ? "Cost unavailable" : `$${targetCost.toFixed(2)}/hr`}</span></div>
     <div data-profile-target-models>${modelContent}</div>

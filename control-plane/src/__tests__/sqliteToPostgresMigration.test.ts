@@ -75,7 +75,7 @@ describePostgres("SQLite to PostgreSQL migration", () => {
       expect(await migrated.modelMetadata.listCapabilities()).toMatchObject([{ modelId: "model-migrate", intelligence: 89, domains: { coding: 94 }, quantization: { format: "Q6", qualityRetentionPercent: 98.4 } }]);
       expect(await migrated.modelMetadata.listDeployments()).toMatchObject([{ targetId: "target-migrate", modelId: "model-migrate", performance: { decodeTokensPerSecond: 33 } }]);
       expect(await migrated.modelFavorites.listForUser("clint")).toMatchObject([{ targetId: "target-migrate", modelId: "model-migrate" }]);
-      expect(await migrated.assistantConfig.get()).toMatchObject({ targetId: "target-migrate", modelId: "model-migrate", reservationMinutes: 12, keepaliveMinutes: 5, requestTimeoutSeconds: 90 });
+      expect(await migrated.assistantConfig.get()).toMatchObject({ targetId: "target-migrate", modelId: "model-migrate", reservationMinutes: 12, keepaliveMinutes: 5, requestTimeoutSeconds: 90, additionalInstructions: "Use migration fixture terminology." });
       await migrated.close();
 
       const rerun = await migrateSqliteToPostgres({ sqlitePath: fixture.sqlitePath, pool: database.pool });
@@ -273,7 +273,7 @@ async function createPopulatedSqlite(): Promise<{ sqlitePath: string; reservatio
   await handle.modelMetadata.upsertCapability({ modelId: "model-migrate", intelligence: 89, domains: { coding: 94 }, quantization: { format: "Q6", qualityRetentionPercent: 98.4 }, provenance: { source: "manual", version: "fixture-v1" } }, createdAt);
   await handle.modelMetadata.upsertDeployment({ targetId: "target-migrate", modelId: "model-migrate", performance: { decodeTokensPerSecond: 33, prefillTokensPerSecond: 700, sampleCount: 3 }, provenance: { source: "NeurOn direct benchmark", version: "neuron-speed-v2-50k" } }, endedAt);
   await handle.modelFavorites.add({ username: "clint", targetId: "target-migrate", modelId: "model-migrate", createdAt });
-  await handle.assistantConfig.save({ targetId: "target-migrate", modelId: "model-migrate", reservationMinutes: 12, keepaliveMinutes: 5, requestTimeoutSeconds: 90, updatedAt: endedAt });
+  await handle.assistantConfig.save({ targetId: "target-migrate", modelId: "model-migrate", reservationMinutes: 12, keepaliveMinutes: 5, requestTimeoutSeconds: 90, additionalInstructions: "Use migration fixture terminology.", updatedAt: endedAt });
   await handle.close();
   return { sqlitePath, reservationId: reservation.id, endedAt };
 }

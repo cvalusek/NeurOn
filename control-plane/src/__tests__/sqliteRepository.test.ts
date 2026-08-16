@@ -280,10 +280,10 @@ describe("SqliteAssistantConfigRepository", () => {
     targets.close();
     const updatedAt = new Date("2026-08-15T12:00:00.000Z");
     const first = new SqliteAssistantConfigRepository(databasePath);
-    await first.save({ targetId: "advisor-target", modelId: "advisor-model", reservationMinutes: 15, keepaliveMinutes: 5, requestTimeoutSeconds: 120, updatedAt });
+    await first.save({ targetId: "advisor-target", modelId: "advisor-model", reservationMinutes: 15, keepaliveMinutes: 5, requestTimeoutSeconds: 120, additionalInstructions: "Prefer concise local guidance.", updatedAt });
     first.close();
     const second = new SqliteAssistantConfigRepository(databasePath);
-    expect(await second.get()).toEqual({ id: "default", targetId: "advisor-target", modelId: "advisor-model", reservationMinutes: 15, keepaliveMinutes: 5, requestTimeoutSeconds: 120, updatedAt });
+    expect(await second.get()).toEqual({ id: "default", targetId: "advisor-target", modelId: "advisor-model", reservationMinutes: 15, keepaliveMinutes: 5, requestTimeoutSeconds: 120, additionalInstructions: "Prefer concise local guidance.", updatedAt });
     second.close();
   });
 
@@ -305,6 +305,25 @@ describe("SqliteAssistantConfigRepository", () => {
     const reopenedTargets = new SqliteCapacityTargetRepository(databasePath);
     expect(await reopenedTargets.get("legacy-target")).not.toHaveProperty("profileAdvisor");
     reopenedTargets.close();
+  });
+
+  it("adds operator instructions to an existing assistant table without losing its selection", async () => {
+    tempDir = await mkdtemp(path.join(os.tmpdir(), "neuron-sqlite-"));
+    const databasePath = path.join(tempDir, "neuron.db");
+    const db = new Database(databasePath);
+    db.exec(`create table assistant_config (
+      id text primary key, target_id text not null, model_id text not null,
+      reservation_minutes integer not null, keepalive_minutes integer not null,
+      request_timeout_seconds integer not null, updated_at text not null
+    )`);
+    db.prepare("insert into assistant_config values ('default', 'target-1', 'model-1', 15, 5, 120, ?)").run("2026-08-15T12:00:00.000Z");
+    db.close();
+
+    const assistant = new SqliteAssistantConfigRepository(databasePath);
+    expect(await assistant.get()).toMatchObject({ targetId: "target-1", modelId: "model-1", additionalInstructions: undefined });
+    await assistant.save({ targetId: "target-1", modelId: "model-1", reservationMinutes: 15, keepaliveMinutes: 5, requestTimeoutSeconds: 120, additionalInstructions: "Local guidance" });
+    expect(await assistant.get()).toMatchObject({ additionalInstructions: "Local guidance" });
+    assistant.close();
   });
 });
 

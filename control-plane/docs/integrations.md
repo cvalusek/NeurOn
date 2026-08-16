@@ -96,17 +96,23 @@ Authenticated users may add or remove an exact target-model favorite through
 interface.
 
 `GET /api/profile-advisor/status` reports whether an administrator selected an
-existing target/model backend. `POST /api/profile-advisor` accepts the request,
-structured current-page identity, and optional editable draft. Asking may
-create or refresh the backend's synthetic system reservation. The response is
-one validated assistant tool result: configure controls, answer, propose a
-confirmed save/start, or—only for admins—navigate or propose confirmed
-rediscovery. The browser must not execute confirmation-required tools merely
-because the model requested them. See [Guided Model
-Selection](model-selection.md).
+existing target/model backend. The browser sends the request, structured
+current-page identity, and optional editable draft to `POST
+/api/profile-advisor/requests`, then polls its owner-scoped status at `GET
+/api/profile-advisor/requests/:id`. Asking may create or refresh the backend's
+synthetic system reservation. The asynchronous response phases distinguish a
+sleeping/waking backend from a warm model that is thinking, while avoiding one
+long ALB request through a cold start. The eventual result is one validated
+assistant tool proposal: configure controls, answer, propose a confirmed
+save/start, or—only for admins—navigate or propose confirmed rediscovery. The
+browser must not execute confirmation-required tools merely because the model
+requested them. The synchronous `POST /api/profile-advisor` remains available
+for compatible clients. See [Guided Model Selection](model-selection.md).
 
 Admins configure that backend independently from target and Model data through
-`GET/PUT /api/admin/assistant-config` or **Admin > Assistant**.
+`GET/PUT /api/admin/assistant-config` or **Admin > Assistant**, including
+optional trusted local system guidance. That guidance cannot loosen tool
+schemas, ownership, authorization, confirmation, or lifecycle safety rules.
 
 These assistant tools reuse NeurOn services and validation but are distinct
 from the external MCP transport. MCP remains appropriate for API-key clients;

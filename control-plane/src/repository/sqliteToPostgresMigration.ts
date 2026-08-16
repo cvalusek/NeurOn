@@ -83,6 +83,9 @@ const sqliteAdditiveExpectedColumns: Record<string, string[]> = {
   model_favorites: ["username", "target_id", "model_id", "created_at"],
   assistant_config: ["id", "target_id", "model_id", "reservation_minutes", "keepalive_minutes", "request_timeout_seconds", "updated_at"]
 };
+const sqliteAdditiveOptionalColumns: Record<string, string[]> = {
+  assistant_config: ["additional_instructions"]
+};
 
 const sqliteIntegerColumns = new Set([
   "reservations.keepalive_minutes",
@@ -319,10 +322,11 @@ function readSqliteDataset(sqlitePath: string): MigrationDataset {
 }
 
 function sqliteAssistantConfigRow(row: Record<string, unknown>): Record<string, unknown> {
+  const additionalInstructions = nullableText(row.additional_instructions);
   return {
     id: text(row.id), targetId: text(row.target_id), modelId: text(row.model_id),
     reservationMinutes: number(row.reservation_minutes), keepaliveMinutes: number(row.keepalive_minutes),
-    requestTimeoutSeconds: number(row.request_timeout_seconds), updatedAt: iso(row.updated_at)
+    requestTimeoutSeconds: number(row.request_timeout_seconds), ...(additionalInstructions === null ? {} : { additionalInstructions }), updatedAt: iso(row.updated_at)
   };
 }
 
@@ -330,7 +334,7 @@ function assistantConfigDatasetRow(config: NonNullable<ReturnType<typeof assista
   return {
     id: config.id, targetId: config.targetId, modelId: config.modelId,
     reservationMinutes: config.reservationMinutes, keepaliveMinutes: config.keepaliveMinutes,
-    requestTimeoutSeconds: config.requestTimeoutSeconds, updatedAt: config.updatedAt.toISOString()
+    requestTimeoutSeconds: config.requestTimeoutSeconds, ...(config.additionalInstructions ? { additionalInstructions: config.additionalInstructions } : {}), updatedAt: config.updatedAt.toISOString()
   };
 }
 
@@ -474,8 +478,8 @@ async function importDataset(client: pg.PoolClient, dataset: MigrationDataset): 
   }
   for (const row of dataset.assistantConfig) {
     await client.query(
-      "insert into assistant_config (id, target_id, model_id, reservation_minutes, keepalive_minutes, request_timeout_seconds, updated_at) values ($1,$2,$3,$4,$5,$6,$7)",
-      [row.id, row.targetId, row.modelId, row.reservationMinutes, row.keepaliveMinutes, row.requestTimeoutSeconds, row.updatedAt]
+      "insert into assistant_config (id, target_id, model_id, reservation_minutes, keepalive_minutes, request_timeout_seconds, additional_instructions, updated_at) values ($1,$2,$3,$4,$5,$6,$7,$8)",
+      [row.id, row.targetId, row.modelId, row.reservationMinutes, row.keepaliveMinutes, row.requestTimeoutSeconds, row.additionalInstructions ?? null, row.updatedAt]
     );
   }
 }
@@ -511,7 +515,7 @@ function validateSqliteSchema(db: Database.Database): void {
     validateSqliteTable(db, table, expected, problems, sqliteOptionalColumns[table] ?? []);
   }
   for (const [table, expected] of Object.entries(sqliteAdditiveExpectedColumns)) {
-    if (tables.has(table)) validateSqliteTable(db, table, expected, problems);
+    if (tables.has(table)) validateSqliteTable(db, table, expected, problems, sqliteAdditiveOptionalColumns[table] ?? []);
   }
   const legacyTables = Object.keys(sqliteLegacyActivationColumns);
   const presentLegacyTables = legacyTables.filter((table) => tables.has(table));
@@ -570,6 +574,9 @@ function validateDatasetSemantics(dataset: MigrationDataset): void {
     }
     if (!boundedInteger(row.reservationMinutes, 1, 720) || !boundedInteger(row.keepaliveMinutes, 1, 60) || !boundedInteger(row.requestTimeoutSeconds, 1, 600)) {
       throw new Error("SQLite source contains out-of-range assistant configuration");
+    }
+    if (row.additionalInstructions != null && (typeof row.additionalInstructions !== "string" || row.additionalInstructions.length > 8_000)) {
+      throw new Error("SQLite source contains incompatible Assistant instructions");
     }
   }
   if (dataset.reservations.some((row) => !reservationStatuses.has(String(row.status)))) {

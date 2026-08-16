@@ -33,11 +33,14 @@ quality retained is intentionally display-only: it is useful context, but the
 measurement methods are not consistent enough to make it a safe eligibility
 gate.
 
-The **Good / Fast / Cheap** triangle is the profile wizard. It controls the
-internal Intelligence / Speed / Cost weights and snaps at the center, category
-corners, and balanced edge positions. Everywhere outside the triangle uses the
-formal Intelligence, Speed, and Cost names. The current leader for each formal
-category appears beside the triangle.
+The profile builder opens in **Browse & filter** mode. Users can search model
+and target names, IDs, aliases, and capabilities, then sort by fit, favorites,
+profile usage, name, cost, Intelligence, or Speed. **Help me choose** opens the
+optional **Good / Fast / Cheap** triangle wizard. It controls the internal
+Intelligence / Speed / Cost weights and shows its magnetic snap points at the
+center, category corners, and balanced edge positions. Everywhere outside the
+triangle uses the formal Intelligence, Speed, and Cost names. The current
+leader for each formal category appears beside the triangle.
 
 Intelligence uses the model's 0–100 score, refined by selected scored strengths.
 Speed compares the deployment against the fastest eligible measurements and
@@ -132,10 +135,14 @@ environment-configured external endpoint. Asking for help creates or
 refreshes a synthetic `profile-advisor` reservation, waits for the ordinary
 reconciler and health checks, and calls that target's OpenAI-compatible API.
 This means the first request may cold-start the configured target. The admin
-setting controls reservation duration, keep-alive, and response timeout. The
-reservation duration is also the maximum cold-start wait. The selected runtime
+setting controls reservation duration, keep-alive, warm-model response timeout,
+and optional trusted local system guidance. The reservation duration is the
+maximum cold-start wait; the response timeout begins only after the target is
+healthy. The selected runtime
 must expose OpenAI-compatible chat completions;
 function/tool-call support is required for screen updates and action proposals.
+Operator guidance is sent to the selected model; do not put credentials,
+licensed benchmark data, or private source material in it.
 
 ![The independent Assistant configuration screen](images/assistant-config.png)
 
@@ -150,7 +157,9 @@ it answer “what am I looking at?” and update the right controls without send
 HTML or scraping visible text. It never receives target endpoints, provider or
 model credentials, raw DOM contents, prompt logs, hidden fields outside the
 explicit snapshot, unrelated private state, or another user's reservations.
-Requests and model responses are not persisted by NeurOn.
+Requests and model responses are not persisted by NeurOn. The browser keeps the
+current conversation and pending confirmation in per-user session storage so
+they survive full-page navigation; **Clear** removes that browser-side history.
 
 The system prompt explains the target/model/profile/reservation relationships,
 reconciler ownership of provider lifecycle, health and model preparation,
@@ -160,6 +169,7 @@ rules. The model must use an allowlisted tool:
 
 - `configure_profile` fills reversible browser controls and exact target/model
   selections.
+- `open_page` points to and follows an allowlisted ordinary NeurOn page.
 - `save_profile` creates a confirmation card. Only the user's confirmation
   invokes the normal profile service.
 - `start_reservation` is separate and requires another confirmation before it
@@ -168,15 +178,22 @@ rules. The model must use an allowlisted tool:
   tools. Destructive target/provider/update controls are not exposed.
 
 The assistant drawer is available throughout authenticated pages and collapses
-to a small launcher. A draft created outside the profile builder is held in
-session storage and applied when the user opens the builder. If the backend is
-unconfigured or unavailable, every local requirement, triangle, ranking, and
-recommendation remains usable.
+to a small launcher. Enter sends and Shift+Enter inserts a line break. A draft
+created outside the profile builder is held in session storage and applied when
+the user opens the builder. Navigation tools first pulse and point to the link
+they will follow; reversible form tools fill and highlight the corresponding
+controls. Confirmed save/start actions similarly identify the ordinary UI
+control before calling the existing application API. If the backend is
+unconfigured or unavailable, local search, requirements, sorting, and the
+optional wizard remain usable.
 
-`GET /api/profile-advisor/status` reports availability. `POST
-/api/profile-advisor` accepts the workload plus structured screen context and
-returns a validated tool proposal. Assistant tool calls do not bypass normal
-authorization, maintenance mode, validation, or user confirmation.
+`GET /api/profile-advisor/status` reports availability. The browser starts a
+request with `POST /api/profile-advisor/requests` and polls the owner-scoped
+`GET /api/profile-advisor/requests/:id`. This short-request flow can report
+sleeping/waking and thinking states without holding one ALB connection open
+through a cold start. The synchronous `POST /api/profile-advisor` remains a
+compatibility surface. Assistant tool calls do not bypass normal authorization,
+maintenance mode, validation, or user confirmation.
 
 ## PreFer boundary
 
