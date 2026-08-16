@@ -388,7 +388,8 @@ async function validateExistingPostgresTablesForMigration(queryable: pg.PoolClie
     "reservations.profile_id",
     "reservations.profile_name",
     "reservations.target_selections",
-    "capacity_providers.provisioning_enabled"
+    "capacity_providers.provisioning_enabled",
+    "assistant_config.additional_instructions"
   ]);
   const problems: string[] = [];
   for (const [table, columns] of Object.entries(expectedColumns)) {

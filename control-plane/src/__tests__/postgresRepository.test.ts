@@ -184,6 +184,33 @@ describePostgres("PostgreSQL schema and repositories", () => {
     }
   });
 
+  it("upgrades a schema v4 assistant record through schema v5 without manual SQL", async () => {
+    const database = await createPostgresTestSchema();
+    try {
+      await migratePostgresSchema(database.pool);
+      await database.pool.query(`
+        insert into assistant_config (
+          id, target_id, model_id, reservation_minutes, keepalive_minutes,
+          request_timeout_seconds, updated_at
+        ) values ('default', 'advisor-target', 'advisor-model', 12, 5, 90, '2026-08-15T12:00:00Z')
+      `);
+      await database.pool.query("delete from neuron_schema_migrations where version = 5");
+      await database.pool.query("alter table assistant_config drop column additional_instructions");
+
+      const state = await migratePostgresSchema(database.pool);
+
+      expect(state).toEqual({ currentVersion: 5, appliedVersions: [1, 2, 3, 4, 5] });
+      const assistant = await database.pool.query<{ target_id: string; model_id: string; additional_instructions: string | null }>(`
+        select target_id, model_id, additional_instructions
+        from assistant_config
+        where id = 'default'
+      `);
+      expect(assistant.rows).toEqual([{ target_id: "advisor-target", model_id: "advisor-model", additional_instructions: null }]);
+    } finally {
+      await database.cleanup();
+    }
+  });
+
   it("fails closed when persisted target selections have an invalid shape", async () => {
     const database = await createPostgresTestSchema();
     try {

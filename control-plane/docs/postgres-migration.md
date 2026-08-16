@@ -26,6 +26,8 @@ operator guidance to the independent Assistant record. The explicit SQLite
 transfer contract remains source schema version 2: the additive guidance column
 is accepted when present, and its value participates in semantic fingerprints,
 while a source without guidance retains its prior exact-migration identity.
+The startup validator permits columns owned by pending, known migrations, so a
+version 4 deployment upgrades to version 5 automatically without operator SQL.
 
 ## Durable scope
 
