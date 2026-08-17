@@ -165,6 +165,10 @@ filters by context, cost, required technical capabilities, and dedicated versus
 multi-model hosting. Users can optionally open the Good/Fast/Cheap triangle
 wizard to rank eligible choices by Intelligence, Speed, and Cost. Scored
 strengths refine Intelligence; quality-retention estimates remain display-only.
+Hosting mode is explicit: unclassified targets remain visible and are not
+guessed from their model count. The collapsible Assistant keeps bounded
+conversation history across pages, sends screen-state deltas behind a stable
+cache-friendly operating prompt, and exposes privacy-safe diagnostics to admins.
 No PreFer manifest is required.
 See [Guided Model Selection](docs/model-selection.md).
 

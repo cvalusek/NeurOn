@@ -74,7 +74,10 @@ effective per-request context, durable capability metadata, target-specific
 performance, estimated quantization retention, favorites, usage, and LiteLLM
 aliases. The default Browse & filter view searches names, IDs, aliases, and
 capabilities and offers ordinary sort choices. Hard filters remove deployments
-with missing or insufficient facts. The separately-invoked Good/Fast/Cheap
+with missing or insufficient facts. Hosting mode is an explicit target fact;
+the selector reports counts for dedicated, multi-model, and unclassified
+targets and never guesses from catalog size or concurrency. The
+separately-invoked Good/Fast/Cheap
 triangle is the optional profile wizard. Its visible snap points rank the
 remainder, show Intelligence/Speed/Cost leaders, update each card's fit score,
 and reorder both models and targets. Binary technical capabilities are hard
@@ -93,6 +96,11 @@ It receives structured page identity and profile state—not raw DOM contents—
 can fill filters, defaults, and exact target/model choices. Drafts created away
 from the builder carry into it through session storage. The per-user chat and a
 pending confirmation also survive full-page navigation until **Clear** is used.
+Bounded prior turns are sent with each request and compacted as the conversation
+grows. A stable operating-prompt/catalog prefix is followed by an initial
+structured page snapshot and then only changed screen-state deltas. Admins can
+toggle a privacy-safe diagnostic view of timing, retry, context-delta, and
+conversation-size metadata without exposing prompts or model content.
 Enter sends; Shift+Enter adds a line break. Sleeping/waking and warm-model
 thinking appear as spinner bubbles in the conversation. Guided navigation
 points to and pulses the ordinary link before following it, while form actions
@@ -247,8 +255,10 @@ GET /admin/usage
 ```
 
 Admins can inspect 7-, 30-, or 90-day UTC breakdowns by day, user, provider,
-target, and model. Reports use durable reservation/activation allocations and
-exclude synthetic traffic reservations.
+target, and model. The page leads with cost, activated time, reservation, and
+active-user summaries, then shows one sortable-by-cost breakdown at a time in
+Daily, Users, Targets, Providers, and Models tabs. Reports use durable
+reservation/activation allocations and exclude synthetic traffic reservations.
 
 ## Activations Page
 

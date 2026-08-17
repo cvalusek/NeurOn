@@ -24,6 +24,14 @@ import { apiKeyJson, requireUser, reservationDisplayUsername, reservationJson, s
 
 const assistantRequestBodySchema = z.object({
   request: z.string().trim().min(3).max(2_000),
+  conversation: z.object({
+    summary: z.string().max(6_000).optional(),
+    history: z.array(z.object({
+      role: z.enum(["user", "assistant", "context"]),
+      content: z.string().min(1).max(4_000)
+    }).strict()).max(32).optional(),
+    previousContext: z.unknown().optional()
+  }).strict().optional(),
   currentDraft: z.object({
     name: z.string().max(120).optional(),
     description: z.string().max(500).optional(),
@@ -117,7 +125,7 @@ export function registerApiRoutes(
       const body = assistantRequestBodySchema.parse(request.body);
       const user = requireUser(request);
       const context = await assistantContext(body, user, reservationProfileService, reservationService);
-      return reply.code(202).send(await profileAdvisor.startInterpret(body.request, context, user));
+      return reply.code(202).send(await profileAdvisor.startInterpret(body.request, context, user, body.conversation));
     } catch (error) {
       const invalidRequest = error instanceof z.ZodError;
       return reply.code(invalidRequest ? 400 : error instanceof ProfileAssistantRequestConflictError ? 409 : 502).send({
@@ -328,7 +336,7 @@ export function registerApiRoutes(
         const body = assistantRequestBodySchema.parse(request.body);
         const user = requireUser(request);
         const context = await assistantContext(body, user, reservationProfileService, reservationService);
-        return { result: await profileAdvisor.interpret(body.request, context, user.isAdmin) };
+        return { result: await profileAdvisor.interpret(body.request, context, user.isAdmin, undefined, body.conversation) };
       } catch (error) {
         const invalidRequest = error instanceof z.ZodError;
         const message = invalidRequest

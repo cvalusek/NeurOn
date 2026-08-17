@@ -137,8 +137,10 @@ reconciler and health checks, and calls that target's OpenAI-compatible API.
 This means the first request may cold-start the configured target. The admin
 setting controls reservation duration, keep-alive, warm-model response timeout,
 and optional trusted local system guidance. The reservation duration is the
-maximum cold-start wait; the response timeout begins only after the target is
-healthy. The selected runtime
+maximum cold-start wait. Once a cold target becomes healthy, its first
+completion receives another response window equal to the reservation duration;
+an already-warm target uses the separate warm-model response timeout. The
+selected runtime
 must expose OpenAI-compatible chat completions;
 function/tool-call support is required for screen updates and action proposals.
 Operator guidance is sent to the selected model; do not put credentials,
@@ -160,6 +162,19 @@ explicit snapshot, unrelated private state, or another user's reservations.
 Requests and model responses are not persisted by NeurOn. The browser keeps the
 current conversation and pending confirmation in per-user session storage so
 they survive full-page navigation; **Clear** removes that browser-side history.
+It sends bounded prior user, Assistant, and application-context turns. Older
+turns are compacted into a bounded summary while recent turns remain verbatim.
+
+The invariant operating prompt and sanitized deployment catalog stay at the
+front of every request to preserve the model host's prefix-cache opportunity.
+The first conversation turn receives a structured screen/user-state snapshot;
+later turns receive only an application-computed delta when that state changes.
+Browser/user state is marked as untrusted descriptive context, never as prompt
+instructions. Administrators may reveal a privacy-safe **Debug** panel in the
+drawer to inspect history size, context snapshot/delta behavior, warm versus
+cold acquisition, response timeout, attempt count, selected tool, and elapsed
+time. It deliberately omits prompt text, catalog values, credentials, endpoints,
+and model response content.
 
 The system prompt explains the target/model/profile/reservation relationships,
 reconciler ownership of provider lifecycle, health and model preparation,
@@ -192,8 +207,12 @@ request with `POST /api/profile-advisor/requests` and polls the owner-scoped
 `GET /api/profile-advisor/requests/:id`. This short-request flow can report
 sleeping/waking and thinking states without holding one ALB connection open
 through a cold start. The synchronous `POST /api/profile-advisor` remains a
-compatibility surface. Assistant tool calls do not bypass normal authorization,
-maintenance mode, validation, or user confirmation.
+compatibility surface. Completion replies accept current tool calls, legacy
+function calls, and ordinary explanatory content. An empty or malformed reply
+gets one schema-forced repair attempt; transient 408/425/429/502/503/504
+responses get one short retry when the request deadline permits. Assistant tool
+calls do not bypass normal authorization, maintenance mode, validation, or user
+confirmation.
 
 ## PreFer boundary
 

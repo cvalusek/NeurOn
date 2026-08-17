@@ -113,6 +113,9 @@ export class Reconciler {
           observed = health.ok ? "healthy" : "starting";
           message = health.message;
         }
+        if (this.modelWarmup && (desired !== "on" || observed !== "healthy" || previous?.observed !== "healthy")) {
+          this.modelWarmup.forgetTarget?.(target.id);
+        }
         if (desired === "on" && observed === "healthy" && this.modelWarmup) {
           const modelIds = targetReservations.flatMap((reservation) =>
             reservation.targetSelections?.find((selection) => selection.targetId === target.id)?.modelIds ?? reservation.modelIds

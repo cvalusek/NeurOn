@@ -22,10 +22,15 @@ export class ModelWarmupService {
       this.warmed.add(key);
     }
   }
+
+  forgetTarget(targetId: string): void {
+    const prefix = `${targetId}:`;
+    for (const key of this.warmed) if (key.startsWith(prefix)) this.warmed.delete(key);
+  }
 }
 
 function warmupModelIdFor(model: ModelDefinition | undefined, fallback: string): string {
-  return model?.id ?? fallback;
+  return model?.runtimeModelIds?.[0] ?? model?.backendModelIds?.[0] ?? model?.id ?? fallback;
 }
 
 function warmupApiBaseUrl(target: CapacityTarget): string | undefined {

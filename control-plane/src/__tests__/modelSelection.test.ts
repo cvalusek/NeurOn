@@ -174,6 +174,46 @@ describe("profile advisor", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
+  it("carries bounded conversation history and only appends changed screen context", async () => {
+    const { advisor, fetchMock } = profileAdvisorHarness([
+      { name: "answer_question", value: { message: "The fast model is available." } },
+      { name: "answer_question", value: { message: "You are now on Profiles." } }
+    ]);
+    const owner = { username: "owner", isAdmin: false };
+    const firstContext = { screen: { path: "/", title: "Home", surface: "home" as const }, savedProfiles: [] };
+    const started = await advisor.startInterpret("Which models are available?", firstContext, owner);
+    expect(started.conversation?.contextMessage).toContain("state snapshot");
+    expect(started.debug).toBeUndefined();
+    await vi.waitFor(() => expect(advisor.getInterpretRequest(started.id, owner)).toMatchObject({ phase: "complete" }));
+
+    await advisor.interpret("Where am I now?", { ...firstContext, screen: { path: "/profiles", title: "Profiles", surface: "profiles" } }, false, undefined, {
+      previousContext: started.conversation?.contextSnapshot,
+      history: [
+        { role: "context", content: started.conversation!.contextMessage! },
+        { role: "user", content: "Which models are available?" },
+        { role: "assistant", content: "The fast model is available." }
+      ]
+    });
+
+    const firstBody = JSON.parse(String(fetchMock.mock.calls[0][1]?.body));
+    const secondBody = JSON.parse(String(fetchMock.mock.calls[1][1]?.body));
+    expect(firstBody.messages[0].content).not.toContain("Current screen and user state");
+    expect(secondBody.messages.map((message: { content: string }) => message.content)).toEqual(expect.arrayContaining([
+      "Which models are available?", "The fast model is available."
+    ]));
+    expect(String(secondBody.messages.at(-2).content)).toContain("state delta");
+    expect(String(secondBody.messages.at(-2).content)).toContain('"path":"/profiles"');
+  });
+
+  it("retries an empty model response once with a required tool call", async () => {
+    const { advisor, fetchMock } = profileAdvisorHarness([{ name: "answer_question", value: { message: "Here are the models." } }]);
+    fetchMock.mockImplementationOnce(async () => new Response(JSON.stringify({ choices: [{ message: { content: null } }] }), { status: 200 }));
+
+    await expect(advisor.interpret("What models can I use?")).resolves.toEqual({ type: "answer", message: "Here are the models." });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(JSON.parse(String(fetchMock.mock.calls[1][1]?.body)).tool_choice).toBe("required");
+  });
+
   it("shows the waking state unless the assistant deployment is both healthy and desired on", async () => {
     let statusReads = 0;
     const { advisor } = profileAdvisorHarness(
@@ -191,6 +231,15 @@ describe("profile advisor", () => {
     const { advisor, fetchMock } = profileAdvisorHarness([]);
     fetchMock.mockRejectedValueOnce(Object.assign(new Error("timed out"), { name: "TimeoutError" }));
     await expect(advisor.interpret("Help me choose a model")).rejects.toThrow("warm Assistant model did not respond within 5 seconds");
+  });
+
+  it("uses reservation duration rather than the warm timeout for the first cold response", async () => {
+    let reads = 0;
+    const { advisor, fetchMock } = profileAdvisorHarness([], () => reads++ === 0
+      ? { targetId: "small", desired: "off", observed: "stopped", message: "Stopped" }
+      : { targetId: "small", desired: "on", observed: "healthy", message: "Ready" });
+    fetchMock.mockRejectedValueOnce(Object.assign(new Error("timed out"), { name: "TimeoutError" }));
+    await expect(advisor.interpret("Help me choose a model")).rejects.toThrow("first response did not finish within the 10-minute reservation duration");
   });
 
   it("allows ordinary users to request only allowlisted guided navigation", async () => {
@@ -214,18 +263,19 @@ function profileAdvisorHarness(
     if (!result) throw new Error("No mocked profile-advisor result remains");
     return new Response(JSON.stringify({ choices: [{ message: { tool_calls: [{ function: { name: result.name, arguments: JSON.stringify(result.value) } }] } }] }), { status: 200, headers: { "content-type": "application/json" } });
   });
+  const getTargetStatus = vi.fn(async () => ({ observed: "healthy" as const, message: "Ready" }));
   const advisor = new ProfileAdvisorService({
     assistantConfig,
     catalog,
     reservationService: { listActiveOwned: async () => [], createForUser, markDone: vi.fn(), extend: vi.fn() } as never,
     statuses: { get: () => typeof assistantStatus === "function" ? assistantStatus() : assistantStatus, set: vi.fn(), list: () => [] },
-    capacityProvider: { getTargetStatus: async () => ({ observed: "healthy", message: "Ready" }), provisionTarget: vi.fn(), ensureTargetOn: vi.fn(), ensureTargetOff: vi.fn(), forceStopTarget: vi.fn() },
+    capacityProvider: { getTargetStatus, provisionTarget: vi.fn(), ensureTargetOn: vi.fn(), ensureTargetOff: vi.fn(), forceStopTarget: vi.fn() },
     availableDomains: () => ["coding"],
     availableDeployments: () => [selectionService().listDeployments({ small: { hourlyUsd: 1.25 } }).find((deployment) => deployment.key === "small::fast")!],
     fetchImpl: fetchMock as typeof fetch,
     sleep: async () => undefined
   });
-  return { advisor, createForUser, fetchMock };
+  return { advisor, createForUser, fetchMock, getTargetStatus };
 }
 
 function selectionService(): ModelSelectionService {

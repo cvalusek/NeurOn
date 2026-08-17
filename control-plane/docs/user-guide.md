@@ -35,14 +35,16 @@ order. Use **Help me choose** when the model list is unfamiliar:
   context does not pass the filter.
 - Add required technical flags such as vision or tool use, a cost ceiling, or
   a dedicated versus multi-model host requirement only when it is mandatory.
+  Targets without an explicit hosting classification appear as Unclassified;
+  NeurOn does not guess their mode from how many catalog entries they expose.
 - Add any scored strengths you care about, such as coding or reasoning. They
   refine Intelligence ranking but do not filter models out.
 - Move the **Good**, **Fast**, and **Cheap** point to express preferences among
   the choices that remain. The center means maximum, equal preference for all
   three. Visible balanced positions and category corners snap into place.
-- The triangle is the optional profile wizard. The collapsible NeurOn assistant can also
-  fill the complete draft, including exact
-target/model choices. Its save and start tools always present separate
+- The triangle is the optional profile wizard. The collapsible NeurOn assistant
+  can also fill the complete draft, including exact target/model choices. Its
+  save and start tools always present separate
   confirmation cards before anything is persisted or capacity demand begins.
 - Review the ranked cards and category leaders, then select the exact
   target-model choices the profile needs.
@@ -52,7 +54,9 @@ session and can be removed with **Clear**. Enter sends; Shift+Enter inserts a
 new line. When its selected target is sleeping, a progress bubble distinguishes
 waking the target from waiting on the warm model. Guided navigation points to
 the ordinary link before following it, so the same workflow remains available
-without the Assistant.
+without the Assistant. It remembers recent turns and compacts older ones during
+longer conversations. Administrators can toggle a privacy-safe diagnostic panel
+for timing, retries, history size, and page-context updates.
 
 ![The collapsible NeurOn assistant alongside the profile builder](images/profile-assistant.png)
 

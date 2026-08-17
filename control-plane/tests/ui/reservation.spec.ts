@@ -180,13 +180,19 @@ test("filters and recommends target-model deployments in the profile builder", a
 });
 
 test("keeps the assistant available across the app and sends structured current-screen state", async ({ page }) => {
+  const clientErrors: string[] = [];
+  page.on("pageerror", (error) => clientErrors.push(error.message));
   await page.route("**/api/profile-advisor/status", async (route) => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ enabled: true, backend: { targetId: "prefer-smol", modelId: "qwen-smol" } }) }));
-  let requestBody: Record<string, unknown> | undefined;
+  const requestBodies: Record<string, unknown>[] = [];
   let polls = 0;
   const requestId = "9de0942a-364e-4e6c-8b4e-852cf583c7ad";
   await page.route("**/api/profile-advisor/requests", async (route) => {
-    requestBody = route.request().postDataJSON() as Record<string, unknown>;
-    await route.fulfill({ status: 202, contentType: "application/json", body: JSON.stringify({ id: requestId, phase: "waking", message: "The Assistant is sleeping. NeurOn is waking it…" }) });
+    requestBodies.push(route.request().postDataJSON() as Record<string, unknown>);
+    await route.fulfill({ status: 202, contentType: "application/json", body: JSON.stringify({
+      id: requestId, phase: "waking", message: "The Assistant is sleeping. NeurOn is waking it…",
+      conversation: { contextMessage: "[NeurOn browser and user-state snapshot]\n{}", contextSnapshot: { screen: { path: "/profiles/new", surface: "profile_create" } } },
+      debug: { startedAt: new Date().toISOString(), initialTargetState: "cold", contextUpdate: "snapshot", historyMessages: 0, historyCharacters: 0, summaryCharacters: 0 }
+    }) });
   });
   await page.route("**/api/profile-advisor/requests/**", async (route) => {
     polls += 1;
@@ -196,6 +202,9 @@ test("keeps the assistant available across the app and sends structured current-
   });
   await signIn(page, "assistant-user");
   await page.getByRole("button", { name: "Create your first profile" }).click();
+  await expect(page).toHaveURL(/\/profiles\/new\?onboarding=1$/);
+  await expect(page.locator("#profile-modal")).toBeVisible();
+  expect(clientErrors).toEqual([]);
   await page.getByRole("button", { name: "Ask NeurOn" }).click();
   const assistantInput = page.locator("[data-assistant-form] textarea");
   await assistantInput.fill("What am I configuring on this screen?");
@@ -207,17 +216,26 @@ test("keeps the assistant available across the app and sends structured current-
   await expect(page.locator("[data-assistant-messages]")).toContainText(/sleeping|thinking/);
   await expect(page.locator(".assistant-spinner")).toBeVisible();
   await expect(page.locator("[data-assistant-messages]")).toContainText("I can see the profile builder controls.");
-  expect(requestBody).toMatchObject({
+  expect(requestBodies[0]).toMatchObject({
     request: "What am I configuring on this screen?",
     screen: { path: "/profiles/new", surface: "profile_create", profileRequirements: { domains: [], technicalCapabilities: [], weights: { intelligence: 1 / 3, speed: 1 / 3, cost: 1 / 3 } } },
     currentDraft: { selections: [{ targetId: "prefer-smol", modelIds: ["qwen-smol"] }] }
   });
-  expect(JSON.stringify(requestBody)).not.toContain("<main");
+  expect(JSON.stringify(requestBodies[0])).not.toContain("<main");
+  await page.getByRole("button", { name: "Toggle Assistant diagnostics" }).click();
+  await expect(page.locator("[data-assistant-debug]")).toContainText("conversationMessages");
 
   await page.goto(`${baseUrl}/api-keys`);
   await expect(page.locator("[data-assistant-toggle]")).toBeVisible();
   await expect(page.locator("[data-assistant-toggle]")).toHaveText("Assistant open");
   await expect(page.locator("[data-assistant-messages]")).toContainText("I can see the profile builder controls.");
+  await page.locator("[data-assistant-form] textarea").fill("What did I just ask?");
+  await page.locator("[data-assistant-form] textarea").press("Enter");
+  await expect.poll(() => requestBodies.length).toBe(2);
+  expect(requestBodies[1]).toMatchObject({ conversation: { history: expect.arrayContaining([
+    { role: "user", content: "What am I configuring on this screen?" },
+    { role: "assistant", content: "I can see the profile builder controls." }
+  ]) } });
   await page.getByRole("button", { name: "Clear assistant chat" }).click();
   await expect(page.locator("[data-assistant-messages]")).not.toContainText("I can see the profile builder controls.");
   await expect(page.locator("[data-assistant-messages]")).toContainText("I will always ask before saving or starting capacity.");
@@ -324,6 +342,34 @@ test("shows reservation cost and activation history", async ({ page }) => {
   await page.goto(`${baseUrl}/reservations/${reservationId}`);
   await expect(page.locator("#reservation-cost-so-far")).toContainText("$3.00");
   await expect(page.locator("#reservation-cost-projected")).toContainText("$");
+});
+
+test("presents daily usage as a focused summary with selectable breakdowns", async ({ page }) => {
+  await page.route("**/api/admin/usage?days=*", async (route) => route.fulfill({
+    status: 200,
+    contentType: "application/json",
+    body: JSON.stringify({
+      windowDays: 30,
+      generatedAt: "2026-08-17T12:00:00.000Z",
+      timezone: "UTC",
+      daily: [{ key: "2026-08-16", label: "2026-08-16", reservationCount: 2, activatedMinutes: 150, estimatedCostUsd: 9.5 }],
+      users: [{ key: "alice", label: "alice", reservationCount: 2, activatedMinutes: 150, estimatedCostUsd: 9.5 }],
+      providers: [{ key: "aws", label: "aws", reservationCount: 2, activatedMinutes: 150, estimatedCostUsd: 9.5 }],
+      targets: [{ key: "gpu-1", label: "GPU 1", reservationCount: 2, activatedMinutes: 150, estimatedCostUsd: 9.5 }],
+      models: [{ key: "model-1", label: "Model 1", reservationCount: 2, activatedMinutes: 150, estimatedCostUsd: 9.5 }]
+    })
+  }));
+  await signIn(page, "usage-user");
+  await page.goto(`${baseUrl}/admin/usage`);
+
+  await expect(page.getByRole("heading", { name: "Usage report" })).toBeVisible();
+  await expect(page.locator(".usage-summary")).toContainText("$9.50");
+  await expect(page.locator(".usage-summary")).toContainText("2.5 hr");
+  await expect(page.getByRole("tab", { name: "Daily" })).toHaveAttribute("aria-selected", "true");
+  await page.getByRole("tab", { name: "Targets" }).click();
+  await expect(page.getByRole("heading", { name: "Targets" })).toBeVisible();
+  await expect(page.locator("#usage-report")).toContainText("GPU 1");
+  await expect(page.locator("#usage-report")).not.toContainText("alice");
 });
 
 test("generates and revokes personal API keys", async ({ page }) => {

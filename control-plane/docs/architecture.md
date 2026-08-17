@@ -173,11 +173,19 @@ into AWS, Docker, LiteLLM, or a concrete repository from unrelated code.
   converts a sanitized catalog and structured current-screen snapshot into a
   validated allowlisted tool proposal. Its in-memory request coordinator
   exposes owner-scoped waking/thinking/completed polling, while the browser
-  retains only session-scoped chat and pending UI state. Reversible profile
+  retains session-scoped bounded conversation history, compaction state,
+  previous screen context, and pending UI state. The invariant system/catalog
+  prefix stays stable for model-host caching; subsequent application context is
+  emitted as a delta. Warm requests use the configured response deadline,
+  while the first completion after a cold start gets the reservation-duration
+  response window. One constrained repair pass accepts providers that return an
+  empty or malformed tool result without loosening tool validation. Reversible profile
   controls can be filled immediately; profile saves, reservation starts, and
   capacity-affecting admin proposals remain separate UI-confirmed actions.
 - `Reconciler`: computes desired target state from aggregate reservations and
-  applies that state through a capacity provider.
+  applies that state through a capacity provider. When a target is no longer
+  continuously healthy it clears the process-local model-warmup cache, so the
+  next healthy transition prepares the runtime model again.
 - `HassleOffCapacityProvider`: decorates provider lifecycle calls with the
   opt-in exact-target start/provision interlock and stale-test shutdown route.
 - `ActivateOrReprovisionCapacityProvider`: recognizes only the typed

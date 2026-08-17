@@ -208,6 +208,8 @@ describe("reconciler decisions", () => {
     });
     const modelWarmup = {
       calls: [] as string[][],
+      forgotten: [] as string[],
+      forgetTarget(targetId: string) { this.forgotten.push(targetId); },
       async warmupTargetModels(_target: CapacityTarget, modelIds: string[]) {
         this.calls.push(modelIds);
       }
@@ -217,6 +219,7 @@ describe("reconciler decisions", () => {
     await reconciler.reconcile(new Date("2026-06-25T10:00:00.000Z"));
 
     expect(modelWarmup.calls).toEqual([["m1"]]);
+    expect(modelWarmup.forgotten).toEqual(["t1"]);
     expect(statuses.get("t1")).toMatchObject({ desired: "on", observed: "healthy" });
   });
 

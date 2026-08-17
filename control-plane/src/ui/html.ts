@@ -128,6 +128,7 @@ export function layout(title: string, user: AuthenticatedUser | undefined, body:
     .status-grid { display: grid; gap: 12px; }
     .target-status-card { border: 1px solid #d8ddd7; border-radius: 8px; padding: 14px; background: #fbfcfb; }
     .profile-target-selections { display: grid; gap: 12px; }
+    .profile-target-selection[hidden], .option[hidden] { display: none; }
     .profile-target-selection:not(.selected) [data-profile-target-models] { opacity: 0.55; }
     .modal-dialog.profile-builder-dialog { width: min(1180px, 100%); }
     .profile-builder-layout { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; align-items: start; }
@@ -160,7 +161,7 @@ export function layout(title: string, user: AuthenticatedUser | undefined, body:
     .recommendation-card { display: grid; gap: 5px; text-align: left; border: 1px solid #86b8ad; background: white; color: #1f2933; }
     .recommendation-card strong { color: #0f766e; }
     .assistant-toggle { position: fixed; right: 18px; bottom: 18px; z-index: 25; border-radius: 999px; box-shadow: 0 8px 24px rgba(23, 32, 42, 0.24); }
-    .assistant-drawer { position: fixed; right: 18px; bottom: 70px; z-index: 25; width: min(560px, calc(100vw - 36px)); height: min(760px, calc(100vh - 100px)); display: grid; grid-template-rows: auto minmax(280px, 1fr) auto; border: 1px solid #aab4ad; border-radius: 12px; background: white; box-shadow: 0 18px 54px rgba(23, 32, 42, 0.28); overflow: hidden; }
+    .assistant-drawer { position: fixed; right: 18px; bottom: 70px; z-index: 25; width: min(560px, calc(100vw - 36px)); height: min(760px, calc(100vh - 100px)); display: grid; grid-template-rows: auto minmax(280px, 1fr) auto auto; border: 1px solid #aab4ad; border-radius: 12px; background: white; box-shadow: 0 18px 54px rgba(23, 32, 42, 0.28); overflow: hidden; }
     .assistant-drawer[hidden] { display: none; }
     .assistant-head { display: flex; align-items: start; justify-content: space-between; gap: 12px; padding: 13px 14px; background: #17202a; color: white; }
     .assistant-head button { padding: 5px 9px; background: #334155; }
@@ -170,6 +171,8 @@ export function layout(title: string, user: AuthenticatedUser | undefined, body:
     .assistant-message.user { margin-left: 34px; background: #e7f5f2; border-color: #86b8ad; }
     .assistant-message.system { display: flex; align-items: center; gap: 9px; margin-right: 34px; background: #f0f7ff; border-color: #93b8dc; color: #244a6a; }
     .assistant-message.error { background: #fff1f0; border-color: #d99a96; color: #7a2e2a; }
+    .assistant-debug { max-height: 180px; margin: 0; overflow: auto; border-top: 1px solid #d8ddd7; background: #111827; color: #d1fae5; padding: 10px 12px; font: 11px ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre-wrap; }
+    .assistant-debug[hidden] { display: none; }
     .assistant-spinner { width: 16px; height: 16px; flex: 0 0 auto; border: 2px solid #b9ccdf; border-top-color: #0f766e; border-radius: 50%; animation: assistant-spin .8s linear infinite; }
     .assistant-guided-target { position: relative; z-index: 30; animation: assistant-guide-pulse .45s ease-in-out 4 alternate; }
     .assistant-guide-arrow { display: inline-block; margin-right: 5px; color: #d97706; font-size: 18px; font-weight: 900; }
@@ -182,6 +185,18 @@ export function layout(title: string, user: AuthenticatedUser | undefined, body:
     .target-price { border-radius: 6px; padding: 5px 8px; background: #17202a; color: white; font-weight: 800; white-space: nowrap; }
     .model-metrics { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 7px; }
     .metric { border-radius: 5px; padding: 3px 6px; background: #eef2f0; color: #334155; font-size: 11px; font-weight: 750; }
+    .usage-summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin: 16px 0; }
+    .usage-metric { border: 1px solid #d8ddd7; border-radius: 8px; padding: 12px; background: #fbfcfb; }
+    .usage-metric strong, .usage-metric span { display: block; }
+    .usage-metric strong { margin-top: 4px; color: #0f5f59; font-size: 22px; }
+    .usage-tabs { display: flex; gap: 7px; flex-wrap: wrap; margin: 14px 0; border-bottom: 1px solid #d8ddd7; padding-bottom: 9px; }
+    .usage-tabs button { border: 1px solid #aab4ad; background: white; color: #334155; }
+    .usage-tabs button[aria-selected="true"] { border-color: #0f766e; background: #0f766e; color: white; }
+    .usage-table-wrap { overflow-x: auto; }
+    .usage-table-wrap table { margin: 0; }
+    .usage-bar { min-width: 130px; height: 6px; margin-top: 5px; overflow: hidden; border-radius: 999px; background: #e7ebe6; }
+    .usage-bar span { display: block; height: 100%; border-radius: inherit; background: #5a9488; }
+    .usage-report-head { display: flex; gap: 12px; align-items: end; justify-content: space-between; flex-wrap: wrap; }
     .option.does-not-match { border-style: dashed; opacity: 0.72; }
     .filter-status { margin-top: 8px; }
     .profile-target-toggle { display: flex; gap: 10px; align-items: start; cursor: pointer; }
@@ -309,8 +324,9 @@ export function layout(title: string, user: AuthenticatedUser | undefined, body:
   <main>${body}</main>
   ${user ? `<button class="assistant-toggle" type="button" data-assistant-toggle aria-controls="profile-assistant" aria-expanded="false">Ask NeurOn</button>
   <aside id="profile-assistant" class="assistant-drawer" hidden aria-label="NeurOn assistant">
-    <div class="assistant-head"><strong>NeurOn assistant</strong><span class="assistant-head-actions"><button type="button" data-assistant-clear aria-label="Clear assistant chat">Clear</button><button type="button" data-assistant-collapse aria-label="Collapse assistant">Collapse</button></span></div>
+    <div class="assistant-head"><strong>NeurOn assistant</strong><span class="assistant-head-actions">${user.isAdmin ? `<button type="button" data-assistant-debug-toggle aria-label="Toggle Assistant diagnostics">Debug</button>` : ""}<button type="button" data-assistant-clear aria-label="Clear assistant chat">Clear</button><button type="button" data-assistant-collapse aria-label="Collapse assistant">Collapse</button></span></div>
     <div class="assistant-messages" data-assistant-messages></div>
+    ${user.isAdmin ? `<pre class="assistant-debug" data-assistant-debug hidden>Diagnostics appear after the next request.</pre>` : ""}
     <form class="assistant-compose" data-assistant-form><textarea maxlength="2000" placeholder="Ask about this screen, configure a profile, or manage a reservation."></textarea><span class="assistant-compose-hint">Enter to send · Shift+Enter for a new line</span><button type="submit">Send</button><span class="muted" data-assistant-status></span></form>
   </aside>` : ""}
   <script>
@@ -356,23 +372,28 @@ export function layout(title: string, user: AuthenticatedUser | undefined, body:
       refresh();
       setInterval(refresh, 300000);
     })();` : ""}
-    ${user ? assistantClientScript(user.username) : ""}
+    ${user ? assistantClientScript(user.username, user.isAdmin) : ""}
   </script>
 </body>
 </html>`;
 }
 
-function assistantClientScript(username: string): string {
+function assistantClientScript(username: string, isAdmin: boolean): string {
   const usernameJson = JSON.stringify(username).replace(/</gu, "\\u003c");
+  const isAdminJson = JSON.stringify(isAdmin);
   return `(() => {
       const namespace = ${usernameJson};
+      const isAdmin = ${isAdminJson};
       const chatKey = 'neuron-assistant-chat:' + namespace;
+      const conversationKey = 'neuron-assistant-conversation:' + namespace;
       const requestKey = 'neuron-assistant-request:' + namespace;
       const actionKey = 'neuron-assistant-action:' + namespace;
       const drawer = document.querySelector('#profile-assistant');
       const toggle = document.querySelector('[data-assistant-toggle]');
       const collapse = document.querySelector('[data-assistant-collapse]');
       const clear = document.querySelector('[data-assistant-clear]');
+      const debugToggle = document.querySelector('[data-assistant-debug-toggle]');
+      const debugPanel = document.querySelector('[data-assistant-debug]');
       const form = document.querySelector('[data-assistant-form]');
       const messages = document.querySelector('[data-assistant-messages]');
       const status = document.querySelector('[data-assistant-status]');
@@ -384,7 +405,38 @@ function assistantClientScript(username: string): string {
       toggle.addEventListener('click', () => setOpen(drawer.hidden)); collapse.addEventListener('click', () => setOpen(false));
       let history = [];
       try { const stored = JSON.parse(sessionStorage.getItem(chatKey) || '[]'); if (Array.isArray(stored)) history = stored; } catch {}
+      let conversation = { summary: '', history: [], previousContext: undefined };
+      try {
+        const stored = JSON.parse(sessionStorage.getItem(conversationKey) || 'null');
+        if (stored && typeof stored === 'object') {
+          const storedHistory = Array.isArray(stored.history) ? stored.history.filter(entry => entry && ['user', 'assistant', 'context'].includes(entry.role) && typeof entry.content === 'string').slice(-32) : [];
+          conversation = { summary: typeof stored.summary === 'string' ? stored.summary.slice(-6000) : '', history: storedHistory, previousContext: stored.previousContext };
+        }
+      } catch {}
       const persistHistory = () => sessionStorage.setItem(chatKey, JSON.stringify(history.slice(-100)));
+      const persistConversation = () => sessionStorage.setItem(conversationKey, JSON.stringify(conversation));
+      const compactConversation = () => {
+        const characters = () => conversation.history.reduce((sum, entry) => sum + String(entry.content || '').length, 0);
+        if (conversation.history.length <= 24 && characters() <= 14000) return;
+        const keep = conversation.history.slice(-12);
+        const compacted = conversation.history.slice(0, -12).map(entry => '[' + entry.role + '] ' + String(entry.content || '').replace(/\\s+/g, ' ').slice(0, 500)).join('\\n');
+        conversation.summary = ((conversation.summary ? conversation.summary + '\\n' : '') + compacted).slice(-6000);
+        conversation.history = keep;
+      };
+      const appendConversation = (role, content) => {
+        const text = String(content || '').trim().slice(0, 4000); if (!text) return;
+        conversation.history.push({ role, content: text }); compactConversation(); persistConversation();
+      };
+      const renderDebug = debug => {
+        if (!debugPanel || !isAdmin) return;
+        const client = { conversationMessages: conversation.history.length, conversationSummaryCharacters: conversation.summary.length, contextRemembered: Boolean(conversation.previousContext) };
+        debugPanel.textContent = JSON.stringify({ request: debug || null, client }, null, 2);
+      };
+      if (debugToggle && debugPanel) {
+        const showDebug = localStorage.getItem('neuron-assistant-debug') === '1'; debugPanel.hidden = !showDebug;
+        debugToggle.setAttribute('aria-pressed', String(showDebug));
+        debugToggle.addEventListener('click', () => { const show = debugPanel.hidden; debugPanel.hidden = !show; debugToggle.setAttribute('aria-pressed', String(show)); localStorage.setItem('neuron-assistant-debug', show ? '1' : '0'); renderDebug(); });
+      }
       const addMessage = (text, kind = '', persist = true) => {
         const node = document.createElement('div'); node.className = 'assistant-message' + (kind ? ' ' + kind : ''); node.textContent = text; messages.appendChild(node); messages.scrollTop = messages.scrollHeight;
         if (persist) { history.push({ text, kind }); persistHistory(); }
@@ -399,7 +451,7 @@ function assistantClientScript(username: string): string {
         progressNode.lastElementChild.textContent = text; messages.scrollTop = messages.scrollHeight;
       };
       const clearProgress = () => { progressNode?.remove(); progressNode = undefined; };
-      clear.addEventListener('click', () => { history = []; persistHistory(); messages.replaceChildren(); progressNode = undefined; sessionStorage.removeItem(actionKey); sessionStorage.removeItem(requestKey); activeRequestId = undefined; setBusy(false); showWelcome(); });
+      clear.addEventListener('click', () => { history = []; conversation = { summary: '', history: [], previousContext: undefined }; persistHistory(); persistConversation(); messages.replaceChildren(); progressNode = undefined; sessionStorage.removeItem(actionKey); sessionStorage.removeItem(requestKey); activeRequestId = undefined; setBusy(false); renderDebug(); showWelcome(); });
       const currentDraft = () => {
         const profile = document.querySelector('#profile-form');
         if (!profile) { try { return JSON.parse(sessionStorage.getItem('neuron-profile-assistant-guidance') || 'null')?.draft; } catch { return undefined; } }
@@ -441,6 +493,12 @@ function assistantClientScript(username: string): string {
         addMessage(message); const arrow = document.createElement('span'); arrow.className = 'assistant-guide-arrow'; arrow.textContent = '→'; element.prepend(arrow); highlight(element);
         await new Promise(resolve => setTimeout(resolve, 1300)); arrow.remove();
       };
+      const resultConversationText = result => {
+        if (!result) return '';
+        if (result.type === 'answer') return result.message;
+        if (result.type === 'configure_profile') return 'I filled a profile draft for ' + result.guidance.useCase + '. Review the target and model selections before saving.';
+        return result.message || '';
+      };
       const handleResult = result => {
         if (!result) return;
         if (result.type === 'answer') { clearPendingAction(); addMessage(result.message); return; }
@@ -458,15 +516,21 @@ function assistantClientScript(username: string): string {
         try {
           while (activeRequestId === id) {
             const request = await jsonRequest('/api/profile-advisor/requests/' + encodeURIComponent(id)); showProgress(request.message || 'Assistant is working…');
-            if (request.phase === 'complete') { clearProgress(); sessionStorage.removeItem(requestKey); activeRequestId = undefined; setBusy(false); handleResult(request.result); return; }
+            renderDebug(request.debug);
+            if (request.phase === 'complete') { clearProgress(); sessionStorage.removeItem(requestKey); activeRequestId = undefined; setBusy(false); appendConversation('assistant', resultConversationText(request.result)); handleResult(request.result); return; }
             if (request.phase === 'failed') { clearProgress(); sessionStorage.removeItem(requestKey); activeRequestId = undefined; setBusy(false); addMessage(request.message || 'Assistant failed.', 'error'); return; }
-            await new Promise(resolve => setTimeout(resolve, 900));
+            await new Promise(resolve => setTimeout(resolve, 700));
           }
         } catch (error) { clearProgress(); sessionStorage.removeItem(requestKey); activeRequestId = undefined; setBusy(false); addMessage(error instanceof Error ? error.message : 'The Assistant request could not be checked.', 'error'); }
       };
       form.addEventListener('submit', async event => {
         event.preventDefault(); const request = textarea.value.trim(); if (request.length < 3 || activeRequestId) return; addMessage(request, 'user'); textarea.value = ''; setBusy(true); showProgress('Checking whether the Assistant is awake…');
-        try { const started = await jsonRequest('/api/profile-advisor/requests', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ request, currentDraft: currentDraft(), screen: currentScreen() }) }); activeRequestId = undefined; showProgress(started.message); await pollRequest(started.id); }
+        try {
+          const started = await jsonRequest('/api/profile-advisor/requests', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ request, currentDraft: currentDraft(), screen: currentScreen(), conversation: { summary: conversation.summary || undefined, history: conversation.history, previousContext: conversation.previousContext } }) });
+          if (started.conversation?.contextMessage) appendConversation('context', started.conversation.contextMessage);
+          if (started.conversation?.contextSnapshot) { conversation.previousContext = started.conversation.contextSnapshot; persistConversation(); }
+          appendConversation('user', request); renderDebug(started.debug); activeRequestId = undefined; showProgress(started.message); await pollRequest(started.id);
+        }
         catch (error) { clearProgress(); setBusy(false); addMessage(error instanceof Error ? error.message : 'The Assistant failed.', 'error'); }
       });
       textarea.addEventListener('keydown', event => { if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) { event.preventDefault(); form.requestSubmit(); } });
@@ -1216,18 +1280,43 @@ export function activationPage(user: AuthenticatedUser): string {
 }
 
 export function usagePage(user: AuthenticatedUser): string {
-  return layout("Usage", user, `<section class="panel"><div class="target-status-head"><div><h1>Daily usage</h1><p class="muted">Cost and activated time are derived from durable activation allocations. Times are grouped by UTC day.</p></div><select id="usage-window"><option value="7">7 days</option><option value="30" selected>30 days</option><option value="90">90 days</option></select></div><div id="usage-report"><p class="muted">Loading…</p></div></section>
+  return layout("Usage", user, `<section class="panel"><div class="usage-report-head"><div><h1>Usage report</h1><p class="muted">Cost and activated time come from durable reservation allocations. Daily boundaries use UTC.</p></div><label>Reporting window<br><select id="usage-window"><option value="7">Last 7 days</option><option value="30" selected>Last 30 days</option><option value="90">Last 90 days</option></select></label></div><div id="usage-report"><p class="muted">Loading…</p></div></section>
   <script type="module">
     const root = document.querySelector('#usage-report');
     const escapeText = value => String(value ?? '').replace(/[&<>"']/g, character => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' }[character]));
-    const money = value => '$' + Number(value ?? 0).toFixed(2);
-    const table = (title, rows, date = false) => '<section class="panel"><h2>' + title + '</h2>' + (rows.length ? '<table><thead><tr><th>' + (date ? 'Date' : 'Name') + '</th><th>Reservations</th><th>Activated</th><th>Estimated cost</th></tr></thead><tbody>' + rows.map(row => '<tr><td>' + escapeText(row.label) + '</td><td>' + row.reservationCount + '</td><td>' + row.activatedMinutes.toFixed(1) + ' min</td><td>' + money(row.estimatedCostUsd) + '</td></tr>').join('') + '</tbody></table>' : '<p class="muted">No allocated usage in this window.</p>') + '</section>';
+    const money = value => '$' + new Intl.NumberFormat(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(Number(value ?? 0));
+    const duration = minutes => minutes >= 60 ? (minutes / 60).toFixed(minutes >= 600 ? 0 : 1) + ' hr' : Number(minutes ?? 0).toFixed(1) + ' min';
+    const metric = (label, value, note) => '<div class="usage-metric"><span class="muted">' + escapeText(label) + '</span><strong>' + escapeText(value) + '</strong><span class="muted">' + escapeText(note) + '</span></div>';
+    const table = (rows, date = false) => {
+      if (!rows.length) return '<p class="muted">No allocated usage in this window.</p>';
+      const maximumCost = Math.max(...rows.map(row => Number(row.estimatedCostUsd || 0)), 0);
+      return '<div class="usage-table-wrap"><table><thead><tr><th>' + (date ? 'UTC date' : 'Name') + '</th><th>Reservations</th><th>Activated</th><th>Estimated cost</th></tr></thead><tbody>' + rows.map(row => {
+        const width = maximumCost ? Math.max(2, Number(row.estimatedCostUsd || 0) / maximumCost * 100) : 0;
+        return '<tr><td><strong>' + escapeText(row.label) + '</strong><div class="usage-bar" aria-hidden="true"><span style="width:' + width.toFixed(1) + '%"></span></div></td><td>' + row.reservationCount + '</td><td>' + duration(row.activatedMinutes) + '</td><td>' + money(row.estimatedCostUsd) + '</td></tr>';
+      }).join('') + '</tbody></table></div>';
+    };
+    const sections = [
+      ['daily', 'Daily'], ['users', 'Users'], ['targets', 'Targets'], ['providers', 'Providers'], ['models', 'Models']
+    ];
+    let active = 'daily';
+    let report;
+    const render = () => {
+      if (!report) return;
+      const daily = [...report.daily].sort((left, right) => right.key.localeCompare(left.key));
+      const totalCost = daily.reduce((sum, row) => sum + Number(row.estimatedCostUsd || 0), 0);
+      const totalMinutes = daily.reduce((sum, row) => sum + Number(row.activatedMinutes || 0), 0);
+      const reservations = report.users.reduce((sum, row) => sum + Number(row.reservationCount || 0), 0);
+      const generated = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(report.generatedAt));
+      const tabs = '<div class="usage-tabs" role="tablist" aria-label="Usage breakdown">' + sections.map(([key, label]) => '<button type="button" role="tab" data-usage-tab="' + key + '" aria-selected="' + String(active === key) + '">' + label + '</button>').join('') + '</div>';
+      const rows = active === 'daily' ? daily : report[active];
+      root.innerHTML = '<div class="usage-summary">' + metric('Estimated cost', money(totalCost), report.windowDays + '-day allocation') + metric('Activated time', duration(totalMinutes), 'Across all targets') + metric('Reservations', String(reservations), 'Distinct within each user') + metric('Active users', String(report.users.length), 'With allocated usage') + '</div>' + tabs + '<section aria-live="polite"><div class="usage-report-head"><div><h2>' + sections.find(([key]) => key === active)[1] + '</h2><p class="muted">Sorted by estimated cost, then reservation count.</p></div><span class="muted">Generated ' + escapeText(generated) + '</span></div>' + table(rows, active === 'daily') + '</section>';
+      root.querySelectorAll('[data-usage-tab]').forEach(button => button.addEventListener('click', () => { active = button.dataset.usageTab; render(); }));
+    };
     async function load() {
       root.innerHTML = '<p class="muted">Loading…</p>';
       const response = await fetch('/api/admin/usage?days=' + document.querySelector('#usage-window').value);
-      if (!response.ok) { root.textContent = 'Could not load usage.'; return; }
-      const data = await response.json();
-      root.innerHTML = '<div class="field-grid">' + table('By user', data.users) + table('By provider', data.providers) + table('By target', data.targets) + table('By model', data.models) + '</div>' + table('Daily', [...data.daily].sort((a,b) => b.key.localeCompare(a.key)), true);
+      if (!response.ok) { root.innerHTML = '<p class="status">Could not load usage. Try the report again.</p>'; return; }
+      report = await response.json(); render();
     }
     document.querySelector('#usage-window').addEventListener('change', load); load();
   </script>`);
@@ -2716,6 +2805,11 @@ function profileSelectionGuide(deployments: ModelDeploymentSelectionView[]): str
   const contextStops = contexts.map((value, index) => `<option value="${index + 1}" label="${escapeHtml(formatTokenCount(value))}"></option>`).join("");
   const costs = Array.from(new Set(deployments.map((deployment) => deployment.hourlyUsd).filter((value): value is number => typeof value === "number" && value >= 0))).sort((left, right) => left - right);
   const costStops = costs.map((value, index) => `<option value="${index + 1}" label="$${value.toFixed(2)}"></option>`).join("");
+  const hostingCounts = {
+    dedicated: deployments.filter((deployment) => deployment.hostingMode === "dedicated").length,
+    multi: deployments.filter((deployment) => deployment.hostingMode === "multi-model").length,
+    unclassified: deployments.filter((deployment) => !deployment.hostingMode).length
+  };
   return `<section class="profile-guide" aria-labelledby="profile-guide-title">
     <div class="profile-guide-head"><div><h3 id="profile-guide-title">Choose models</h3><p class="muted">Search and sort the catalog, or let the Good, Fast, and Cheap wizard rank the choices.</p></div><div class="profile-guide-mode" role="group" aria-label="Model selection mode"><button id="profile-browse-mode" class="secondary" type="button" aria-pressed="true">Browse &amp; filter</button><button id="profile-wizard-mode" class="secondary wizard-callout" type="button" aria-pressed="false">Help me choose</button></div></div>
     <div class="profile-browser-grid">
@@ -2725,7 +2819,7 @@ function profileSelectionGuide(deployments: ModelDeploymentSelectionView[]): str
     <p class="muted">Requirements below remove deployments that cannot work. Missing measurements never pass a selected requirement.</p>
     <div class="selection-filter-grid" style="margin-top: 14px;">
       <label>Minimum context${helpTip("A hard per-request context requirement. Values come from target configuration or runtime discovery, including any concurrency sharing.")}<br><input id="profile-min-context" class="context-slider" type="range" min="0" max="${contexts.length}" step="1" value="0" list="profile-context-stops" data-context-values="${escapeHtml(JSON.stringify(contexts))}"><datalist id="profile-context-stops"><option value="0" label="Any"></option>${contextStops}</datalist><output id="profile-min-context-output">No minimum</output></label>
-      <label>Hosting mode${helpTip("Dedicated targets serve one model deployment. Multi-model targets can keep several models available together.")}<br><select id="profile-hosting-mode"><option value="">Dedicated or multi-model</option><option value="dedicated">Dedicated model host</option><option value="multi-model">Multi-model host</option></select></label>
+      <label>Hosting mode${helpTip("Dedicated and multi-model are explicit target settings. Unclassified targets stay separate; NeurOn does not guess from modelsMax or catalog size.")}<br><select id="profile-hosting-mode"><option value="">All hosting modes (${deployments.length})</option><option value="dedicated">Dedicated model host (${hostingCounts.dedicated})</option><option value="multi-model">Multi-model host (${hostingCounts.multi})</option><option value="unclassified">Unclassified (${hostingCounts.unclassified})</option></select></label>
       <label>Maximum target cost${helpTip("A hard hourly target-cost ceiling. The slider stops are the costs currently known to NeurOn.")}<br><input id="profile-max-cost" class="context-slider" type="range" min="0" max="${costs.length}" step="1" value="0" list="profile-cost-stops" data-cost-values="${escapeHtml(JSON.stringify(costs))}"><datalist id="profile-cost-stops"><option value="0" label="Any"></option>${costStops}</datalist><output id="profile-max-cost-output">No maximum</output></label>
     </div>
     ${technicalCapabilities.length ? `<fieldset><legend>Required technical capabilities${helpTip("Binary features advertised by the runtime or configured by an operator, such as vision or tool use. Selected features are hard requirements.")}</legend><div id="profile-technical-capabilities" class="requirement-tags">${technicalCapabilities.map((capability) => `<label><input type="checkbox" value="${escapeHtml(capability)}" data-profile-technical-capability> ${escapeHtml(domainLabel(capability))}</label>`).join("")}</div></fieldset>` : `<p class="muted">No runtime has advertised a recognized technical capability such as vision or tool use yet.</p>`}
@@ -2822,7 +2916,7 @@ function profileSelectionClientScript(deployments: ModelDeploymentSelectionView[
         return deployments.filter(deployment => {
           if (minimumContext && (!isNumber(deployment.contextWindowTokens) || deployment.contextWindowTokens < minimumContext)) return false;
           if (costCeiling !== undefined && (!isNumber(deployment.hourlyUsd) || deployment.hourlyUsd > costCeiling)) return false;
-          if (hostingInput.value && deployment.hostingMode !== hostingInput.value) return false;
+          if (hostingInput.value === 'unclassified' ? Boolean(deployment.hostingMode) : hostingInput.value && deployment.hostingMode !== hostingInput.value) return false;
           if (requiredTechnical.some(required => !deployment.technicalCapabilities?.some(capability => capability.label === required))) return false;
           return true;
         });
@@ -2888,7 +2982,7 @@ function profileSelectionClientScript(deployments: ModelDeploymentSelectionView[
         root.dataset.assistantRequirements = JSON.stringify({
           ...(contextIndex ? { minimumContextTokens: contextValues[contextIndex - 1] } : {}),
           ...(maximumCost() === undefined ? {} : { maximumHourlyUsd: maximumCost() }),
-          ...(hostingInput.value ? { hostingMode: hostingInput.value } : {}),
+          ...(['dedicated', 'multi-model'].includes(hostingInput.value) ? { hostingMode: hostingInput.value } : {}),
           domains: selectedDomains(),
           technicalCapabilities: selectedTechnicalCapabilities(),
           weights: normalizedWeights
@@ -2966,6 +3060,7 @@ function profileSelectionClientScript(deployments: ModelDeploymentSelectionView[
         maxCostOutput.value = isNumber(value) ? '$' + value.toFixed(2) + '/hr maximum' : 'No maximum';
       };
       [searchInput, sortInput, contextInput, hostingInput, maxCostInput, ...domainInputs, ...technicalInputs].forEach(input => input?.addEventListener('input', () => { updateContextOutput(); updateCostOutput(); render(); }));
+      hostingInput?.addEventListener('change', render);
       browseModeButton.addEventListener('click', () => setSelectionMode('browse'));
       wizardModeButton.addEventListener('click', () => setSelectionMode('wizard'));
       const snaps = [
@@ -3146,8 +3241,9 @@ function profileTargetSelection(target: CapacityTarget, models: ModelDefinition[
     : models.length === 1
       ? `<p class="muted">This target has one model, so NeurOn selects it automatically.</p><div class="models">${profileModelOption(target, models[0], selected, deploymentByKey.get(`${target.id}::${models[0].id}`))}</div>`
       : `<p class="muted">Choose at least one model for this target. Matching models follow the active search, requirements, and sort or wizard ranking.</p><div class="models">${models.map((model) => profileModelOption(target, model, selectedModelIds.includes(model.id), deploymentByKey.get(`${target.id}::${model.id}`))).join("")}</div>`;
+  const hostingLabel = target.hostingMode === "dedicated" ? "Dedicated" : target.hostingMode === "multi-model" ? "Multi-model" : "Unclassified hosting";
   return `<section class="target-status-card profile-target-selection" data-profile-target-card data-target-id="${escapeHtml(target.id)}">
-    <div class="target-status-head"><label class="profile-target-toggle"><input type="checkbox" name="selectionTargetIds" value="${escapeHtml(target.id)}" data-profile-target ${selected ? "checked" : ""}><span><strong>${escapeHtml(target.displayName)}</strong><span class="muted"><code>${escapeHtml(target.id)}</code></span></span></label><span class="target-price">${targetCost === undefined ? "Cost unavailable" : `$${targetCost.toFixed(2)}/hr`}</span></div>
+    <div class="target-status-head"><label class="profile-target-toggle"><input type="checkbox" name="selectionTargetIds" value="${escapeHtml(target.id)}" data-profile-target ${selected ? "checked" : ""}><span><strong>${escapeHtml(target.displayName)}</strong><span class="muted"><code>${escapeHtml(target.id)}</code> · ${hostingLabel}</span></span></label><span class="target-price">${targetCost === undefined ? "Cost unavailable" : `$${targetCost.toFixed(2)}/hr`}</span></div>
     <div data-profile-target-models>${modelContent}</div>
   </section>`;
 }
