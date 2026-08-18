@@ -480,7 +480,15 @@ describe("API authentication context", () => {
 
   it("keeps direct reservation creation working without a reservation profile", async () => {
     process.env.USE_FAKE_PROVIDER = "true";
-    const { app } = await buildApp(config, models);
+    const routingModels: ModelDefinition[] = [{ ...models[0], aliases: ["fast"], backendModelIds: ["llama-m1"] }];
+    const { app } = await buildApp({
+      ...config,
+      capacityTargets: [{
+        ...config.capacityTargets[0],
+        apiUrl: "https://runtime.example.test/models/v1?ignored=1",
+        models: [{ id: "m1", displayName: "M1", aliases: ["fast"], backendModelIds: ["llama-m1"] }]
+      }]
+    }, routingModels);
     const response = await app.inject({
       method: "POST",
       url: "/api/reservations",
@@ -500,12 +508,22 @@ describe("API authentication context", () => {
     await app.close();
 
     expect(response.statusCode).toBe(201);
-    expect(response.json()).toMatchObject({ modelIds: ["m1"], targets: [{ id: "t1" }] });
+    expect(response.json()).toMatchObject({
+      modelIds: ["m1"],
+      targets: [{ id: "t1", displayName: "T1", directHostUrl: "https://runtime.example.test/models/" }]
+    });
     expect(response.json().profileId).toBeUndefined();
     expect(home.statusCode).toBe(200);
     expect(home.body).toContain("Your reservations");
     expect(page.body).toContain("setInterval(updateReservationTime, 1000)");
     expect(page.body).toContain("String(seconds).padStart(2, '0')");
+    expect(page.body).toContain("Connect to your models");
+    expect(page.body).toContain("LiteLLM");
+    expect(page.body).toContain("fast");
+    expect(page.body).toContain("t1/fast");
+    expect(page.body).toContain("llama-m1");
+    expect(page.body).toContain("https://runtime.example.test/models/");
+    expect(page.body).not.toContain("ignored=1");
   });
 
   it("hides expired reservations from the default status payload", async () => {

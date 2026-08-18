@@ -101,7 +101,9 @@ OpenCode examples. **Client setup** shows the live global and target-scoped
 LiteLLM names and generates an OpenCode provider configuration for all models or
 one profile. NeurOn publishes those friendly names through LiteLLM's formal
 model-group aliases and uses formal fallback chains for priority collisions;
-aliases do not create duplicate model deployments.
+aliases do not create duplicate model deployments. Active reservation cards
+lead with the same aliases, distinguish direct runtime/llama.cpp IDs, and link
+to the target's direct model host when it has a safe HTTP endpoint.
 
 ## Operations and updates
 

@@ -7,6 +7,7 @@ import { litellmAliases, litellmRoutePrefixes } from "../litellm/modelRouting.js
 import type { ShutdownStatus } from "../services/ShutdownCoordinator.js";
 import { safeGithubRepositoryUrl, type UpdateStatus } from "../services/UpdateChecker.js";
 import type { ModelDeploymentSelectionView } from "../services/ModelSelectionService.js";
+import { directRuntimeHostUrl } from "../utils/runtimeUrl.js";
 
 export interface HassleOffSafetyView {
   configured: boolean;
@@ -120,6 +121,13 @@ export function layout(title: string, user: AuthenticatedUser | undefined, body:
     .pill.starting, .pill.stopping { background: #fff4d6; color: #854a0e; }
     .pill.failed { background: #fee4e2; color: #912018; }
     .copy-row { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+    .reservation-routing { display: grid; gap: 8px; margin-top: 10px; }
+    .reservation-route-group { border: 1px solid #dce5dd; border-radius: 8px; padding: 9px 10px; background: #f8faf8; }
+    .reservation-route-head, .reservation-route-model { display: flex; justify-content: space-between; gap: 10px; align-items: baseline; flex-wrap: wrap; }
+    .reservation-route-model + .reservation-route-model { border-top: 1px solid #e2e7e1; margin-top: 8px; padding-top: 8px; }
+    .route-label { color: #3f5142; font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; }
+    .route-kind { color: #657266; font-size: 12px; margin-left: 3px; }
+    .direct-host-link { white-space: nowrap; font-size: 13px; font-weight: 650; }
     .copy-chip { border: 1px solid #c8d0c9; border-radius: 999px; padding: 3px 8px; background: white; color: #334155; font: 12px ui-monospace, SFMono-Regular, Menlo, monospace; max-width: 100%; overflow-wrap: anywhere; }
     .copy-chip.primary { border-color: #0f766e; color: #0f766e; background: #f0faf7; }
     .tag-row { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 7px; }
@@ -622,6 +630,7 @@ export function startPage(user: AuthenticatedUser, targets: Array<{ target: Capa
   ${profileCreateModal(targets, initialTargetId, "/", selectionDeployments, costEstimates)}
   <script type="module">
     const modelLookup = ${safeJson(modelLookupForTargets(targets))};
+    const reservationRoutingLookup = ${safeJson(reservationRoutingLookupForTargets(targets))};
     const targetLookup = ${safeJson(targetLookupForTargets(targets))};
     const profiles = ${safeJson(profilesForClient(profiles, targets))};
     const costLookup = ${safeJson(costEstimates)};
@@ -685,6 +694,27 @@ export function startPage(user: AuthenticatedUser, targets: Array<{ target: Capa
     const modelChipRow = (modelIds) => modelIds.length
       ? '<span class="chip-row">' + modelIds.map((id, index) => copyButton(modelLookup[id]?.recommendedAlias ?? id, index === 0) + ((modelLookup[id]?.recommendedAlias && modelLookup[id].recommendedAlias !== id) ? copyButton(id) : '')).join('') + '</span>'
       : '<span class="chip-row"><span class="pill">All models</span></span>';
+    const reservationRoutingHtml = (reservation, onlyTargetId) => {
+      const targetIds = onlyTargetId ? [onlyTargetId] : reservation.targets.map(target => target.id);
+      const groups = targetIds.map(targetId => {
+        const target = targetLookup[targetId];
+        if (!target) return '';
+        const selection = reservation.targetSelections?.find(candidate => candidate.targetId === targetId);
+        const modelIds = selection?.modelIds ?? reservation.modelIds;
+        const modelRows = modelIds.length ? modelIds.map(modelId => {
+          const model = reservationRoutingLookup[targetId]?.[modelId] ?? { displayName: modelId, globalAliases: [], scopedAliases: [], runtimeModelIds: [modelId] };
+          const routes = model.globalAliases.map((alias, index) => {
+            const scoped = model.scopedAliases[index];
+            if (!scoped || scoped === alias) return '<span class="route-kind">Global + target</span>' + copyButton(alias, index === 0);
+            return '<span class="route-kind">Global</span>' + copyButton(alias, index === 0) + '<span class="route-kind">Target</span>' + copyButton(scoped);
+          }).join('');
+          return '<div class="reservation-route-model"><div><strong>' + escapeText(model.displayName) + '</strong><div class="copy-row"><span class="route-label">LiteLLM</span>' + (routes || '<span class="muted">Alias not found</span>') + '</div></div><div class="model-meta"><span class="route-label">Direct runtime / llama.cpp</span><br>' + model.runtimeModelIds.map(id => '<code>' + escapeText(id) + '</code>').join(' · ') + '</div></div>';
+        }).join('') : '<p class="muted">All models on this target</p>';
+        const directLink = target.directHostUrl ? '<a class="direct-host-link" href="' + escapeText(target.directHostUrl) + '" target="_blank" rel="noopener noreferrer">Open direct model host ↗</a>' : '';
+        return '<div class="reservation-route-group"><div class="reservation-route-head"><strong>' + escapeText(target.displayName) + '</strong>' + directLink + '</div>' + modelRows + '</div>';
+      }).filter(Boolean).join('');
+      return groups ? '<div class="reservation-routing">' + groups + '</div>' : '';
+    };
     const profileSummaryHtml = (profile) => {
       if (!profile) return '<span class="muted">Choose a profile</span>';
       const targetNames = profile.selections.map(selection => targetLookup[selection.targetId]?.displayName ?? selection.targetId).join(', ');
@@ -810,7 +840,7 @@ export function startPage(user: AuthenticatedUser, targets: Array<{ target: Capa
       const actions = includeActions
         ? '<div class="reservation-actions"><form method="post" action="/reservations/' + reservation.reservationId + '/extend"><button class="secondary" name="durationMinutes" value="1" type="submit">+1 min</button></form><form method="post" action="/reservations/' + reservation.reservationId + '/extend"><button class="secondary" name="durationMinutes" value="2" type="submit">+2 min</button></form><form method="post" action="/reservations/' + reservation.reservationId + '/extend"><button class="secondary" name="durationMinutes" value="5" type="submit">+5 min</button></form><form method="post" action="/reservations/' + reservation.reservationId + '/extend"><button class="secondary" name="durationMinutes" value="15" type="submit">+15 min</button></form><form method="post" action="/reservations/' + reservation.reservationId + '/extend"><button class="secondary" name="durationMinutes" value="30" type="submit">+30 min</button></form><form method="post" action="/reservations/' + reservation.reservationId + '/done"><button class="danger" type="submit">I\\'m done</button></form></div>'
         : '';
-      return '<div class="reservation-card"><div><div class="reservation-meta">' + statusBadge(reservation.status) + '<strong>' + escapeText(reservation.displayUsername ?? reservation.username) + '</strong><span class="muted">' + reservationTimeHtml(reservation) + '</span>' + profileButton + trafficContext + '</div><div class="muted">' + escapeText(reservationTargets(reservation)) + '</div>' + reservationCostLine(reservation.costEstimate) + modelChipRow(reservationModelsForTarget(reservation, targetId)) + '</div>' + actions + '</div>';
+      return '<div class="reservation-card"><div><div class="reservation-meta">' + statusBadge(reservation.status) + '<strong>' + escapeText(reservation.displayUsername ?? reservation.username) + '</strong><span class="muted">' + reservationTimeHtml(reservation) + '</span>' + profileButton + trafficContext + '</div><div class="muted">' + escapeText(reservationTargets(reservation)) + '</div>' + reservationCostLine(reservation.costEstimate) + reservationRoutingHtml(reservation, targetId) + '</div>' + actions + '</div>';
     };
     const compactReservationCard = (reservation, targetId) => {
       const models = reservationModelsForTarget(reservation, targetId);
@@ -834,7 +864,8 @@ export function startPage(user: AuthenticatedUser, targets: Array<{ target: Capa
       const mineRows = mine.length ? mine.map(reservation => reservationCard(reservation, false, target.id)).join('') : '';
       const otherRows = others.length ? '<details class="status-details" data-status-details="' + escapeText(target.id) + ':others"><summary>' + others.length + ' other reservations</summary><div class="reservation-list">' + others.map(reservation => compactReservationCard(reservation, target.id)).join('') + '</div></details>' : '';
       const rows = relevant.length ? mineRows + otherRows : '<p class="muted">No reservations for this server</p>';
-      return '<section class="target-status-card" data-status-target="' + escapeText(target.id) + '"><div class="target-status-head"><div><h3>' + escapeText(target.displayName) + '</h3><div class="target-status-meta">' + statusPill(target.desired) + statusPill(target.observed) + summary + startupEstimate(target) + '</div></div><div class="muted">' + escapeText(target.provider) + '</div></div><p class="muted">' + escapeText(target.message) + '</p><div class="target-status-meta">' + userLine + '</div><div class="reservation-list">' + rows + '</div></section>';
+      const directLink = target.directHostUrl ? '<a class="direct-host-link" href="' + escapeText(target.directHostUrl) + '" target="_blank" rel="noopener noreferrer">Direct host ↗</a>' : '';
+      return '<section class="target-status-card" data-status-target="' + escapeText(target.id) + '"><div class="target-status-head"><div><h3>' + escapeText(target.displayName) + '</h3><div class="target-status-meta">' + statusPill(target.desired) + statusPill(target.observed) + summary + startupEstimate(target) + '</div></div><div><div class="muted">' + escapeText(target.provider) + '</div>' + directLink + '</div></div><p class="muted">' + escapeText(target.message) + '</p><div class="target-status-meta">' + userLine + '</div><div class="reservation-list">' + rows + '</div></section>';
     };
     const selectDuration = (button, focus = true) => {
       durationButtons.forEach(candidate => candidate.setAttribute('aria-pressed', candidate === button ? 'true' : 'false'));
@@ -955,19 +986,27 @@ export function startPage(user: AuthenticatedUser, targets: Array<{ target: Capa
   </script>`);
 }
 
-export function reservationPage(user: AuthenticatedUser, reservation: Reservation, config: AppConfig): string {
+export function reservationPage(
+  user: AuthenticatedUser,
+  reservation: Reservation,
+  config: AppConfig,
+  targets: Array<{ target: CapacityTarget; models: ModelDefinition[] }> = []
+): string {
   return layout("NeurOn Reservation", user, `<section class="panel">
     <h1>Reservation ${escapeHtml(reservation.id)}</h1>
     <p>Status: <span id="reservation-status" class="status">${escapeHtml(reservation.status)}</span></p>
-    <p>Models: <span id="reservation-models">${escapeHtml(reservation.modelIds.join(", "))}</span></p>
     <p>Expires: <span id="reservation-expires">${reservation.expiresAt.toISOString()}</span></p>
     <p>Cost so far: <span id="reservation-cost-so-far" class="status">Not allocated yet</span></p>
     <p>Projected total: <span id="reservation-cost-projected" class="status">Not available</span></p>
+    <h2>Connect to your models</h2>
+    <p class="muted">Use a LiteLLM alias in OpenCode or another configured client. Runtime IDs are the values exposed directly by the model host.</p>
+    ${reservationRoutingHtml(reservation, targets)}
     <div id="target-status"></div>
     <form method="post" action="/reservations/${escapeHtml(reservation.id)}/done"><button class="large danger" type="submit">I'm done</button></form>
   </section>
   <script type="module">
     const reservationId = ${JSON.stringify(reservation.id)};
+    const escapeText = (value) => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' }[char]));
     const formatDateTime = (iso) => new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(iso));
     const timeLeft = (iso) => {
       const ms = new Date(iso).getTime() - Date.now();
@@ -993,8 +1032,16 @@ export function reservationPage(user: AuthenticatedUser, reservation: Reservatio
       updateReservationTime();
       document.querySelector('#reservation-cost-so-far').textContent = data.costEstimate ? formatUsd(data.costEstimate.estimatedCostUsd) : 'Not allocated yet';
       document.querySelector('#reservation-cost-projected').textContent = data.costEstimate?.projectedTotalCostUsd !== undefined ? formatUsd(data.costEstimate.projectedTotalCostUsd) : 'Not available';
-      document.querySelector('#target-status').innerHTML = data.targets.map(t => '<p><strong>' + t.id + '</strong>: ' + t.observed + ' - ' + t.message + '</p>').join('');
+      document.querySelector('#target-status').innerHTML = data.targets.map(target => '<p><strong>' + escapeText(target.displayName ?? target.id) + '</strong>: ' + escapeText(target.observed) + ' - ' + escapeText(target.message) + '</p>').join('');
     }
+    document.addEventListener('click', async (event) => {
+      const button = event.target.closest('[data-copy]');
+      if (!button) return;
+      await navigator.clipboard?.writeText(button.dataset.copy);
+      const previous = button.textContent;
+      button.textContent = 'copied';
+      setTimeout(() => { button.textContent = previous; }, 900);
+    });
     refresh();
     setInterval(updateReservationTime, 1000);
     setInterval(refresh, ${config.reservationStatusPollSeconds * 1000});
@@ -3355,8 +3402,70 @@ function modelLookupForTargets(targets: Array<{ target: CapacityTarget; models: 
   return lookup;
 }
 
-function targetLookupForTargets(targets: Array<{ target: CapacityTarget; models: ModelDefinition[] }>): Record<string, { displayName: string }> {
-  return Object.fromEntries(targets.map(({ target }) => [target.id, { displayName: target.displayName }]));
+interface ReservationRoutingModel {
+  displayName: string;
+  canonicalModelId: string;
+  globalAliases: string[];
+  scopedAliases: string[];
+  runtimeModelIds: string[];
+}
+
+function reservationRoutingLookupForTargets(targets: Array<{ target: CapacityTarget; models: ModelDefinition[] }>): Record<string, Record<string, ReservationRoutingModel>> {
+  return Object.fromEntries(targets.map(({ target, models }) => {
+    const lookup: Record<string, ReservationRoutingModel> = {};
+    for (const model of models) {
+      const aliases = litellmAliases(target, model.id, model.aliases);
+      const runtimeModelIds = Array.from(new Set([...(model.runtimeModelIds ?? []), ...(model.backendModelIds ?? [])]));
+      const value = {
+        displayName: model.displayName,
+        canonicalModelId: model.id,
+        globalAliases: aliases.global,
+        scopedAliases: aliases.scoped,
+        runtimeModelIds: runtimeModelIds.length ? runtimeModelIds : [model.id]
+      };
+      for (const identifier of [model.id, ...model.aliases, ...(model.runtimeModelIds ?? []), ...(model.backendModelIds ?? [])]) lookup[identifier] = value;
+    }
+    return [target.id, lookup];
+  }));
+}
+
+function reservationRoutingHtml(
+  reservation: Pick<Reservation, "modelIds" | "targetIds" | "targetSelections">,
+  targets: Array<{ target: CapacityTarget; models: ModelDefinition[] }>,
+  onlyTargetId?: string
+): string {
+  const targetMap = new Map(targets.map((entry) => [entry.target.id, entry]));
+  const routingLookup = reservationRoutingLookupForTargets(targets);
+  const targetIds = onlyTargetId ? [onlyTargetId] : reservation.targetIds;
+  const groups = targetIds.map((targetId) => {
+    const entry = targetMap.get(targetId);
+    if (!entry) return "";
+    const selection = reservation.targetSelections?.find((candidate) => candidate.targetId === targetId);
+    const modelIds = selection?.modelIds ?? reservation.modelIds;
+    const models = modelIds.map((modelId) => routingLookup[targetId]?.[modelId] ?? {
+      displayName: modelId,
+      canonicalModelId: modelId,
+      globalAliases: [],
+      scopedAliases: [],
+      runtimeModelIds: [modelId]
+    });
+    const modelRows = models.length ? models.map((model) => {
+      const routeChips = model.globalAliases.map((alias, index) => {
+        const scoped = model.scopedAliases[index];
+        if (!scoped || scoped === alias) return `<span class="route-kind">Global + target</span>${copyChip(alias, index === 0 ? "primary" : "")}`;
+        return `<span class="route-kind">Global</span>${copyChip(alias, index === 0 ? "primary" : "")}<span class="route-kind">Target</span>${copyChip(scoped)}`;
+      }).join("");
+      return `<div class="reservation-route-model"><div><strong>${escapeHtml(model.displayName)}</strong><div class="copy-row"><span class="route-label">LiteLLM</span>${routeChips || `<span class="muted">Alias not found</span>`}</div></div><div class="model-meta"><span class="route-label">Direct runtime / llama.cpp</span><br>${model.runtimeModelIds.map((id) => `<code>${escapeHtml(id)}</code>`).join(" · ")}</div></div>`;
+    }).join("") : `<p class="muted">All models on this target</p>`;
+    const directUrl = directRuntimeHostUrl(entry.target);
+    const directLink = directUrl ? `<a class="direct-host-link" href="${escapeHtml(directUrl)}" target="_blank" rel="noopener noreferrer">Open direct model host ↗</a>` : "";
+    return `<div class="reservation-route-group"><div class="reservation-route-head"><strong>${escapeHtml(entry.target.displayName)}</strong>${directLink}</div>${modelRows}</div>`;
+  }).filter(Boolean).join("");
+  return groups ? `<div class="reservation-routing">${groups}</div>` : "";
+}
+
+function targetLookupForTargets(targets: Array<{ target: CapacityTarget; models: ModelDefinition[] }>): Record<string, { displayName: string; directHostUrl?: string }> {
+  return Object.fromEntries(targets.map(({ target }) => [target.id, { displayName: target.displayName, directHostUrl: directRuntimeHostUrl(target) }]));
 }
 
 function safeJson(value: unknown): string {

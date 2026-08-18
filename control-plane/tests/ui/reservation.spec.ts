@@ -99,6 +99,9 @@ test("creates, extends, and ends a reservation from the rendered UI", async ({ p
   await expect(page.locator("#current-reservation")).toContainText("active");
   await expect(page.locator("#current-reservation")).toContainText("PreFer Smol");
   await expect(page.locator("#current-reservation")).toContainText("qwen-smol");
+  await expect(page.locator("#current-reservation")).toContainText("LiteLLM");
+  await expect(page.locator("#current-reservation")).toContainText("Direct runtime / llama.cpp");
+  await expect(page.locator("#current-reservation").getByRole("link", { name: "Open direct model host" })).toHaveAttribute("href", "http://host.docker.internal:8080/");
   await expect(page.locator("#server-status")).toContainText("Users: ui-user");
 
   await page.locator("#current-reservation").getByRole("button", { name: "+1 min", exact: true }).click();
@@ -307,8 +310,12 @@ test("shows and completes the standalone reservation page", async ({ page }) => 
   await page.goto(`${baseUrl}/reservations/${reservationId}`);
   await expect(page.getByRole("heading", { name: new RegExp(`Reservation ${reservationId}`) })).toBeVisible();
   await expect(page.locator("#reservation-status")).toContainText("active");
-  await expect(page.locator("#reservation-models")).toContainText("qwen-smol");
-  await expect(page.locator("#target-status")).toContainText("prefer-smol");
+  await expect(page.getByRole("heading", { name: "Connect to your models" })).toBeVisible();
+  await expect(page.locator(".reservation-routing")).toContainText("LiteLLM");
+  await expect(page.locator(".reservation-routing")).toContainText("prefer/qwen-smol");
+  await expect(page.locator(".reservation-routing")).toContainText("Direct runtime / llama.cpp");
+  await expect(page.getByRole("link", { name: "Open direct model host" })).toHaveAttribute("href", "http://host.docker.internal:8080/");
+  await expect(page.locator("#target-status")).toContainText("PreFer Smol");
 
   await page.getByRole("button", { name: "I'm done" }).click();
   await expect(page).toHaveURL(`${baseUrl}/`);

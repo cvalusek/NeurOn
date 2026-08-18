@@ -290,7 +290,11 @@ export function registerUiRoutes(
   app.get("/reservations/:id", async (request, reply) => {
     const { id } = z.object({ id: z.string() }).parse(request.params);
     const reservation = await reservationService.getOwned(id, requireUser(request));
-    return reply.type("text/html").send(reservationPage(requireUser(request), reservation, config));
+    const targets = reservation.targetIds
+      .map((targetId) => catalog.getTarget(targetId))
+      .filter((target): target is CapacityTarget => Boolean(target))
+      .map((target) => ({ target, models: catalog.listModelsForTarget(target.id) }));
+    return reply.type("text/html").send(reservationPage(requireUser(request), reservation, config, targets));
   });
   app.post("/reservations/:id/done", async (request, reply) => {
     const { id } = z.object({ id: z.string() }).parse(request.params);

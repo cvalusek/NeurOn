@@ -3,6 +3,7 @@ import type { ApiKey, AuthenticatedUser, CapacityTarget, Reservation, TargetStat
 import { litellmDisplayPrefix, litellmRoutePrefixes } from "../litellm/modelRouting.js";
 import type { ReservationCostEstimate } from "../services/CostEstimationService.js";
 import type { StartupRuntimeModelDiscoveryOutcome } from "../services/RuntimeModelDiscovery.js";
+import { directRuntimeHostUrl } from "./runtimeUrl.js";
 
 export function requireUser(request: FastifyRequest): AuthenticatedUser {
   const user = request.user;
@@ -10,7 +11,7 @@ export function requireUser(request: FastifyRequest): AuthenticatedUser {
   return user;
 }
 
-export function reservationJson(reservation: Reservation, statuses: TargetStatus[], costEstimate?: ReservationCostEstimate) {
+export function reservationJson(reservation: Reservation, statuses: TargetStatus[], costEstimate?: ReservationCostEstimate, capacityTargets: CapacityTarget[] = []) {
   return {
     reservationId: reservation.id,
     username: reservation.username,
@@ -26,8 +27,11 @@ export function reservationJson(reservation: Reservation, statuses: TargetStatus
     targetSelections: reservation.targetSelections,
     targets: reservation.targetIds.map((targetId) => {
       const status = statuses.find((candidate) => candidate.targetId === targetId);
+      const target = capacityTargets.find((candidate) => candidate.id === targetId);
       return {
         id: targetId,
+        displayName: target?.displayName,
+        directHostUrl: target ? directRuntimeHostUrl(target) : undefined,
         desired: status?.desired ?? "off",
         observed: status?.observed ?? "stopped",
         status: status?.observed ?? "stopped",
@@ -80,6 +84,7 @@ export function targetJson(
     litellm: target.litellm,
     healthUrl: target.healthUrl,
     apiUrl: target.apiUrl,
+    directHostUrl: directRuntimeHostUrl(target),
     needsProvisioning: needsProvisioning(target, status),
     desired: status?.desired ?? "off",
     observed: status?.observed ?? "stopped",

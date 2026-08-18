@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import type { BackendConfigSync } from "../domain/interfaces.js";
 import type { CapacityTarget, RuntimeDiscoveredModel } from "../domain/types.js";
-import { litellmModelName } from "./modelRouting.js";
+import { litellmAliases, litellmModelName } from "./modelRouting.js";
 
 interface LiteLlmDeployment {
   model_name?: string;
@@ -224,7 +224,7 @@ function deploymentsForTarget(target: CapacityTarget, models: RuntimeDiscoveredM
     const aliases = uniqueStrings(candidates);
     const groupName = litellmModelName(target, canonicalModelId);
     const globalAliases = aliases.length > 0 ? aliases : [canonicalModelId];
-    const scopedAliases = uniqueStrings(globalAliases.map((alias) => litellmModelName(target, alias))).filter((alias) => alias !== groupName);
+    const scopedAliases = uniqueStrings(litellmAliases(target, canonicalModelId, globalAliases).scoped).filter((alias) => alias !== groupName);
     const deployment: CanonicalDeployment = {
       targetId: target.id,
       canonicalModelId,

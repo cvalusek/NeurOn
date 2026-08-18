@@ -199,6 +199,13 @@ accepts the replacement router settings, NeurOn deletes only stale or redundant
 NeurOn-owned deployment rows. This includes duplicate alias rows made by older
 versions; operator-owned rows and router settings remain untouched.
 
+Home and reservation detail pages present these formal global/scoped aliases
+before the separately labeled backend runtime IDs. A target with a safe HTTP(S)
+`apiUrl` also gets an **Open direct model host** link. The link points at the
+runtime root rather than its trailing `/v1` API path and omits credentials,
+query parameters, and fragments; non-HTTP or credential-bearing URLs are not
+rendered as links.
+
 LiteLLM traffic monitoring remains useful for clients that cannot run a plugin.
 The OpenCode plugin is a stronger signal when it is available because it can
 reserve capacity before sending traffic, rather than reacting to logs after a

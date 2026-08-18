@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { CapacityTarget } from "../domain/types.js";
 import { LiteLlmBackendConfigSync } from "../litellm/LiteLlmBackendConfigSync.js";
-import { litellmDisplayPrefix, litellmModelName, litellmRoutePrefixes } from "../litellm/modelRouting.js";
+import { litellmAliases, litellmDisplayPrefix, litellmModelName, litellmRoutePrefixes } from "../litellm/modelRouting.js";
 
 interface RecordedCall {
   url: string;
@@ -380,5 +380,10 @@ describe("LiteLLM model routing", () => {
   it("preserves an intentionally empty display prefix", () => {
     const unprefixed = { ...target, litellmDisplayPrefix: "" };
     expect(litellmModelName(unprefixed, "gemma-4-e2b")).toBe("gemma-4-e2b");
+  });
+
+  it("does not double-prefix an already scoped alias", () => {
+    const prefixed = { ...target, trafficModelPrefixes: ["prefer/"] };
+    expect(litellmAliases(prefixed, "qwen", ["prefer/qwen"]).scoped).toEqual(["prefer/qwen"]);
   });
 });

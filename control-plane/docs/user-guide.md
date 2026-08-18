@@ -120,11 +120,19 @@ profile, models, projected cost, quick extensions, and **I'm done** action.
 Ending one reservation does not stop capacity still required by another user or
 reservation.
 
+Each reservation groups connection details by target. **LiteLLM** chips are the
+global and target-scoped names to copy into a configured client. The separately
+labeled **Direct runtime / llama.cpp** values are backend model IDs, not extra
+LiteLLM routes. **Open direct model host** opens the target's HTTP runtime root
+in a new tab when the target publishes one; NeurOn removes a trailing `/v1` and
+does not carry URL credentials, query parameters, or fragments into that link.
+
 Server status is grouped by target. Personally reserved targets come first,
 followed by other activated targets and then off targets. Within those groups,
 recently used targets appear first. A multi-target reservation can appear under
 more than one target while remaining one reservation. Expanding a target stays
 expanded across polling, so controls and traffic help text remain usable.
+Target cards also expose the direct-host link when one is available.
 
 ## Configure OpenCode and other clients
 

@@ -16,5 +16,6 @@ export function litellmModelName(target: CapacityTarget, runtimeModelId: string)
 
 export function litellmAliases(target: CapacityTarget, modelId: string, aliases: string[] = []): { global: string[]; scoped: string[] } {
   const global = Array.from(new Set((aliases.length ? aliases : [modelId]).map((value) => value.trim()).filter(Boolean)));
-  return { global, scoped: global.map((alias) => litellmModelName(target, alias)) };
+  const prefix = litellmDisplayPrefix(target);
+  return { global, scoped: global.map((alias) => prefix && alias.startsWith(prefix) ? alias : litellmModelName(target, alias)) };
 }

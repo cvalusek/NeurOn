@@ -681,7 +681,7 @@ async function reservationPayloads(reservations: Reservation[], statuses: Target
 
 async function reservationPayload(reservation: Reservation, statuses: TargetStatusRepository, costEstimation: CostEstimationService, catalog?: ModelCatalog) {
   const targets = catalog ? reservation.targetIds.map((targetId) => catalog.getTarget(targetId)).filter((target): target is CapacityTarget => Boolean(target)) : [];
-  return reservationJson(reservation, statuses.list(), await costEstimation.estimateForReservation(reservation, targets));
+  return reservationJson(reservation, statuses.list(), await costEstimation.estimateForReservation(reservation, targets), targets);
 }
 
 async function targetsPayload(
@@ -878,6 +878,8 @@ const targetRefSchema = {
   type: "object",
   properties: {
     id: { type: "string" },
+    displayName: { type: "string" },
+    directHostUrl: { type: "string" },
     desired: { type: "string" },
     observed: { type: "string" },
     status: { type: "string" },
@@ -973,6 +975,7 @@ const targetSchema = {
     },
     healthUrl: { type: "string" },
     apiUrl: { type: "string" },
+    directHostUrl: { type: "string" },
     desired: { type: "string" },
     observed: { type: "string" },
     message: { type: "string" },
