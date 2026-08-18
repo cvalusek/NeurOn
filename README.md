@@ -99,7 +99,9 @@ is shown once and only its hash is stored. See
 [Integrations](control-plane/docs/integrations.md) for REST, MCP, Codex, and
 OpenCode examples. **Client setup** shows the live global and target-scoped
 LiteLLM names and generates an OpenCode provider configuration for all models or
-one profile.
+one profile. NeurOn publishes those friendly names through LiteLLM's formal
+model-group aliases and uses formal fallback chains for priority collisions;
+aliases do not create duplicate model deployments.
 
 ## Operations and updates
 

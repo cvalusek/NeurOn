@@ -284,7 +284,7 @@ export interface CapacityTarget {
   modelWarmup?: ModelWarmupConfig;
   trafficModelPrefixes?: string[];
   litellmDisplayPrefix?: string;
-  /** Lower values are preferred by LiteLLM's ordered deployment fallback. */
+  /** Lower values become the primary LiteLLM model-group alias; later targets are formal fallbacks. */
   aliasPriority?: number;
   modelsMax?: number;
   /** Operator-owned scheduling shape. modelsMax remains display/debug metadata. */

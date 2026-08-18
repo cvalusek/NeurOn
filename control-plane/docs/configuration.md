@@ -626,8 +626,9 @@ CAPACITY_TARGET_G6_XLARGE_GENERAL_ALIAS_PRIORITY=10
 
 `HOSTING_MODE` is `dedicated` or `multi-model` and is used by the profile
 builder's hard filter. Lower positive `ALIAS_PRIORITY` values win collisions
-for global LiteLLM aliases. Scoped `<target>/<alias>` names remain available for
-every target, and LiteLLM deployments carry the same numeric order for fallback.
+for global LiteLLM model-group aliases. Scoped `<target>/<alias>` names remain
+available for every target. Later targets become LiteLLM `fallbacks`; the
+priority does not create or order duplicate alias deployments.
 
 ## NeurOn Provider Env Fields
 
@@ -754,11 +755,13 @@ and reconciles discovery-started capacity against current demand.
 ### LiteLLM Discovered-Model Sync
 
 When global LiteLLM connectivity is configured, discovery creates or updates one
-reusable credential per target and one LiteLLM deployment per primary `id`
-returned by `/v1/models`. The defaults are:
+reusable credential per target and exactly one LiteLLM deployment per matched
+target/runtime model. A configured model's stable `id` names the canonical model
+group; otherwise the primary `id` returned by `/v1/models` is canonical. The
+defaults are:
 
 - credential name: `neuron/<target-id>`
-- callable model name: `<effective-prefix><runtime-model-id>`
+- canonical model-group name: `<effective-prefix><configured-or-runtime-model-id>`
 - provider: OpenAI-compatible (`custom_llm_provider=openai`)
 - API key: the target key environment variable, or `noapikey` when the runtime
   does not require authentication
@@ -780,31 +783,39 @@ CAPACITY_TARGET_G6_XLARGE_GENERAL_LITELLM_CREDENTIAL_NAME=neuron/g6.xlarge.gener
 CAPACITY_TARGET_G6_XLARGE_GENERAL_LITELLM_SYNC_DISCOVERED_MODELS=false
 ```
 
-NeurOn records `neuron_target_id` and `neuron_target_display_name` in LiteLLM
-credential/deployment metadata. Credential metadata also identifies the provider
-as `openai`; a non-empty `noapikey` placeholder keeps LiteLLM's OpenAI-compatible
-client usable for unauthenticated runtimes. Primary IDs and configured/runtime
-aliases are published as scoped `<target>/<alias>` routes. The lowest target
-`aliasPriority` also publishes each unscoped alias; ties fail closed instead of
-making routing nondeterministic. The LiteLLM deployment `order` carries this
-priority, allowing a global alias to fall through to a later target when
-LiteLLM pre-call checks and ordered fallback are enabled.
+NeurOn records ownership, target identity, canonical model identity, aliases,
+and priority in LiteLLM deployment metadata. Credential metadata also identifies
+the provider as `openai`; a non-empty `noapikey` placeholder keeps LiteLLM's
+OpenAI-compatible client usable for unauthenticated runtimes. Configured/runtime
+aliases are written to LiteLLM `router_settings.model_group_alias`: every scoped
+`<target>/<alias>` maps to that target's canonical group, while an unscoped alias
+maps to the lowest-numbered target priority. Colliding aliases receive explicit
+`router_settings.fallbacks` in priority order. Ties and canonical-name conflicts
+fail closed instead of making routing nondeterministic.
 
-NeurOn does not change deployment block state when capacity stops. Deployments
-that disappear from later discovery are retired non-destructively under a
-`neuron-retired/...` name, preserving their LiteLLM database record while
-removing the stale callable alias. This keeps current routes available for
-LiteLLM queueing while capacity starts and does not override operator-managed
-block state.
+The alias itself is not a deployment. This keeps a model with several friendly
+names represented by one model row in LiteLLM. NeurOn preserves router aliases
+and fallbacks it does not own. For compatibility with LiteLLM releases that look
+up fallbacks before or after resolving a model-group alias, NeurOn publishes the
+same ordered chain for the friendly alias and its primary canonical group.
+
+NeurOn does not change deployment block state when capacity stops. After the
+formal router settings are accepted, deployments that disappear from later
+discovery are deleted through LiteLLM's model-management API. A successful sync
+also removes redundant NeurOn-owned alias/retired deployments created by older
+NeurOn releases. Deletion is limited to rows carrying NeurOn ownership metadata;
+operator-owned deployments and router entries are not changed. Canonical routes
+remain available for LiteLLM queueing while capacity starts.
 
 LiteLLM must have database-backed model storage enabled. Its global API key must
-be allowed to manage models and reusable credentials. Because target API keys
-are sent to LiteLLM during credential upsert, use TLS for the NeurOn-to-LiteLLM
-connection outside an explicitly accepted trusted-network setup. LiteLLM marks
-its reusable-credentials endpoint as beta, so pin and test the LiteLLM version
-used by the deployment. Ordered fallback also depends on LiteLLM version and
-router configuration; enable pre-call checks and verify the chosen version with
-a disposable routing test before relying on fallback in production.
+be allowed to manage models, reusable credentials, and router settings through
+`/router/settings` and `/config/update`. NeurOn fails closed when those formal
+router-management APIs are unavailable; it does not fall back to duplicating
+deployments. Because target API keys are sent to LiteLLM during credential
+upsert, use TLS for the NeurOn-to-LiteLLM connection outside an explicitly
+accepted trusted-network setup. LiteLLM marks some management endpoints as beta,
+so pin the LiteLLM version and verify alias resolution plus fallback with a
+disposable routing test before relying on it in production.
 
 ## Model Warmup
 

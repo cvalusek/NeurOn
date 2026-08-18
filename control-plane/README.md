@@ -225,12 +225,12 @@ reservations. See [docs/integrations.md](docs/integrations.md).
 ## LiteLLM Model Synchronization
 
 When `LITELLM_API_BASE_URL` and `LITELLM_API_KEY` are set, runtime discovery
-publishes each target's primary IDs and aliases to LiteLLM. Scoped model routes
-use `<target-id>/<alias>`. Global alias collisions choose the target with the
-lowest numeric `aliasPriority`, and LiteLLM receives the same order for fallback
-when pre-call checks and a compatible ordered-fallback configuration are enabled.
-Each target gets one reusable `neuron/<target-id>` credential containing its
-current runtime API base.
+publishes one canonical deployment per target/runtime model to LiteLLM. Scoped
+`<target-id>/<alias>` and global friendly names use LiteLLM's formal
+`model_group_alias` router setting instead of duplicate deployments. Global
+alias collisions choose the target with the lowest numeric `aliasPriority`, and
+later targets become formal LiteLLM `fallbacks`. Each target gets one reusable
+`neuron/<target-id>` credential containing its current runtime API base.
 Set the target's `litellm.apiKeyEnv` to the name of an injected runtime secret
 when the runtime requires authentication; otherwise NeurOn supplies the
 non-empty placeholder `noapikey` required by the OpenAI-compatible LiteLLM

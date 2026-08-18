@@ -197,7 +197,10 @@ into AWS, Docker, LiteLLM, or a concrete repository from unrelated code.
   per target-model route, and forwards unambiguous performance observations to
   model selection.
 - `BackendConfigSync`: pushes backend configuration/availability into LiteLLM
-  or another proxy when runtime state changes.
+  or another proxy when runtime state changes. The LiteLLM adapter owns one
+  canonical deployment per target/runtime model and manages friendly names and
+  priority failover through formal model-group aliases and fallbacks; it does
+  not materialize aliases as duplicate deployments.
 - `RuntimeModelDiscovery`: reads OpenAI-compatible `/v1/models` from healthy
   targets, records runtime IDs, trusts API-provided aliases, and uses runtime
   metadata such as context size, parameter count, vocabulary size, and model

@@ -1738,8 +1738,8 @@ function targetCreateModal(providers: ProviderView[], runtimeProfiles: RuntimePr
         <p><label>Hourly cost override (USD)<br><input name="estimatedHourlyCostUsd" type="number" min="0" step="0.000001" placeholder="leave empty for provider discovery"></label></p>
         <p><label>Configured model IDs<br><input name="modelIds" type="text" placeholder="qwen-3.6,gemma-4"></label></p>
         <p><label>Hosting mode<br><select name="hostingMode"><option value="">Unknown</option><option value="dedicated">Dedicated model host</option><option value="multi-model">Multi-model host</option></select></label></p>
-        <p><label>LiteLLM alias priority<br><input name="aliasPriority" type="number" min="1" step="1" value="100"></label></p>
-        <p class="muted">Lower priorities are tried first; later targets become ordered fallbacks for colliding aliases.</p>
+        <p><label>LiteLLM model-group alias priority<br><input name="aliasPriority" type="number" min="1" step="1" value="100"></label></p>
+        <p class="muted">Lower priorities own a colliding alias; later targets become formal LiteLLM fallbacks.</p>
         <p><label>LiteLLM model route prefixes<br><input name="trafficModelPrefixes" type="text" placeholder="defaults to &lt;target-id&gt;/"></label></p>
         <p class="muted">Comma-separated prefixes link matching LiteLLM model names and traffic to this target. When omitted, NeurOn uses <code>&lt;target-id&gt;/</code>.</p>
         <p><label>LiteLLM credential name override<br><input name="litellmCredentialName" type="text" placeholder="neuron/&lt;target-id&gt;"></label></p>
@@ -2120,8 +2120,8 @@ function targetEditPanel(target: TargetView, providers: ProviderView[], runtimeP
       <p><label>Hourly cost override (USD)<br><input name="estimatedHourlyCostUsd" type="number" min="0" step="0.000001" value="${escapeHtml(String(target.costEstimate?.hourlyUsd ?? ""))}" placeholder="leave empty for provider discovery"></label></p>
       <p><label>Configured model IDs<br><input name="modelIds" type="text" value="${escapeHtml(target.modelIds.join(","))}"></label></p>
       <p><label>Hosting mode<br><select name="hostingMode"><option value="" ${target.hostingMode ? "" : "selected"}>Unknown</option><option value="dedicated" ${target.hostingMode === "dedicated" ? "selected" : ""}>Dedicated model host</option><option value="multi-model" ${target.hostingMode === "multi-model" ? "selected" : ""}>Multi-model host</option></select></label></p>
-      <p><label>LiteLLM alias priority<br><input name="aliasPriority" type="number" min="1" step="1" value="${target.aliasPriority ?? 100}"></label></p>
-      <p class="muted">Lower priorities are preferred; matching aliases on higher-numbered targets are fallbacks.</p>
+      <p><label>LiteLLM model-group alias priority<br><input name="aliasPriority" type="number" min="1" step="1" value="${target.aliasPriority ?? 100}"></label></p>
+      <p class="muted">Lower priorities own a colliding alias; matching aliases on higher-numbered targets are formal fallbacks.</p>
       <p><label>LiteLLM model route prefixes<br><input name="trafficModelPrefixes" type="text" value="${escapeHtml(target.trafficModelPrefixes?.join(",") ?? "")}" placeholder="defaults to ${escapeHtml(target.id)}/"></label></p>
       <p class="muted">Comma-separated prefixes link matching LiteLLM model names and traffic to this target. When omitted, NeurOn uses <code>${escapeHtml(target.id)}/</code>.</p>
       <p><label>LiteLLM credential name override<br><input name="litellmCredentialName" type="text" value="${escapeHtml(target.litellm?.credentialName ?? "")}" placeholder="neuron/${escapeHtml(target.id)}"></label></p>

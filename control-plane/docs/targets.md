@@ -23,8 +23,8 @@ Important fields:
 - `providerId`: configured provider instance; defaults to `provider`
 - `modelIds` and optional detailed `models`
 - optional `hostingMode`: `dedicated` or `multi-model`
-- optional positive `aliasPriority`: lower values win global LiteLLM alias
-  collisions and become ordered fallback priority
+- optional positive `aliasPriority`: lower values win global LiteLLM
+  model-group alias collisions; later targets become formal fallbacks
 - provider-specific resource config, such as `docker`, `runpod`, `aws`, or `neuron`
 - `healthUrl` and `apiUrl` overrides
 - optional `modelDiscovery`
@@ -34,9 +34,11 @@ instance that owns it. Shared account/endpoint details belong on the provider;
 resource identifiers belong on the target.
 
 Persisted target models can carry operator-managed aliases in addition to
-runtime-discovered IDs. NeurOn publishes a scoped `<target>/<alias>` name for
-each and makes the lowest-priority-number target the global alias owner. The
-same names appear in profile selection and Client setup.
+runtime-discovered IDs. NeurOn keeps one canonical LiteLLM deployment for the
+exact target/model, maps scoped `<target>/<alias>` and global friendly names to
+it with LiteLLM model-group aliases, and makes the lowest-priority-number target
+the global alias owner. Later targets form the fallback chain. The same names
+appear in profile selection and Client setup.
 
 ## Runtime Profiles
 

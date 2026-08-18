@@ -183,20 +183,21 @@ without editing JSON. Declarative targets can set the field in JSON/env config
 or use **Copy to DB** before editing it in Admin.
 
 With global LiteLLM connectivity configured, successful runtime discovery
-upserts a `neuron/<target-id>` credential and publishes primary IDs plus aliases
-as scoped routes. Global aliases use the target priority; ties fail closed. The
-same value becomes LiteLLM's deployment `order`, so a compatible LiteLLM router
-can try later target deployments after pre-call checks reject an unavailable
-one. Operators must enable pre-call checks and validate the pinned LiteLLM
-version because ordered fallback behavior has changed across releases.
+upserts a `neuron/<target-id>` credential and one canonical deployment for each
+target/runtime model. Scoped and global friendly names are formal LiteLLM
+`model_group_alias` entries that point at those canonical groups; they are not
+additional model deployments. Global alias collisions use the target priority
+to produce formal LiteLLM `fallbacks`, and ties fail closed. Operators should
+validate alias resolution and failover against their pinned LiteLLM version.
 
 The friendly target display name is preserved in LiteLLM metadata as
 `neuron_target_display_name`; routing remains based on the stable target ID.
 Credentials identify `openai` as their provider and use `noapikey` when the
 target has no configured runtime key. Target stops do not block deployments,
-allowing requests to remain queued while NeurOn starts capacity. Aliases absent
-from later discovery are renamed under `neuron-retired/...` rather than deleted,
-preserving LiteLLM records without leaving the stale route callable.
+allowing requests to remain queued while NeurOn starts capacity. Once LiteLLM
+accepts the replacement router settings, NeurOn deletes only stale or redundant
+NeurOn-owned deployment rows. This includes duplicate alias rows made by older
+versions; operator-owned rows and router settings remain untouched.
 
 LiteLLM traffic monitoring remains useful for clients that cannot run a plugin.
 The OpenCode plugin is a stronger signal when it is available because it can

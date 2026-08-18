@@ -9,8 +9,7 @@ target discovery/benchmark or sequential Rediscover all, and review daily usage
 by user, provider, target, and model.
 
 Client setup now generates OpenCode configuration and lists global and scoped
-LiteLLM aliases. Alias collisions resolve by target priority and publish ordered
-fallback candidates; operators should enable LiteLLM pre-call checks and verify
-their pinned LiteLLM version. Stale NeurOn-owned aliases are retired without
-deleting LiteLLM history. AWS target discovery hides already-configured EC2
-instances by default.
+LiteLLM aliases. Alias collisions resolve by target priority through LiteLLM's
+formal model-group aliases and fallbacks rather than duplicate deployments;
+operators should verify the behavior against their pinned LiteLLM version.
+AWS target discovery hides already-configured EC2 instances by default.

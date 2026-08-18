@@ -81,6 +81,9 @@ referenced through NeurOn target configuration.
 - The Codex stdio bridge lives at
   `control-plane/scripts/neuron-mcp-stdio.js` and forwards stdio-framed MCP
   messages to NeurOn's HTTP `/mcp` endpoint.
+- LiteLLM sync keeps one canonical deployment per target/runtime model. Publish
+  friendly names through `model_group_alias` and priority failover through
+  `fallbacks`; never materialize aliases as duplicate model deployments.
 
 ## UI Rules
 
