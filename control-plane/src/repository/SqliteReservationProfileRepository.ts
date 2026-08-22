@@ -7,6 +7,7 @@ import type { ReservationProfile, ReservationProfileSelection } from "../domain/
 
 interface ReservationProfileRow {
   id: string;
+  user_id: string;
   username: string;
   name: string;
   description: string | null;
@@ -33,10 +34,10 @@ export class SqliteReservationProfileRepository implements ReservationProfileRep
     const profile = { ...input, id: input.id ?? nanoid(12), createdAt: input.createdAt ?? now, updatedAt: input.updatedAt ?? now };
     this.db.prepare(
       `insert into reservation_profiles (
-        id, username, name, description, selections, default_duration_minutes,
+        id, user_id, username, name, description, selections, default_duration_minutes,
         default_keepalive_minutes, created_at, updated_at
       ) values (
-        @id, @username, @name, @description, @selections, @defaultDurationMinutes,
+        @id, @userId, @username, @name, @description, @selections, @defaultDurationMinutes,
         @defaultKeepaliveMinutes, @createdAt, @updatedAt
       )`
     ).run(toSqlParams(profile));
@@ -48,8 +49,8 @@ export class SqliteReservationProfileRepository implements ReservationProfileRep
     return row ? fromRow(row) : undefined;
   }
 
-  async listForUser(username: string): Promise<ReservationProfile[]> {
-    const rows = this.db.prepare("select * from reservation_profiles where username = ? order by name asc, id asc").all(username) as ReservationProfileRow[];
+  async listForUser(userId: string): Promise<ReservationProfile[]> {
+    const rows = this.db.prepare("select * from reservation_profiles where user_id = ? order by name asc, id asc").all(userId) as ReservationProfileRow[];
     return rows.map(fromRow);
   }
 
@@ -61,6 +62,7 @@ export class SqliteReservationProfileRepository implements ReservationProfileRep
   async update(id: string, input: ReservationProfile): Promise<ReservationProfile> {
     this.db.prepare(
       `update reservation_profiles set
+        user_id = @userId,
         username = @username,
         name = @name,
         description = @description,
@@ -74,8 +76,8 @@ export class SqliteReservationProfileRepository implements ReservationProfileRep
     return cloneProfile({ ...input, id });
   }
 
-  async deleteForUser(id: string, username: string): Promise<boolean> {
-    const result = this.db.prepare("delete from reservation_profiles where id = ? and username = ?").run(id, username);
+  async deleteForUser(id: string, userId: string): Promise<boolean> {
+    const result = this.db.prepare("delete from reservation_profiles where id = ? and user_id = ?").run(id, userId);
     return result.changes > 0;
   }
 
@@ -87,6 +89,7 @@ export class SqliteReservationProfileRepository implements ReservationProfileRep
     this.db.exec(`
       create table if not exists reservation_profiles (
         id text primary key,
+        user_id text,
         username text not null,
         name text not null,
         description text,
@@ -100,12 +103,15 @@ export class SqliteReservationProfileRepository implements ReservationProfileRep
       create index if not exists idx_reservation_profiles_username_name
         on reservation_profiles(username, name);
     `);
+    const columns = this.db.prepare("pragma table_info(reservation_profiles)").all() as Array<{ name: string }>;
+    if (!columns.some((column) => column.name === "user_id")) this.db.exec("alter table reservation_profiles add column user_id text");
   }
 }
 
 function toSqlParams(profile: ReservationProfile) {
   return {
     id: profile.id,
+    userId: profile.userId,
     username: profile.username,
     name: profile.name,
     description: profile.description ?? null,
@@ -120,6 +126,7 @@ function toSqlParams(profile: ReservationProfile) {
 function fromRow(row: ReservationProfileRow): ReservationProfile {
   return {
     id: row.id,
+    userId: row.user_id,
     username: row.username,
     name: row.name,
     description: row.description ?? undefined,

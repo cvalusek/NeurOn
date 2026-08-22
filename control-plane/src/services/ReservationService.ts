@@ -2,6 +2,7 @@ import type { ReservationProfileRepository, ReservationRepository } from "../dom
 import type { AuthenticatedUser, Reservation, ReservationProfile, ReservationProfileSelection } from "../domain/types.js";
 import { ModelCatalog } from "./ModelCatalog.js";
 import { normalizeReservationProfileSelections } from "./reservationProfileSelections.js";
+import type { IdentityService } from "./IdentityService.js";
 
 const MAX_DURATION_MINUTES = 12 * 60;
 const DEFAULT_KEEPALIVE_MINUTES = 2;
@@ -15,10 +16,12 @@ export class ReservationService {
     private readonly catalog: ModelCatalog,
     private readonly profiles?: ReservationProfileRepository,
     private readonly onReservationChanged?: () => void,
-    private readonly acceptingReservations: () => boolean = () => true
+    private readonly acceptingReservations: () => boolean = () => true,
+    private readonly identities?: IdentityService
   ) {}
 
   async createForUser(user: AuthenticatedUser, input: { modelIds?: string[]; targetIds?: string[]; profileId?: string; durationMinutes?: number; keepaliveMinutes?: number; synthetic?: boolean }): Promise<Reservation> {
+    if (this.identities && !this.identities.hasPermission(user, "reservations.create")) throw new Error("Reservation permission is required");
     const finishMutation = this.beginDemandMutation();
     try {
       const storedProfile = input.profileId ? await this.getOwnedProfile(input.profileId, user) : undefined;
@@ -33,8 +36,10 @@ export class ReservationService {
       const requestedTargetIds = unique(expandedInput.targetIds ?? []);
       const now = new Date();
       const targetIds = this.targetIdsForRequest(modelIds, requestedTargetIds);
+      await this.requireTargetAccess(user, targetIds);
       const targetSelections = this.targetSelectionsForRequest(profile, modelIds, targetIds);
       const reservation = await this.repository.create({
+        userId: input.synthetic ? undefined : user.id,
         username: user.username,
         apiKeyName: user.apiKeyName,
         profileId: profile?.id,
@@ -58,15 +63,16 @@ export class ReservationService {
   async getOwned(id: string, user: AuthenticatedUser): Promise<Reservation> {
     const reservation = await this.repository.get(id);
     if (!reservation) throw new Error("Reservation not found");
-    if (!user.isAdmin && reservation.username !== user.username) throw new Error("Reservation not found");
+    if (reservation.userId !== user.id && !(this.identities ? this.identities.hasPermission(user, "reservations.manage_any") : user.isAdmin)) throw new Error("Reservation not found");
     return reservation;
   }
 
   async listActiveOwned(user: AuthenticatedUser, now = new Date()): Promise<Reservation[]> {
-    return (await this.repository.listActive(now)).filter((reservation) => reservation.username === user.username);
+    return (await this.repository.listActive(now)).filter((reservation) => reservation.userId === user.id);
   }
 
   async markDone(id: string, user: AuthenticatedUser): Promise<Reservation> {
+    if (this.identities && !this.identities.hasPermission(user, "reservations.manage_own") && !this.identities.hasPermission(user, "reservations.manage_any")) throw new Error("Reservation management permission is required");
     await this.getOwned(id, user);
     const reservation = await this.repository.update(id, { status: "done", endedAt: new Date() });
     this.notifyReservationChanged();
@@ -74,6 +80,7 @@ export class ReservationService {
   }
 
   async extend(id: string, user: AuthenticatedUser, durationMinutes: number, options: { fromNow?: boolean } = {}): Promise<Reservation> {
+    if (this.identities && !this.identities.hasPermission(user, "reservations.manage_own") && !this.identities.hasPermission(user, "reservations.manage_any")) throw new Error("Reservation management permission is required");
     const finishMutation = this.beginDemandMutation();
     try {
       if (!Number.isFinite(durationMinutes) || durationMinutes <= 0 || durationMinutes > MAX_DURATION_MINUTES) {
@@ -138,8 +145,16 @@ export class ReservationService {
   private async getOwnedProfile(profileId: string, user: AuthenticatedUser): Promise<ReservationProfile> {
     if (!this.profiles) throw new Error("Reservation profiles are not configured");
     const profile = await this.profiles.get(profileId);
-    if (!profile || profile.username !== user.username) throw new Error("Reservation profile not found");
+    if (!profile || profile.userId !== user.id) throw new Error("Reservation profile not found");
     return profile;
+  }
+
+  private async requireTargetAccess(user: AuthenticatedUser, targetIds: string[]): Promise<void> {
+    if (!this.identities) return;
+    for (const targetId of targetIds) {
+      const target = this.catalog.getTarget(targetId);
+      if (!target || !await this.identities.canAccessTarget(user, target, "use")) throw new Error(`Target is not available: ${targetId}`);
+    }
   }
 
   private notifyReservationChanged(): void {

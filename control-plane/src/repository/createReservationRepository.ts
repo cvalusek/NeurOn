@@ -1,4 +1,4 @@
-import type { ApiKeyRepository, AssistantConfigRepository, AuthMethodRepository, CapacityProviderRepository, CapacityTargetRepository, ModelFavoriteRepository, ModelMetadataRepository, ReservationProfileRepository, ReservationRepository, TargetModelDiscoveryRepository, TargetProvisioningJobRepository, TargetActivationRepository } from "../domain/interfaces.js";
+import type { ApiKeyRepository, AssistantConfigRepository, AuthMethodRepository, CapacityProviderRepository, CapacityTargetRepository, IdentityRepository, ModelFavoriteRepository, ModelMetadataRepository, ReservationProfileRepository, ReservationRepository, TargetModelDiscoveryRepository, TargetProvisioningJobRepository, TargetActivationRepository } from "../domain/interfaces.js";
 import type { StorageConfig } from "../domain/types.js";
 import pg from "pg";
 import { InMemoryApiKeyRepository } from "./InMemoryApiKeyRepository.js";
@@ -12,6 +12,7 @@ import { InMemoryTargetActivationRepository } from "./InMemoryTargetActivationRe
 import { InMemoryModelMetadataRepository } from "./InMemoryModelMetadataRepository.js";
 import { InMemoryModelFavoriteRepository } from "./InMemoryModelFavoriteRepository.js";
 import { InMemoryAssistantConfigRepository } from "./InMemoryAssistantConfigRepository.js";
+import { InMemoryIdentityRepository } from "./InMemoryIdentityRepository.js";
 import { migratePostgresSchema } from "./postgresSchema.js";
 
 export interface ReservationRepositoryHandle {
@@ -27,6 +28,7 @@ export interface ReservationRepositoryHandle {
   modelMetadata: ModelMetadataRepository;
   modelFavorites: ModelFavoriteRepository;
   assistantConfig: AssistantConfigRepository;
+  identities: IdentityRepository;
   close(): Promise<void>;
 }
 
@@ -44,6 +46,7 @@ export async function createReservationRepository(config: StorageConfig): Promis
     const { SqliteModelMetadataRepository } = await import("./SqliteModelMetadataRepository.js");
     const { SqliteModelFavoriteRepository } = await import("./SqliteModelFavoriteRepository.js");
     const { SqliteAssistantConfigRepository } = await import("./SqliteAssistantConfigRepository.js");
+    const { SqliteIdentityRepository } = await import("./SqliteIdentityRepository.js");
     const repository = new SqliteReservationRepository(config.path);
     const reservationProfiles = new SqliteReservationProfileRepository(config.path);
     const apiKeys = new SqliteApiKeyRepository(config.path);
@@ -56,6 +59,7 @@ export async function createReservationRepository(config: StorageConfig): Promis
     const modelMetadata = new SqliteModelMetadataRepository(config.path);
     const modelFavorites = new SqliteModelFavoriteRepository(config.path);
     const assistantConfig = new SqliteAssistantConfigRepository(config.path);
+    const identities = new SqliteIdentityRepository(config.path);
     return {
       repository,
       reservationProfiles,
@@ -69,6 +73,7 @@ export async function createReservationRepository(config: StorageConfig): Promis
       modelMetadata,
       modelFavorites,
       assistantConfig,
+      identities,
       close: async () => {
         repository.close();
         reservationProfiles.close();
@@ -82,6 +87,7 @@ export async function createReservationRepository(config: StorageConfig): Promis
         modelMetadata.close();
         modelFavorites.close();
         assistantConfig.close();
+        identities.close();
       }
     };
   }
@@ -98,6 +104,7 @@ export async function createReservationRepository(config: StorageConfig): Promis
     const { PostgresModelMetadataRepository } = await import("./PostgresModelMetadataRepository.js");
     const { PostgresModelFavoriteRepository } = await import("./PostgresModelFavoriteRepository.js");
     const { PostgresAssistantConfigRepository } = await import("./PostgresAssistantConfigRepository.js");
+    const { PostgresIdentityRepository } = await import("./PostgresIdentityRepository.js");
     const pool = new pg.Pool({ connectionString: config.connectionString, max: config.maxConnections });
     try {
       await migratePostgresSchema(pool);
@@ -117,6 +124,7 @@ export async function createReservationRepository(config: StorageConfig): Promis
     const modelMetadata = new PostgresModelMetadataRepository(pool);
     const modelFavorites = new PostgresModelFavoriteRepository(pool);
     const assistantConfig = new PostgresAssistantConfigRepository(pool);
+    const identities = new PostgresIdentityRepository(pool);
     return {
       repository,
       reservationProfiles,
@@ -130,6 +138,7 @@ export async function createReservationRepository(config: StorageConfig): Promis
       modelMetadata,
       modelFavorites,
       assistantConfig,
+      identities,
       close: async () => pool.end()
     };
   }
@@ -147,5 +156,20 @@ export async function createReservationRepository(config: StorageConfig): Promis
   const modelMetadata = new InMemoryModelMetadataRepository();
   const modelFavorites = new InMemoryModelFavoriteRepository();
   const assistantConfig = new InMemoryAssistantConfigRepository();
-  return { repository, reservationProfiles, apiKeys, authMethods, capacityProviders, capacityTargets, targetProvisioningJobs, targetModelDiscoveries, targetActivations, modelMetadata, modelFavorites, assistantConfig, close: async () => undefined };
+  const identities = new InMemoryIdentityRepository({
+    counts: (userId) => ({
+      reservations: repository.countForUser(userId),
+      profiles: reservationProfiles.countForUser(userId),
+      apiKeys: apiKeys.countForUser(userId),
+      favorites: modelFavorites.countForUser(userId)
+    }),
+    reassign: (sourceUserId, targetUserId, username) => {
+      repository.reassignUser(sourceUserId, targetUserId, username);
+      reservationProfiles.reassignUser(sourceUserId, targetUserId, username);
+      apiKeys.reassignUser(sourceUserId, targetUserId, username);
+      modelFavorites.reassignUser(sourceUserId, targetUserId, username);
+      capacityTargets.reassignAudienceUser(sourceUserId, targetUserId);
+    }
+  });
+  return { repository, reservationProfiles, apiKeys, authMethods, capacityProviders, capacityTargets, targetProvisioningJobs, targetModelDiscoveries, targetActivations, modelMetadata, modelFavorites, assistantConfig, identities, close: async () => undefined };
 }

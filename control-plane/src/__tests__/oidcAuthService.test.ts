@@ -49,16 +49,16 @@ describe("OIDC authentication", () => {
   });
 
   it("returns the configured username claim when user and group restrictions pass", async () => {
-    protocol.claims = { email: "alice@example.com", groups: ["neuron-users"] };
+    protocol.claims = { sub: "oidc-alice-123", email: "alice@example.com", groups: ["neuron-users"] };
     const service = new OidcAuthService({ resolve: vi.fn(async () => "client-secret") } as unknown as AuthSecretResolver);
 
-    const username = await service.authenticate(
+    const identity = await service.authenticate(
       { ...baseConfig, usernameClaim: "email", allowedUsers: ["alice@example.com"], allowedGroups: ["neuron-users"] },
       "https://neuron.example.test/auth/oidc/callback?code=code&state=state",
       { methodId: "okta", state: "state", nonce: "nonce", codeVerifier: "code-verifier", issuedAt: Date.now() }
     );
 
-    expect(username).toBe("alice@example.com");
+    expect(identity).toMatchObject({ subject: "oidc-alice-123", username: "alice@example.com", email: "alice@example.com" });
     expect(protocol.authorizationCodeGrant).toHaveBeenCalledWith(expect.anything(), expect.any(URL), {
       pkceCodeVerifier: "code-verifier",
       expectedState: "state",
@@ -67,7 +67,7 @@ describe("OIDC authentication", () => {
   });
 
   it("rejects users outside configured groups", async () => {
-    protocol.claims = { preferred_username: "alice", groups: ["other"] };
+    protocol.claims = { sub: "oidc-alice-123", preferred_username: "alice", groups: ["other"] };
     const service = new OidcAuthService({ resolve: vi.fn(async () => "client-secret") } as unknown as AuthSecretResolver);
 
     await expect(service.authenticate(

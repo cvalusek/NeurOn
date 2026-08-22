@@ -45,6 +45,11 @@ export class InMemoryReservationRepository implements ReservationRepository {
       .filter((reservation) => reservation.status === "active" && reservation.expiresAt > now)
       .map(cloneReservation);
   }
+
+  countForUser(userId: string): number { return Array.from(this.reservations.values()).filter((value) => value.userId === userId).length; }
+  reassignUser(sourceUserId: string, targetUserId: string, username: string): void {
+    for (const reservation of this.reservations.values()) if (reservation.userId === sourceUserId) Object.assign(reservation, { userId: targetUserId, username });
+  }
 }
 
 function cloneReservation(reservation: Reservation): Reservation {

@@ -10,6 +10,7 @@ import { ModelCatalog } from "../services/ModelCatalog.js";
 import { ModelSelectionService } from "../services/ModelSelectionService.js";
 import { ModelFavoriteService } from "../services/ModelFavoriteService.js";
 import { UsageAnalyticsService } from "../services/UsageAnalyticsService.js";
+import { IdentityService } from "../services/IdentityService.js";
 import { litellmAliases } from "../litellm/modelRouting.js";
 import { ProfileAssistantRequestConflictError, type ProfileAdvisorService, type ProfileAssistantContext } from "../services/ProfileAdvisorService.js";
 import { ReservationService } from "../services/ReservationService.js";
@@ -102,9 +103,93 @@ export function registerApiRoutes(
   modelSelection: ModelSelectionService,
   profileAdvisor: ProfileAdvisorService,
   modelFavorites: ModelFavoriteService,
-  usageAnalytics: UsageAnalyticsService
+  usageAnalytics: UsageAnalyticsService,
+  identityService: IdentityService
 ) {
   app.get("/healthz", async () => ({ ok: true, ...healthInfo }));
+  app.get("/api/admin/users", async () => ({ users: await identityService.listUsers() }));
+  app.get("/api/admin/roles", async () => ({ roles: await identityService.listRoles() }));
+  app.get("/api/admin/teams", async () => ({ teams: await identityService.listTeams() }));
+  app.get("/api/admin/teams/:id/members", async (request) => { const {id}=z.object({id:z.string()}).parse(request.params); return { memberships:await identityService.listTeamMemberships(id) }; });
+  app.get("/api/admin/external-users", async (request) => {
+    const query = z.object({ integration: z.string().optional() }).parse(request.query);
+    return { links: await identityService.listExternalUserLinks(query.integration) };
+  });
+  app.post("/api/admin/users/invitations", async (request, reply) => {
+    try {
+      const body = z.object({ userId: z.string().optional(), intendedUsername: z.string().optional(), initialRoleId: z.string().optional(), expiresInMinutes: z.number().int().min(5).max(43_200).optional() }).parse(request.body);
+      const created = await identityService.createInvitation(requireUser(request), body);
+      return reply.code(201).send({ invitation: { ...created.invitation, tokenHash: undefined }, token: created.token, registrationPath: `/register#token=${encodeURIComponent(created.token)}` });
+    } catch (error) { return sendError(reply,error); }
+  });
+  app.post("/api/admin/users/merge/preview", async (request, reply) => {
+    try { const body=z.object({sourceUserId:z.string(),targetUserId:z.string()}).parse(request.body); return identityService.previewMerge(requireUser(request),body.sourceUserId,body.targetUserId); }
+    catch(error){return sendError(reply,error);}
+  });
+  app.post("/api/admin/users/merge", async (request, reply) => {
+    try { const body=z.object({sourceUserId:z.string(),targetUserId:z.string(),confirm:z.literal("MERGE")}).parse(request.body); const preview=await identityService.previewMerge(requireUser(request),body.sourceUserId,body.targetUserId); await identityService.mergeUsers(requireUser(request),body.sourceUserId,body.targetUserId); return { merged:true, preview }; }
+    catch(error){return sendError(reply,error);}
+  });
+  app.post("/api/admin/users/:id/roles", async (request, reply) => {
+    try { const {id}=z.object({id:z.string()}).parse(request.params); const {roleId}=z.object({roleId:z.string()}).parse(request.body); await identityService.assignRole(requireUser(request),id,roleId); return reply.code(204).send(); }
+    catch(error){return sendError(reply,error);}
+  });
+  app.delete("/api/admin/users/:id/roles/:roleId", async (request, reply) => {
+    try { const {id,roleId}=z.object({id:z.string(),roleId:z.string()}).parse(request.params); return { removed:await identityService.revokeRole(requireUser(request),id,roleId) }; }
+    catch(error){return sendError(reply,error);}
+  });
+  app.post("/api/admin/users/:id/sessions/revoke", async (request, reply) => {
+    try { const {id}=z.object({id:z.string()}).parse(request.params); await identityService.revokeSessions(requireUser(request),id); return reply.code(204).send(); }
+    catch(error){return sendError(reply,error);}
+  });
+  app.put("/api/admin/users/:id/status", async (request, reply) => {
+    try { const {id}=z.object({id:z.string()}).parse(request.params); const {status}=z.object({status:z.enum(["active","disabled"])}).parse(request.body); return identityService.setUserStatus(requireUser(request),id,status); }
+    catch(error){return sendError(reply,error);}
+  });
+  app.post("/api/admin/roles", async (request, reply) => {
+    try { const body=z.object({name:z.string().trim().min(1),description:z.string().optional(),scope:z.enum(["global","team"]),permissions:z.array(z.string().trim().min(1))}).parse(request.body); return reply.code(201).send(await identityService.createRole(requireUser(request),body)); }
+    catch(error){return sendError(reply,error);}
+  });
+  app.put("/api/admin/roles/:id", async (request, reply) => {
+    try { const {id}=z.object({id:z.string()}).parse(request.params); const body=z.object({name:z.string().trim().min(1),description:z.string().optional(),permissions:z.array(z.string().trim().min(1))}).parse(request.body); return identityService.updateRole(requireUser(request),id,body); }
+    catch(error){return sendError(reply,error);}
+  });
+  app.delete("/api/admin/roles/:id", async (request, reply) => {
+    try { const {id}=z.object({id:z.string()}).parse(request.params); return { removed:await identityService.deleteRole(requireUser(request),id) }; }
+    catch(error){return sendError(reply,error);}
+  });
+  app.post("/api/admin/teams", async (request, reply) => {
+    try { const body=z.object({name:z.string().trim().min(1),description:z.string().optional(),parentTeamId:z.string().optional()}).parse(request.body); return reply.code(201).send(await identityService.createTeam(requireUser(request),body)); }
+    catch(error){return sendError(reply,error);}
+  });
+  app.put("/api/admin/teams/:id", async (request, reply) => {
+    try { const {id}=z.object({id:z.string()}).parse(request.params); const body=z.object({name:z.string().trim().min(1),description:z.string().optional(),parentTeamId:z.string().optional()}).parse(request.body); return identityService.updateTeam(requireUser(request),id,body); }
+    catch(error){return sendError(reply,error);}
+  });
+  app.delete("/api/admin/teams/:id", async (request, reply) => {
+    try { const {id}=z.object({id:z.string()}).parse(request.params); return { removed:await identityService.deleteTeam(requireUser(request),id) }; }
+    catch(error){return sendError(reply,error);}
+  });
+  app.post("/api/admin/teams/:id/members", async (request, reply) => {
+    try { const {id}=z.object({id:z.string()}).parse(request.params); const body=z.object({userId:z.string(),roleId:z.string()}).parse(request.body); return reply.code(201).send(await identityService.setTeamMembership(requireUser(request),{teamId:id,userId:body.userId,roleId:body.roleId,source:"manual"})); }
+    catch(error){return sendError(reply,error);}
+  });
+  app.delete("/api/admin/teams/:id/members/:userId", async (request, reply) => {
+    try { const {id,userId}=z.object({id:z.string(),userId:z.string()}).parse(request.params); return { removed:await identityService.removeTeamMembership(requireUser(request),id,userId,"manual","") }; }
+    catch(error){return sendError(reply,error);}
+  });
+  app.delete("/api/admin/users/invitations/:id", async (request, reply) => {
+    try { const {id}=z.object({id:z.string()}).parse(request.params); return { revoked:await identityService.revokeInvitation(requireUser(request),id) }; }
+    catch(error){return sendError(reply,error);}
+  });
+  app.put("/api/admin/external-users/litellm/:externalSubject", async (request, reply) => {
+    try { const {externalSubject}=z.object({externalSubject:z.string()}).parse(request.params); const {userId}=z.object({userId:z.string()}).parse(request.body); return identityService.linkExternalUser(requireUser(request),"litellm",externalSubject,userId); }
+    catch(error){return sendError(reply,error);}
+  });
+  app.delete("/api/admin/external-users/litellm/:externalSubject", async (request, reply) => {
+    try { const {externalSubject}=z.object({externalSubject:z.string()}).parse(request.params); return { removed:await identityService.unlinkExternalUser(requireUser(request),"litellm",externalSubject) }; }
+    catch(error){return sendError(reply,error);}
+  });
   app.get(
     "/api/models",
     {
@@ -115,7 +200,7 @@ export function registerApiRoutes(
         response: { 200: { type: "object", properties: { models: { type: "array", items: modelSchema } }, required: ["models"] } }
       }
     },
-    async () => ({ models: catalog.listModels() })
+    async (request) => ({ models: await visibleModels(requireUser(request), catalog, identityService) })
   );
 
   app.post("/api/profile-advisor/requests", async (request, reply) => {
@@ -153,15 +238,17 @@ export function registerApiRoutes(
     },
     async (request) => {
       const user = requireUser(request);
+      const visibleTargets = await targetsVisibleTo(user,catalog,identityService);
+      const visibleTargetIds = new Set(visibleTargets.map((target) => target.id));
       const [usage, favorites, costs] = await Promise.all([
-        usageAnalytics.deploymentUsage(), modelFavorites.listForUser(user), selectionCostEstimates(catalog.listTargets(), costEstimation)
+        usageAnalytics.deploymentUsage(), modelFavorites.listForUser(user), selectionCostEstimates(visibleTargets, costEstimation)
       ]);
       const usageByKey = new Map(usage.map((value) => [`${value.targetId}::${value.modelId}`, value]));
       const favoriteKeys = new Set(favorites.map((value) => `${value.targetId}::${value.modelId}`));
       return {
         domains: modelSelection.availableDomains(),
         technicalCapabilities: modelSelection.availableTechnicalCapabilities(),
-        deployments: modelSelection.listDeployments(costs).map((deployment) => ({ ...deployment, ...usageByKey.get(deployment.key), favorite: favoriteKeys.has(deployment.key) })),
+        deployments: modelSelection.listDeployments(costs).filter((deployment) => visibleTargetIds.has(deployment.targetId)).map((deployment) => ({ ...deployment, ...usageByKey.get(deployment.key), favorite: favoriteKeys.has(deployment.key) })),
         advisorEnabled: await profileAdvisor.isConfigured()
       };
     }
@@ -170,7 +257,7 @@ export function registerApiRoutes(
   app.get("/api/client-models", async (request) => {
     const user = requireUser(request);
     const profiles = await reservationProfileService.listForUser(user);
-    const targets = new Map(catalog.listTargets().map((target) => [target.id, target]));
+    const targets = new Map((await targetsVisibleTo(user,catalog,identityService)).map((target) => [target.id, target]));
     return {
       models: modelSelection.listDeployments().flatMap((deployment) => {
         const target = targets.get(deployment.targetId);
@@ -336,7 +423,7 @@ export function registerApiRoutes(
         const body = assistantRequestBodySchema.parse(request.body);
         const user = requireUser(request);
         const context = await assistantContext(body, user, reservationProfileService, reservationService);
-        return { result: await profileAdvisor.interpret(body.request, context, user.isAdmin, undefined, body.conversation) };
+        return { result: await profileAdvisor.interpretForUser(body.request, context, user, body.conversation) };
       } catch (error) {
         const invalidRequest = error instanceof z.ZodError;
         const message = invalidRequest
@@ -525,7 +612,7 @@ export function registerApiRoutes(
         response: { 200: statusSchema }
       }
     },
-    async () => statusPayload(catalog, reservations, statuses, costEstimation, runtimeModelDiscovery)
+    async (request) => statusPayload(catalog, reservations, statuses, costEstimation, runtimeModelDiscovery, { user: requireUser(request), identities: identityService })
   );
   app.get("/api/admin/reservations", async (request) => {
     const query = z
@@ -626,7 +713,9 @@ export function registerApiRoutes(
       const body = z.object({ targetId: z.string(), modelIds: z.array(z.string()).default([]) }).parse(request.body);
       const target = catalog.getTarget(body.targetId);
       if (!target) throw new Error("Target not found");
-      return { recorded: await trafficKeepalive.recordTraffic(target, body.modelIds) };
+      const user = requireUser(request);
+      if (!await identityService.canAccessTarget(user, target, "use")) throw new Error("Target not found");
+      return { recorded: await trafficKeepalive.recordTraffic(target, body.modelIds, new Date(), new Date(), user) };
     } catch (error) {
       return sendError(reply, error);
     }
@@ -664,14 +753,16 @@ async function statusPayload(
   statuses: TargetStatusRepository,
   costEstimation: CostEstimationService,
   runtimeModelDiscovery: RuntimeModelDiscovery,
-  options: { includeReservationHistory?: boolean } = {}
+  options: { includeReservationHistory?: boolean; user?: AuthenticatedUser; identities?: IdentityService } = {}
 ) {
   const activeReservations = await reservations.listActive(new Date());
-  const visibleReservations = options.includeReservationHistory ? await reservations.list() : activeReservations;
+  const candidateReservations = options.includeReservationHistory ? await reservations.list() : activeReservations;
+  const visibleReservations = options.user ? candidateReservations.filter((reservation) => reservation.userId === options.user!.id) : candidateReservations;
+  const visibleActive = options.user ? activeReservations.filter((reservation) => reservation.userId === options.user!.id) : activeReservations;
   return {
     reservations: await reservationPayloads(visibleReservations, statuses, costEstimation, catalog),
-    activeReservations: await reservationPayloads(activeReservations, statuses, costEstimation, catalog),
-    capacityTargets: await targetsPayload(catalog, reservations, statuses, runtimeModelDiscovery)
+    activeReservations: await reservationPayloads(visibleActive, statuses, costEstimation, catalog),
+    capacityTargets: await targetsPayload(catalog, reservations, statuses, runtimeModelDiscovery, options.user, options.identities)
   };
 }
 
@@ -688,11 +779,14 @@ async function targetsPayload(
   catalog: ModelCatalog,
   reservations: ReservationRepository,
   statuses: TargetStatusRepository,
-  runtimeModelDiscovery: RuntimeModelDiscovery
+  runtimeModelDiscovery: RuntimeModelDiscovery,
+  user?: AuthenticatedUser,
+  identities?: IdentityService
 ) {
   const active = await reservations.listActive(new Date());
   const history = await reservations.list();
-  return catalog.listTargets().map((target) =>
+  const visibleTargets = user && identities ? await targetsVisibleTo(user,catalog,identities) : catalog.listTargets();
+  return visibleTargets.map((target) =>
     targetJson(
       target,
       statuses.get(target.id),
@@ -760,6 +854,7 @@ function sortReservations(reservations: Reservation[], sort: "expires_desc" | "e
 function reservationProfileJson(profile: ReservationProfile) {
   return {
     id: profile.id,
+    userId: profile.userId,
     username: profile.username,
     name: profile.name,
     description: profile.description,
@@ -770,6 +865,9 @@ function reservationProfileJson(profile: ReservationProfile) {
     updatedAt: profile.updatedAt.toISOString()
   };
 }
+
+async function targetsVisibleTo(user: AuthenticatedUser,catalog:ModelCatalog,identities:IdentityService):Promise<CapacityTarget[]>{const result:CapacityTarget[]=[];for(const target of catalog.listTargets())if(await identities.canAccessTarget(user,target))result.push(target);return result}
+async function visibleModels(user:AuthenticatedUser,catalog:ModelCatalog,identities:IdentityService){const targetIds=new Set((await targetsVisibleTo(user,catalog,identities)).map(target=>target.id));return catalog.listModels().map(model=>({...model,targetIds:model.targetIds.filter(id=>targetIds.has(id))})).filter(model=>model.targetIds.length>0)}
 
 function lastUsedAtForTarget(reservations: Reservation[], targetId: string): Date | undefined {
   const matching = reservations.filter((reservation) => reservation.targetIds.includes(targetId));
@@ -825,6 +923,7 @@ const reservationProfileSchema = {
   type: "object",
   properties: {
     id: { type: "string" },
+    userId: { type: "string" },
     username: { type: "string" },
     name: { type: "string" },
     description: { type: "string" },
@@ -834,7 +933,7 @@ const reservationProfileSchema = {
     createdAt: { type: "string", format: "date-time" },
     updatedAt: { type: "string", format: "date-time" }
   },
-  required: ["id", "username", "name", "selections", "createdAt", "updatedAt"]
+  required: ["id", "userId", "username", "name", "selections", "createdAt", "updatedAt"]
 } as const;
 
 const reservationProfileCreateSchema = {

@@ -3,6 +3,7 @@ import { z } from "zod";
 import type { ReservationRepository, TargetStatusRepository } from "../domain/interfaces.js";
 import { ModelCatalog } from "../services/ModelCatalog.js";
 import { ReservationService } from "../services/ReservationService.js";
+import { IdentityService } from "../services/IdentityService.js";
 import { requireUser, reservationDisplayUsername, reservationJson, targetJson } from "../utils/http.js";
 
 const jsonRpcRequestSchema = z.object({
@@ -27,7 +28,8 @@ export function registerMcpRoutes(
   catalog: ModelCatalog,
   reservations: ReservationRepository,
   statuses: TargetStatusRepository,
-  reservationService: ReservationService
+  reservationService: ReservationService,
+  identities: IdentityService
 ) {
   app.post(
     "/mcp",
@@ -71,7 +73,7 @@ export function registerMcpRoutes(
       if (!parsed.success) return rpcError(undefined, -32600, "Invalid request", parsed.error.flatten());
       const rpc = parsed.data;
       try {
-        const result = await handleMcpMethod(rpc.method, rpc.params, requireUser(request), catalog, reservations, statuses, reservationService);
+        const result = await handleMcpMethod(rpc.method, rpc.params, requireUser(request), catalog, reservations, statuses, reservationService, identities);
         return { jsonrpc: "2.0", id: rpc.id ?? null, result };
       } catch (error) {
         return rpcError(rpc.id ?? null, error instanceof UnknownMcpMethodError ? -32601 : -32602, error instanceof Error ? error.message : String(error));
@@ -87,7 +89,8 @@ async function handleMcpMethod(
   catalog: ModelCatalog,
   reservations: ReservationRepository,
   statuses: TargetStatusRepository,
-  reservationService: ReservationService
+  reservationService: ReservationService,
+  identities: IdentityService
 ) {
   if (method === "initialize") {
     return {
@@ -100,7 +103,7 @@ async function handleMcpMethod(
   if (method !== "tools/call") throw new UnknownMcpMethodError(`Unknown MCP method: ${method}`);
 
   const call = z.object({ name: z.string(), arguments: z.record(z.unknown()).default({}) }).parse(params ?? {});
-  const result = await callTool(call.name, call.arguments, user, catalog, reservations, statuses, reservationService);
+  const result = await callTool(call.name, call.arguments, user, catalog, reservations, statuses, reservationService, identities);
   return {
     content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
     structuredContent: result
@@ -114,11 +117,12 @@ async function callTool(
   catalog: ModelCatalog,
   reservations: ReservationRepository,
   statuses: TargetStatusRepository,
-  reservationService: ReservationService
+  reservationService: ReservationService,
+  identities: IdentityService
 ) {
-  if (name === "list_models") return { models: catalog.listModels() };
-  if (name === "list_targets") return { capacityTargets: await targetsPayload(catalog, reservations, statuses) };
-  if (name === "get_status") return statusPayload(catalog, reservations, statuses);
+  if (name === "list_models") return { models: await visibleModels(user, catalog, identities) };
+  if (name === "list_targets") return { capacityTargets: await targetsPayload(user, catalog, reservations, statuses, identities) };
+  if (name === "get_status") return statusPayload(user, catalog, reservations, statuses, identities);
   if (name === "create_reservation") {
     const input = createReservationParamsSchema.parse(args);
     return reservationJson(await reservationService.createForUser(user, input), statuses.list());
@@ -126,7 +130,7 @@ async function callTool(
   if (name === "end_reservation") {
     const input = reservationIdParamsSchema.parse(args);
     const reservation = await reservations.get(input.reservationId);
-    if (!reservation || reservation.username !== user.username) throw new Error("Reservation not found");
+    if (!reservation || reservation.userId !== user.id) throw new Error("Reservation not found");
     return reservationJson(await reservationService.markDone(input.reservationId, user), statuses.list());
   }
   throw new Error(`Unknown MCP tool: ${name}`);
@@ -176,24 +180,32 @@ function mcpTools() {
   ];
 }
 
-async function statusPayload(catalog: ModelCatalog, reservations: ReservationRepository, statuses: TargetStatusRepository) {
-  const activeReservations = await reservations.listActive(new Date());
+async function statusPayload(user: ReturnType<typeof requireUser>, catalog: ModelCatalog, reservations: ReservationRepository, statuses: TargetStatusRepository, identities: IdentityService) {
+  const activeReservations = (await reservations.listActive(new Date())).filter((reservation) => reservation.userId === user.id);
   return {
     reservations: activeReservations.map((reservation) => reservationJson(reservation, statuses.list())),
     activeReservations: activeReservations.map((reservation) => reservationJson(reservation, statuses.list())),
-    capacityTargets: await targetsPayload(catalog, reservations, statuses)
+    capacityTargets: await targetsPayload(user, catalog, reservations, statuses, identities)
   };
 }
 
-async function targetsPayload(catalog: ModelCatalog, reservations: ReservationRepository, statuses: TargetStatusRepository) {
+async function targetsPayload(user: ReturnType<typeof requireUser>, catalog: ModelCatalog, reservations: ReservationRepository, statuses: TargetStatusRepository, identities: IdentityService) {
   const active = await reservations.listActive(new Date());
-  return catalog.listTargets().map((target) =>
+  const visible = [];
+  for (const target of catalog.listTargets()) if (await identities.canAccessTarget(user,target)) visible.push(target);
+  return visible.map((target) =>
     targetJson(
       target,
       statuses.get(target.id),
       Array.from(new Set(active.filter((reservation) => reservation.targetIds.includes(target.id)).map(reservationDisplayUsername)))
     )
   );
+}
+
+async function visibleModels(user: ReturnType<typeof requireUser>, catalog: ModelCatalog, identities: IdentityService) {
+  const targetIds = new Set<string>();
+  for (const target of catalog.listTargets()) if (await identities.canAccessTarget(user,target)) targetIds.add(target.id);
+  return catalog.listModels().map((model) => ({ ...model, targetIds: model.targetIds.filter((id) => targetIds.has(id)) })).filter((model) => model.targetIds.length > 0);
 }
 
 function rpcError(id: string | number | null | undefined, code: number, message: string, data?: unknown) {

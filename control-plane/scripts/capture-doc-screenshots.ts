@@ -32,7 +32,6 @@ const demoModels: ModelDefinition[] = [{
 }];
 const demoConfig: AppConfig = {
   port: 0,
-  sharedPassword: "docs-demo-password",
   cookieSecret: "docs-demo-cookie-secret",
   storage: { driver: "memory" },
   awsRegion: "us-east-1",
@@ -65,7 +64,9 @@ const demoConfig: AppConfig = {
   authMethods: [],
   updates: { enabled: false, repository: "cvalusek/NeurOn", checkIntervalSeconds: 900 }
 };
-const built = await buildApp(demoConfig, demoModels);
+const built = await buildApp(demoConfig, demoModels, {
+  developmentLocalAccounts: [{ username: "docs-user", password: "docs-demo-password", owner: true }]
+});
 const browser = await chromium.launch({ headless: true });
 
 try {

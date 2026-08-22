@@ -27,7 +27,8 @@ describePostgres("SQLite to PostgreSQL migration", () => {
     try {
       const first = await migrateSqliteToPostgres({ sqlitePath, pool: database.pool });
       expect(first.outcome).toBe("imported");
-      expect(Object.values(first.counts).every((count) => count === 0)).toBe(true);
+      expect(first.counts).toMatchObject({ roles: 9 });
+      expect(Object.entries(first.counts).filter(([name]) => name !== "roles").every(([, count]) => count === 0)).toBe(true);
       const second = await migrateSqliteToPostgres({ sqlitePath, pool: database.pool });
       expect(second).toEqual({ ...first, outcome: "verified-noop" });
     } finally {
@@ -55,7 +56,18 @@ describePostgres("SQLite to PostgreSQL migration", () => {
         modelCapabilities: 1,
         modelDeployments: 1,
         modelFavorites: 1,
-        assistantConfig: 1
+        assistantConfig: 1,
+        users: 1,
+        userIdentities: 1,
+        localCredentials: 1,
+        roles: 10,
+        userRoleAssignments: 2,
+        teams: 2,
+        teamHierarchy: 3,
+        teamMemberships: 1,
+        registrationInvitations: 1,
+        externalUserLinks: 1,
+        identityAuditEvents: 1
       });
       const migrated = await createReservationRepository({ driver: "postgres", connectionString: database.connectionString, maxConnections: 3 });
       expect(await migrated.repository.get(fixture.reservationId)).toMatchObject({
@@ -74,8 +86,15 @@ describePostgres("SQLite to PostgreSQL migration", () => {
       ]);
       expect(await migrated.modelMetadata.listCapabilities()).toMatchObject([{ modelId: "model-migrate", intelligence: 89, domains: { coding: 94 }, quantization: { format: "Q6", qualityRetentionPercent: 98.4 } }]);
       expect(await migrated.modelMetadata.listDeployments()).toMatchObject([{ targetId: "target-migrate", modelId: "model-migrate", performance: { decodeTokensPerSecond: 33 } }]);
-      expect(await migrated.modelFavorites.listForUser("clint")).toMatchObject([{ targetId: "target-migrate", modelId: "model-migrate" }]);
+      expect(await migrated.modelFavorites.listForUser("usr-clint")).toMatchObject([{ targetId: "target-migrate", modelId: "model-migrate" }]);
       expect(await migrated.assistantConfig.get()).toMatchObject({ targetId: "target-migrate", modelId: "model-migrate", reservationMinutes: 12, keepaliveMinutes: 5, requestTimeoutSeconds: 90, additionalInstructions: "Use migration fixture terminology." });
+      expect(await migrated.identities.getUser("usr-clint")).toMatchObject({ username: "clint", status: "active" });
+      expect(await migrated.identities.getLocalPasswordHash("usr-clint")).toBe("scrypt$fixture-password-hash");
+      expect(await migrated.identities.findIdentity("oidc", "work", "oidc-clint")).toMatchObject({ userId: "usr-clint", email: "clint@example.test" });
+      expect(await migrated.identities.listGlobalRolesForUser("usr-clint")).toEqual(expect.arrayContaining([expect.objectContaining({ id: "role_member" }), expect.objectContaining({ id: "role_fixture" })]));
+      expect(await migrated.identities.getRole("role_admin")).toMatchObject({ permissions: expect.arrayContaining(["fixture.custom_permission"]) });
+      expect(await migrated.identities.isUserInAnyTeam("usr-clint", ["team-parent"])).toBe(true);
+      expect(await migrated.identities.getExternalUserLink("litellm", "litellm-clint")).toMatchObject({ userId: "usr-clint", source: "rule" });
       await migrated.close();
 
       const rerun = await migrateSqliteToPostgres({ sqlitePath: fixture.sqlitePath, pool: database.pool });
@@ -143,9 +162,7 @@ describePostgres("SQLite to PostgreSQL migration", () => {
     const nonempty = await createPostgresTestSchema();
     try {
       await migratePostgresSchema(nonempty.pool);
-      await nonempty.pool.query(
-        "insert into api_keys (id, username, name, prefix, key_hash, created_at) values ('existing', 'user', 'name', 'prefix', 'hash', now())"
-      );
+      await nonempty.pool.query("insert into users (id, username, normalized_username, status, created_at, updated_at) values ('existing-user', 'user', 'user', 'active', now(), now())");
       await expect(migrateSqliteToPostgres({ sqlitePath: fixture.sqlitePath, pool: nonempty.pool })).rejects.toThrow("destination is nonempty");
     } finally {
       await nonempty.cleanup();
@@ -155,12 +172,24 @@ describePostgres("SQLite to PostgreSQL migration", () => {
     try {
       await migrateSqliteToPostgres({ sqlitePath: fixture.sqlitePath, pool: completed.pool });
       const sqliteHandle = await createReservationRepository({ driver: "sqlite", path: fixture.sqlitePath });
-      await sqliteHandle.apiKeys.create({ id: "key-added", username: "clint", name: "added", prefix: "prefix", keyHash: "hash-added", createdAt: fixture.endedAt });
+      const owner = await sqliteHandle.identities.getUserByUsername("clint");
+      await sqliteHandle.apiKeys.create({ id: "key-added", userId: owner!.id, username: "clint", name: "added", prefix: "prefix", keyHash: "hash-added", createdAt: fixture.endedAt });
       await sqliteHandle.close();
-      await expect(migrateSqliteToPostgres({ sqlitePath: fixture.sqlitePath, pool: completed.pool })).rejects.toThrow("destination is nonempty");
+      await expect(migrateSqliteToPostgres({ sqlitePath: fixture.sqlitePath, pool: completed.pool })).rejects.toThrow("different completed data migration");
     } finally {
       await completed.cleanup();
     }
+  });
+
+  it("refuses any different completed data migration even when both datasets are otherwise empty", async () => {
+    const sqlitePath = await createEmptySqlite();
+    const database = await createPostgresTestSchema();
+    try {
+      await migratePostgresSchema(database.pool);
+      await database.pool.query("insert into neuron_data_migrations (id,source_fingerprint,counts,fingerprints,completed_at) values ('different-migration','different','{}','{}',now())");
+      await expect(migrateSqliteToPostgres({ sqlitePath, pool: database.pool })).rejects.toThrow("different completed data migration");
+      expect((await database.pool.query<{ count: string }>("select count(*)::text as count from neuron_data_migrations")).rows[0].count).toBe("1");
+    } finally { await database.cleanup(); }
   });
 
   it("rolls the entire destination back when interrupted before commit", async () => {
@@ -174,7 +203,7 @@ describePostgres("SQLite to PostgreSQL migration", () => {
       })).rejects.toThrow("simulated interruption");
       for (const table of POSTGRES_DATA_TABLES) {
         const count = await database.pool.query<{ count: string }>(`select count(*)::text as count from ${table}`);
-        expect(count.rows[0].count, table).toBe("0");
+        expect(count.rows[0].count, table).toBe(table === "roles" ? "9" : "0");
       }
       const migrations = await database.pool.query<{ count: string }>("select count(*)::text as count from neuron_data_migrations");
       expect(migrations.rows[0].count).toBe("0");
@@ -188,7 +217,8 @@ describePostgres("SQLite to PostgreSQL migration", () => {
     const sqlitePath = path.join(directory, "unsafe.db");
     const handle = await createReservationRepository({ driver: "sqlite", path: sqlitePath });
     const now = new Date("2026-07-01T12:00:00Z");
-    await handle.repository.create({ id: "active", username: "clint", modelIds: [], targetIds: ["target"], createdAt: now, expiresAt: new Date("2027-01-01T00:00:00Z"), status: "active" });
+    await handle.identities.createUser({ id: "usr-clint", username: "clint", status: "active", createdAt: now, updatedAt: now });
+    await handle.repository.create({ id: "active", userId: "usr-clint", username: "clint", modelIds: [], targetIds: ["target"], createdAt: now, expiresAt: new Date("2027-01-01T00:00:00Z"), status: "active" });
     await handle.targetProvisioningJobs.create({
       id: "running", status: "running", providerId: "provider", providerType: "runpod", targetId: "target",
       targetDraft: { id: "target", displayName: "Target", provider: "runpod", providerId: "provider", modelIds: [] }, createdResources: [], createdAt: now, updatedAt: now
@@ -237,15 +267,25 @@ async function createPopulatedSqlite(): Promise<{ sqlitePath: string; reservatio
   const handle = await createReservationRepository({ driver: "sqlite", path: sqlitePath });
   const createdAt = new Date("2026-07-01T12:30:00-05:00");
   const endedAt = new Date("2026-07-01T13:15:30-05:00");
+  await handle.identities.createUser({ id: "usr-clint", username: "clint", status: "active", createdAt, updatedAt: createdAt });
+  await handle.identities.setLocalPasswordHash("usr-clint", "scrypt$fixture-password-hash");
+  await handle.identities.saveIdentity({ id: "identity-oidc", userId: "usr-clint", providerType: "oidc", providerId: "work", subject: "oidc-clint", username: "clint", email: "clint@example.test", createdAt, lastSeenAt: endedAt });
+  await handle.identities.createRole({ id: "role_fixture", name: "Fixture role", description: "Migration fixture", scope: "global", permissions: ["reports.read_own"], createdAt, updatedAt: endedAt });
+  await handle.identities.assignGlobalRole("usr-clint", "role_fixture");
+  await handle.identities.createTeam({ id: "team-parent", name: "Engineering", createdAt, updatedAt: createdAt });
+  await handle.identities.createTeam({ id: "team-child", name: "Platform", parentTeamId: "team-parent", createdAt, updatedAt: endedAt });
+  await handle.identities.setTeamMembership({ teamId: "team-child", userId: "usr-clint", roleId: "role_team_member", source: "oidc", sourceReference: "work:platform", createdAt });
+  await handle.identities.createInvitation({ id: "invite-fixture", tokenHash: "opaque-invitation-hash", userId: "usr-clint", intendedUsername: "clint", initialRoleId: "role_member", expiresAt: new Date("2027-01-01T00:00:00Z"), maxUses: 1, createdAt });
+  await handle.identities.saveExternalUserLink({ integration: "litellm", externalSubject: "litellm-clint", userId: "usr-clint", source: "rule", createdAt, lastSeenAt: endedAt });
   await handle.reservationProfiles.create({
-    id: "profile-migrate", username: "clint", name: "Migration profile", selections: [{ targetId: "target-migrate", modelIds: ["model-migrate"] }], createdAt, updatedAt: endedAt
+    id: "profile-migrate", userId: "usr-clint", username: "clint", name: "Migration profile", selections: [{ targetId: "target-migrate", modelIds: ["model-migrate"] }], createdAt, updatedAt: endedAt
   });
   const reservation = await handle.repository.create({
-    id: "reservation-migrate", username: "clint", apiKeyName: "migration-key", profileId: "profile-migrate", profileName: "Migration profile",
+    id: "reservation-migrate", userId: "usr-clint", username: "clint", apiKeyName: "migration-key", profileId: "profile-migrate", profileName: "Migration profile",
     modelIds: ["model-migrate"], targetIds: ["target-migrate"], targetSelections: [{ targetId: "target-migrate", modelIds: ["model-migrate"] }],
     createdAt, expiresAt: endedAt, endedAt, status: "failed", failureMessage: "terminal failure", synthetic: true
   });
-  await handle.apiKeys.create({ id: "key-migrate", username: "clint", name: "migration-key", prefix: "sk-neuron-redacted", keyHash: "opaque-hash-value", createdAt });
+  await handle.apiKeys.create({ id: "key-migrate", userId: "usr-clint", username: "clint", name: "migration-key", prefix: "sk-neuron-redacted", keyHash: "opaque-hash-value", createdAt });
   await handle.authMethods.create({
     id: "github-migrate", displayName: "GitHub", type: "github", enabled: true,
     config: { github: { clientId: "client-id", clientSecret: "auth-secret-value", allowedOrganizations: ["example"] } }
@@ -256,6 +296,7 @@ async function createPopulatedSqlite(): Promise<{ sqlitePath: string; reservatio
   });
   await handle.capacityTargets.create({
     id: "target-migrate", displayName: "Target", provider: "runpod", providerId: "provider-migrate", modelIds: ["model-migrate"],
+    audience: { scope: "users", userIds: ["usr-clint"] },
     runpod: { podId: "opaque-pod-id", runtimePort: 8080, create: { custom: [1, null, true] } }
   });
   await handle.targetProvisioningJobs.create({
@@ -272,9 +313,15 @@ async function createPopulatedSqlite(): Promise<{ sqlitePath: string; reservatio
   await handle.targetActivations.closeReservationsForActivation("activation-migrate", endedAt);
   await handle.modelMetadata.upsertCapability({ modelId: "model-migrate", intelligence: 89, domains: { coding: 94 }, quantization: { format: "Q6", qualityRetentionPercent: 98.4 }, provenance: { source: "manual", version: "fixture-v1" } }, createdAt);
   await handle.modelMetadata.upsertDeployment({ targetId: "target-migrate", modelId: "model-migrate", performance: { decodeTokensPerSecond: 33, prefillTokensPerSecond: 700, sampleCount: 3 }, provenance: { source: "NeurOn direct benchmark", version: "neuron-speed-v2-50k" } }, endedAt);
-  await handle.modelFavorites.add({ username: "clint", targetId: "target-migrate", modelId: "model-migrate", createdAt });
+  await handle.modelFavorites.add({ userId: "usr-clint", username: "clint", targetId: "target-migrate", modelId: "model-migrate", createdAt });
   await handle.assistantConfig.save({ targetId: "target-migrate", modelId: "model-migrate", reservationMinutes: 12, keepaliveMinutes: 5, requestTimeoutSeconds: 90, additionalInstructions: "Use migration fixture terminology.", updatedAt: endedAt });
   await handle.close();
+  const sqlite = new Database(sqlitePath);
+  const adminPermissions = JSON.parse((sqlite.prepare("select permissions from roles where id='role_admin'").get() as { permissions: string }).permissions) as string[];
+  sqlite.prepare("update roles set permissions=? where id='role_admin'").run(JSON.stringify([...adminPermissions, "fixture.custom_permission"]));
+  sqlite.prepare("insert into identity_audit_events (id,actor_user_id,action,subject_type,subject_id,details,created_at) values (?,?,?,?,?,?,?)")
+    .run("audit-fixture", "usr-clint", "fixture.created", "user", "usr-clint", JSON.stringify({ private: false }), createdAt.toISOString());
+  sqlite.close();
   return { sqlitePath, reservationId: reservation.id, endedAt };
 }
 

@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import { customAlphabet } from "nanoid";
 import type { ApiKeyRepository } from "../domain/interfaces.js";
 import type { ApiKey, AuthenticatedUser } from "../domain/types.js";
+import type { IdentityService } from "./IdentityService.js";
 
 export interface CreatedApiKey {
   key: ApiKey;
@@ -9,9 +10,10 @@ export interface CreatedApiKey {
 }
 
 export class ApiKeyService {
-  constructor(private readonly apiKeys: ApiKeyRepository) {}
+  constructor(private readonly apiKeys: ApiKeyRepository, private readonly identities?: IdentityService) {}
 
   async createForUser(user: AuthenticatedUser, input: { name: string }): Promise<CreatedApiKey> {
+    if (this.identities && !this.identities.hasPermission(user, "api_keys.manage_own")) throw new Error("API key management permission is required");
     const name = input.name.trim();
     if (!name) throw new Error("API key name is required");
     if (name.length > 80) throw new Error("API key name must be 80 characters or fewer");
@@ -21,6 +23,7 @@ export class ApiKeyService {
     const token = `sk-neuron-${id}-${secret}`;
     const key = await this.apiKeys.create({
       id,
+      userId: user.id,
       username: user.username,
       name,
       prefix: `sk-neuron-${id}`,
@@ -31,18 +34,20 @@ export class ApiKeyService {
   }
 
   async listForUser(user: AuthenticatedUser): Promise<ApiKey[]> {
-    return this.apiKeys.listForUser(user.username);
+    if (this.identities && !this.identities.hasPermission(user, "api_keys.manage_own")) throw new Error("API key management permission is required");
+    return this.apiKeys.listForUser(user.id);
   }
 
   async revokeForUser(user: AuthenticatedUser, id: string): Promise<boolean> {
-    return this.apiKeys.deleteForUser(id, user.username);
+    if (this.identities && !this.identities.hasPermission(user, "api_keys.manage_own")) throw new Error("API key management permission is required");
+    return this.apiKeys.deleteForUser(id, user.id);
   }
 }
 
 export async function authenticateApiKey(
   apiKeys: ApiKeyRepository,
   token: string,
-  isAdmin: (username: string) => boolean
+  resolveUser: (userId: string) => Promise<AuthenticatedUser | undefined>
 ): Promise<AuthenticatedUser | undefined> {
   const id = parseTokenId(token);
   if (!id) return undefined;
@@ -52,7 +57,8 @@ export async function authenticateApiKey(
   const expected = Buffer.from(key.keyHash);
   if (actual.length !== expected.length || !crypto.timingSafeEqual(actual, expected)) return undefined;
   await apiKeys.touchLastUsedAt(key.id, new Date());
-  return { username: key.username, isAdmin: isAdmin(key.username), apiKeyName: key.name };
+  const user = await resolveUser(key.userId);
+  return user ? { ...user, apiKeyName: key.name } : undefined;
 }
 
 function parseTokenId(token: string): string | undefined {

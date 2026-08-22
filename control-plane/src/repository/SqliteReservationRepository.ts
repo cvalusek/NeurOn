@@ -8,6 +8,7 @@ import { parseReservationTargetSelections } from "../domain/reservationSelection
 
 interface ReservationRow {
   id: string;
+  user_id: string | null;
   username: string;
   api_key_name: string | null;
   profile_id: string | null;
@@ -40,10 +41,10 @@ export class SqliteReservationRepository implements ReservationRepository {
     this.db
       .prepare(
         `insert into reservations (
-          id, username, api_key_name, profile_id, profile_name, model_ids, target_ids, target_selections, created_at, expires_at,
+          id, user_id, username, api_key_name, profile_id, profile_name, model_ids, target_ids, target_selections, created_at, expires_at,
           keepalive_minutes, ended_at, status, failure_message, synthetic
         ) values (
-          @id, @username, @apiKeyName, @profileId, @profileName, @modelIds, @targetIds, @targetSelections, @createdAt, @expiresAt,
+          @id, @userId, @username, @apiKeyName, @profileId, @profileName, @modelIds, @targetIds, @targetSelections, @createdAt, @expiresAt,
           @keepaliveMinutes, @endedAt, @status, @failureMessage, @synthetic
         )`
       )
@@ -68,6 +69,7 @@ export class SqliteReservationRepository implements ReservationRepository {
     this.db
       .prepare(
         `update reservations set
+          user_id = @userId,
           username = @username,
           api_key_name = @apiKeyName,
           profile_id = @profileId,
@@ -116,6 +118,7 @@ export class SqliteReservationRepository implements ReservationRepository {
     this.db.exec(`
       create table if not exists reservations (
         id text primary key,
+        user_id text,
         username text not null,
         api_key_name text,
         profile_id text,
@@ -148,12 +151,16 @@ export class SqliteReservationRepository implements ReservationRepository {
     if (!columns.some((column) => column.name === "target_selections")) {
       this.db.exec("alter table reservations add column target_selections text");
     }
+    if (!columns.some((column) => column.name === "user_id")) {
+      this.db.exec("alter table reservations add column user_id text");
+    }
   }
 }
 
 function toSqlParams(reservation: Reservation) {
   return {
     id: reservation.id,
+    userId: reservation.userId ?? null,
     username: reservation.username,
     apiKeyName: reservation.apiKeyName ?? null,
     profileId: reservation.profileId ?? null,
@@ -174,6 +181,7 @@ function toSqlParams(reservation: Reservation) {
 function fromRow(row: ReservationRow): Reservation {
   return {
     id: row.id,
+    userId: row.user_id ?? undefined,
     username: row.username,
     apiKeyName: row.api_key_name ?? undefined,
     profileId: row.profile_id ?? undefined,

@@ -3,12 +3,109 @@ export type RuntimeState = "stopped" | "starting" | "healthy" | "stopping" | "fa
 export type DesiredState = "on" | "off";
 
 export interface AuthenticatedUser {
+  id: string;
   username: string;
   isAdmin: boolean;
+  permissions: string[];
+  sessionVersion: number;
   apiKeyName?: string;
 }
 
-export type AuthMethodType = "github" | "oidc";
+export type AuthMethodType = "local" | "github" | "oidc";
+
+export type UserStatus = "active" | "disabled";
+export type RoleScope = "global" | "team";
+
+export interface UserAccount {
+  id: string;
+  username: string;
+  normalizedUsername: string;
+  displayName?: string;
+  status: UserStatus;
+  sessionVersion: number;
+  mergedIntoUserId?: string;
+  createdAt: Date;
+  updatedAt: Date;
+  lastLoginAt?: Date;
+}
+
+export interface UserIdentity {
+  id: string;
+  userId: string;
+  providerType: "local" | "github" | "oidc";
+  providerId: string;
+  subject: string;
+  username?: string;
+  email?: string;
+  createdAt: Date;
+  lastSeenAt: Date;
+}
+
+export interface Role {
+  id: string;
+  name: string;
+  description?: string;
+  scope: RoleScope;
+  permissions: string[];
+  systemKey?: string;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface Team {
+  id: string;
+  name: string;
+  description?: string;
+  parentTeamId?: string;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface TeamMembership {
+  teamId: string;
+  userId: string;
+  roleId: string;
+  source: "manual" | "oidc";
+  sourceReference?: string;
+  createdAt: Date;
+}
+
+export interface RegistrationInvitation {
+  id: string;
+  tokenHash: string;
+  userId?: string;
+  intendedUsername?: string;
+  initialRoleId?: string;
+  createdByUserId?: string;
+  expiresAt: Date;
+  maxUses: number;
+  useCount: number;
+  revokedAt?: Date;
+  createdAt: Date;
+}
+
+export interface ExternalUserLink {
+  integration: "litellm" | string;
+  externalSubject: string;
+  userId: string;
+  source: "metadata" | "rule" | "admin";
+  createdAt: Date;
+  lastSeenAt: Date;
+}
+
+export interface UserMergePreview {
+  sourceUser: Pick<UserAccount, "id" | "username" | "status">;
+  targetUser: Pick<UserAccount, "id" | "username" | "status">;
+  counts: {
+    reservations: number;
+    profiles: number;
+    apiKeys: number;
+    favorites: number;
+    identities: number;
+    teamMemberships: number;
+    externalUserLinks: number;
+  };
+}
 
 export interface GitHubAuthMethodConfig {
   clientId: string;
@@ -31,6 +128,17 @@ export interface OidcAuthMethodConfig {
   groupsClaim?: string;
   allowedUsers?: string[];
   allowedGroups?: string[];
+  teamMembershipRules?: OidcTeamMembershipRule[];
+}
+
+export interface OidcTeamMembershipRule {
+  id: string;
+  claim: string;
+  match: "exact" | "regex";
+  value: string;
+  teamId: string;
+  roleId: string;
+  enabled?: boolean;
 }
 
 export interface AuthMethod {
@@ -39,6 +147,9 @@ export interface AuthMethod {
   type: AuthMethodType;
   enabled: boolean;
   config: {
+    local?: {
+      registrationEnabled?: boolean;
+    };
     github?: GitHubAuthMethodConfig;
     oidc?: OidcAuthMethodConfig;
     [key: string]: unknown;
@@ -47,6 +158,7 @@ export interface AuthMethod {
 
 export interface ApiKey {
   id: string;
+  userId: string;
   username: string;
   name: string;
   prefix: string;
@@ -57,6 +169,7 @@ export interface ApiKey {
 
 export interface Reservation {
   id: string;
+  userId?: string;
   username: string;
   apiKeyName?: string;
   profileId?: string;
@@ -81,6 +194,7 @@ export interface ReservationProfileSelection {
 
 export interface ReservationProfile {
   id: string;
+  userId: string;
   username: string;
   name: string;
   description?: string;
@@ -301,6 +415,10 @@ export interface CapacityTarget {
   costEstimate?: TargetCostEstimateConfig;
   hassleOff?: HassleOffTargetPolicy;
   activationPolicy?: TargetActivationPolicy;
+  audience?:
+    | { scope: "global" }
+    | { scope: "teams"; teamIds: string[] }
+    | { scope: "users"; userIds: string[] };
 }
 
 /** Singleton durable configuration for NeurOn's in-application assistant. */
@@ -420,6 +538,7 @@ export interface StoredModelDeploymentMetadata extends ModelDeploymentMetadata {
 }
 
 export interface ModelFavorite {
+  userId: string;
   username: string;
   targetId: string;
   modelId: string;
@@ -502,8 +621,6 @@ export interface CapacityProviderResource {
 export interface AppConfig {
   port: number;
   publicBaseUrl?: string;
-  sharedPassword?: string;
-  sharedPasswordEnabled?: boolean;
   cookieSecret?: string;
   storage: StorageConfig;
   awsRegion: string;

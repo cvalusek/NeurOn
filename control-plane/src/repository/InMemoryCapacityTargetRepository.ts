@@ -33,4 +33,11 @@ export class InMemoryCapacityTargetRepository implements CapacityTargetRepositor
   async delete(id: string): Promise<boolean> {
     return this.targets.delete(id);
   }
+
+  reassignAudienceUser(sourceUserId: string, targetUserId: string): void {
+    for (const target of this.targets.values()) {
+      if (target.audience?.scope !== "users" || !target.audience.userIds.includes(sourceUserId)) continue;
+      target.audience.userIds = Array.from(new Set(target.audience.userIds.map((id) => id === sourceUserId ? targetUserId : id)));
+    }
+  }
 }

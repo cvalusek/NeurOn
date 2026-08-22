@@ -69,7 +69,8 @@ describe("LiteLlmSpendLogsTrafficSource", () => {
       prompt_tokens: 1000,
       completion_tokens: 100,
       cache_hit: "false",
-      status: "success"
+      status: "success",
+      user: "usr_alice"
     }] }), { status: 200 })));
 
     const source = new LiteLlmSpendLogsTrafficSource("http://litellm.test:4000", "secret", 300);
@@ -78,6 +79,7 @@ describe("LiteLlmSpendLogsTrafficSource", () => {
     expect(events).toEqual([{
       modelId: "prefer/qwen",
       seenAt: new Date("2026-06-26T17:48:01.000Z"),
+      externalUserSubject: "usr_alice",
       requestId: "request-1",
       performance: { decodeTokensPerSecond: 50, prefillTokensPerSecond: 1000, timeToFirstTokenSeconds: 1 }
     }]);

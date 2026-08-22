@@ -1,9 +1,9 @@
 import { buildApp } from "./app.js";
-import { loadConfig } from "./config/loadConfig.js";
+import { loadConfig, loadStorageConfig, resolveStorageOperationLockPath } from "./config/loadConfig.js";
 import { StorageOperationLock } from "./repository/StorageOperationLock.js";
 
 const storageLock = await StorageOperationLock.acquire(
-  process.env.STORAGE_OPERATION_LOCK_PATH ?? "data/neuron-storage.lock",
+  resolveStorageOperationLockPath(loadStorageConfig(), process.env.STORAGE_OPERATION_LOCK_PATH),
   "neuron-app"
 );
 

@@ -1,12 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
-import { buildApp } from "../app.js";
-import { SharedPasswordAuthProvider } from "../auth/SharedPasswordAuthProvider.js";
+import { buildApp as buildProductionApp, type BuildAppOptions } from "../app.js";
 import type { AppConfig, ModelDefinition } from "../domain/types.js";
 import { shouldBootstrapRuntimeModels } from "../services/RuntimeModelDiscovery.js";
 
 const config: AppConfig = {
   port: 0,
-  sharedPassword: "secret",
   storage: { driver: "memory" },
   awsRegion: "us-east-1",
   litellmTrafficPollSeconds: 0,
@@ -38,6 +36,17 @@ const config: AppConfig = {
 
 const models: ModelDefinition[] = [{ id: "m1", displayName: "M1", aliases: ["m1"], targetIds: ["t1"], contextWindowTokens: 64_000, technicalCapabilities: [{ label: "tools" }] }];
 
+async function buildApp(appConfig: AppConfig, appModels: ModelDefinition[], options: BuildAppOptions = {}) {
+  const ownerByDefault = appConfig.adminUsers.length === 0;
+  return buildProductionApp(appConfig, appModels, {
+    ...options,
+    developmentLocalAccounts: options.developmentLocalAccounts ?? [
+      { username: "actual", password: "local-test-secret", owner: ownerByDefault || appConfig.adminUsers.includes("actual") },
+      { username: "other", password: "local-test-secret", owner: ownerByDefault || appConfig.adminUsers.includes("other") }
+    ]
+  });
+}
+
 describe("model selection guidance", () => {
   it("returns authenticated deployment facts with target cost and explicit unknowns", async () => {
     process.env.USE_FAKE_PROVIDER = "true";
@@ -50,7 +59,7 @@ describe("model selection guidance", () => {
         deployments: [{ targetId: "t1", modelId: "m1", contextWindowTokens: 64_000 }]
       }
     }, models);
-    const auth = { authorization: `Basic ${Buffer.from("actual:secret").toString("base64")}` };
+    const auth = { authorization: `Basic ${Buffer.from("actual:local-test-secret").toString("base64")}` };
     try {
       const unauthenticated = await app.inject({ method: "GET", url: "/api/model-selection" });
       const response = await app.inject({ method: "GET", url: "/api/model-selection", headers: auth });
@@ -76,7 +85,7 @@ describe("model selection guidance", () => {
       maintenanceMode: true,
       modelSelectionCatalog: { schemaVersion: 1, models: [{ modelId: "m1", domains: { coding: 90 } }], deployments: [] }
     }, models);
-    const auth = { authorization: `Basic ${Buffer.from("actual:secret").toString("base64")}` };
+    const auth = { authorization: `Basic ${Buffer.from("actual:local-test-secret").toString("base64")}` };
     try {
       expect((await app.inject({ method: "GET", url: "/api/profile-advisor/status", headers: auth })).json()).toMatchObject({ enabled: false, reason: "maintenance_mode" });
       const response = await app.inject({ method: "POST", url: "/api/profile-advisor", headers: auth, payload: { request: "Long coding sessions with 128K context" } });
@@ -95,7 +104,7 @@ describe("model selection guidance", () => {
   it("stores independent assistant configuration and exposes its own screen plus the global drawer", async () => {
     process.env.USE_FAKE_PROVIDER = "true";
     const { app } = await buildApp({ ...config, adminUsers: ["actual"] }, models);
-    const auth = { authorization: `Basic ${Buffer.from("actual:secret").toString("base64")}` };
+    const auth = { authorization: `Basic ${Buffer.from("actual:local-test-secret").toString("base64")}` };
     try {
       expect((await app.inject({ method: "GET", url: "/api/profile-advisor/status", headers: auth })).json()).toMatchObject({ enabled: false, backend: null });
       const saved = await app.inject({ method: "PUT", url: "/api/admin/assistant-config", headers: auth, payload: { targetId: "t1", modelId: "m1", reservationMinutes: 12, keepaliveMinutes: 5, requestTimeoutSeconds: 90, additionalInstructions: "Use our internal team terminology." } });
@@ -130,7 +139,7 @@ describe("model selection guidance", () => {
         models: [{ id: "m1", displayName: "M1", aliases: ["fast"], contextWindowTokens: 65_536 }]
       }]
     }, models);
-    const auth = { authorization: `Basic ${Buffer.from("actual:secret").toString("base64")}` };
+    const auth = { authorization: `Basic ${Buffer.from("actual:local-test-secret").toString("base64")}` };
     try {
       const profile = await app.inject({
         method: "POST",
@@ -215,7 +224,7 @@ describe("maintenance mode", () => {
         failSafeTestTargetId: "test"
       }
     }, models);
-    const auth = { authorization: `Basic ${Buffer.from("actual:secret").toString("base64")}` };
+    const auth = { authorization: `Basic ${Buffer.from("actual:local-test-secret").toString("base64")}` };
     const health = await app.inject({ method: "GET", url: "/healthz" });
     const mutation = await app.inject({ method: "POST", url: "/api/reservations", headers: auth, payload: { modelIds: ["m1"] } });
     const home = await app.inject({ method: "GET", url: "/", headers: auth });
@@ -236,7 +245,7 @@ describe("API authentication context", () => {
   it("does not render admin navigation for non-admin users", async () => {
     process.env.USE_FAKE_PROVIDER = "true";
     const { app } = await buildApp({ ...config, adminUsers: ["actual"] }, models);
-    const auth = { authorization: `Basic ${Buffer.from("other:secret").toString("base64")}` };
+    const auth = { authorization: `Basic ${Buffer.from("other:local-test-secret").toString("base64")}` };
 
     const response = await app.inject({ method: "GET", url: "/welcome", headers: auth });
     await app.close();
@@ -267,30 +276,116 @@ describe("API authentication context", () => {
     expect(String(response.headers["set-cookie"])).toContain("Expires=Thu, 01 Jan 1970 00:00:00 GMT");
   });
 
-  it("disables shared-password UI and Basic auth while preserving signed sessions", async () => {
+  it("uses per-user local credentials and preserves signed sessions", async () => {
     process.env.USE_FAKE_PROVIDER = "true";
-    const disabledConfig = { ...config, sharedPasswordEnabled: false, sharedPassword: undefined, cookieSecret: "test-cookie-secret", adminUsers: ["actual"] };
-    const { app } = await buildApp(disabledConfig, models);
+    const localConfig = { ...config, cookieSecret: "test-cookie-secret", adminUsers: ["actual"] };
+    const { app } = await buildApp(localConfig, models);
 
     const login = await app.inject({ method: "GET", url: "/login" });
-    const passwordAttempt = await app.inject({ method: "POST", url: "/login", payload: { username: "actual", password: "secret" } });
+    const invalidPassword = await app.inject({ method: "POST", url: "/login", payload: { username: "actual", password: "wrong-password" } });
+    const passwordAttempt = await app.inject({ method: "POST", url: "/login", payload: { username: "actual", password: "local-test-secret" } });
     const basicAttempt = await app.inject({
       method: "GET",
       url: "/",
-      headers: { authorization: `Basic ${Buffer.from("actual:secret").toString("base64")}` }
+      headers: { authorization: `Basic ${Buffer.from("actual:local-test-secret").toString("base64")}` }
     });
-    const sessionCookie = new SharedPasswordAuthProvider(undefined, ["actual"], "test-cookie-secret").createCookie("actual");
-    const sessionRequest = await app.inject({ method: "GET", url: "/welcome", headers: { cookie: `llm_control_auth=${sessionCookie}` } });
+    for (let attempt = 0; attempt < 8; attempt += 1) {
+      expect((await app.inject({
+        method: "GET",
+        url: "/api/models",
+        headers: { authorization: `Basic ${Buffer.from("actual:wrong-password").toString("base64")}` }
+      })).statusCode).toBe(401);
+    }
+    const throttledBasicAttempt = await app.inject({
+      method: "GET",
+      url: "/api/models",
+      headers: { authorization: `Basic ${Buffer.from("actual:local-test-secret").toString("base64")}` }
+    });
+    const sessionCookie = String(passwordAttempt.headers["set-cookie"]).split(";")[0];
+    const sessionRequest = await app.inject({ method: "GET", url: "/welcome", headers: { cookie: sessionCookie } });
     await app.close();
 
     expect(login.statusCode).toBe(200);
-    expect(login.body).not.toContain('<form method="post" action="/login">');
-    expect(login.body).toContain("No interactive sign-in methods are enabled");
-    expect(passwordAttempt.statusCode).toBe(403);
-    expect(passwordAttempt.body).toContain("Shared password authentication is disabled");
-    expect(basicAttempt.statusCode).toBe(302);
-    expect(basicAttempt.headers.location).toBe("/login");
+    expect(login.body).toContain('<form method="post" action="/login">');
+    expect(invalidPassword.statusCode).toBe(401);
+    expect(passwordAttempt.statusCode).toBe(302);
+    expect(basicAttempt.statusCode).not.toBe(401);
+    expect(throttledBasicAttempt.statusCode).toBe(401);
     expect(sessionRequest.statusCode).toBe(200);
+  });
+
+  it("can disable local password login and invitation registration without disabling external auth", async () => {
+    const { app, identityService } = await buildApp({ ...config, cookieSecret: "test-cookie-secret", adminUsers: ["actual"] }, models, { developmentLocalAccounts: [{ username: "actual", password: "local-test-secret", owner: true }] });
+    const auth = { authorization: `Basic ${Buffer.from("actual:local-test-secret").toString("base64")}` };
+    try {
+      const recovery = await identityService.createInvitation(undefined, { intendedUsername: "recovery-owner", initialRoleId: "role_owner" });
+      const update = await app.inject({ method: "POST", url: "/admin/auth/local/update", headers: auth, payload: { id: "local", type: "local", displayName: "Username and password" } });
+      expect(update.statusCode).toBe(302);
+
+      const login = await app.inject({ method: "GET", url: "/login" });
+      expect(login.body).toContain("Username and password sign-in is disabled");
+      expect(login.body).not.toContain('action="/login"');
+      expect((await app.inject({ method: "GET", url: "/api/model-selection", headers: auth })).statusCode).toBe(401);
+      expect((await app.inject({ method: "GET", url: "/register" })).body).toContain("Only a one-time Owner recovery link can be used");
+      const recovered = await app.inject({ method: "POST", url: "/register", payload: { token: recovery.token, username: "recovery-owner", password: "recovery-password", confirmPassword: "recovery-password" } });
+      expect(recovered.statusCode).toBe(302);
+      const recoveredCookie = String(recovered.headers["set-cookie"]).split(";")[0];
+      expect((await app.inject({ method: "GET", url: "/admin/users", headers: { cookie: recoveredCookie } })).statusCode).toBe(200);
+    } finally { await app.close(); }
+  });
+
+  it("registers invited users and merges duplicate accounts through the admin API", async () => {
+    process.env.USE_FAKE_PROVIDER = "true";
+    const accountConfig = { ...config, cookieSecret: "test-cookie-secret", adminUsers: ["actual"] };
+    const { app } = await buildApp(accountConfig, models);
+    const adminAuth = { authorization: `Basic ${Buffer.from("actual:local-test-secret").toString("base64")}` };
+    const nonAdminAuth = { authorization: `Basic ${Buffer.from("other:local-test-secret").toString("base64")}` };
+
+    try {
+      expect((await app.inject({ method: "GET", url: "/api/admin/users", headers: nonAdminAuth })).statusCode).toBe(403);
+
+      for (const username of ["duplicate-github", "duplicate-oidc"]) {
+        const invitationResponse = await app.inject({
+          method: "POST",
+          url: "/api/admin/users/invitations",
+          headers: adminAuth,
+          payload: { intendedUsername: username, initialRoleId: "role_member", expiresInMinutes: 30 }
+        });
+        expect(invitationResponse.statusCode).toBe(201);
+        expect(invitationResponse.json().invitation).not.toHaveProperty("tokenHash");
+        const registration = await app.inject({
+          method: "POST",
+          url: "/register",
+          payload: { token: invitationResponse.json().token, username, password: `${username}-password`, confirmPassword: `${username}-password` }
+        });
+        expect(registration.statusCode).toBe(302);
+      }
+
+      const sourceAuth = { authorization: `Basic ${Buffer.from("duplicate-github:duplicate-github-password").toString("base64")}` };
+      const targetAuth = { authorization: `Basic ${Buffer.from("duplicate-oidc:duplicate-oidc-password").toString("base64")}` };
+      const profile = await app.inject({
+        method: "POST",
+        url: "/api/reservation-profiles",
+        headers: sourceAuth,
+        payload: { name: "Preserved profile", selections: [{ targetId: "t1", modelIds: ["m1"] }] }
+      });
+      expect(profile.statusCode).toBe(201);
+
+      const users = (await app.inject({ method: "GET", url: "/api/admin/users", headers: adminAuth })).json().users as Array<{ id: string; username: string }>;
+      const source = users.find((user) => user.username === "duplicate-github")!;
+      const targetUser = users.find((user) => user.username === "duplicate-oidc")!;
+      const preview = await app.inject({ method: "POST", url: "/api/admin/users/merge/preview", headers: adminAuth, payload: { sourceUserId: source.id, targetUserId: targetUser.id } });
+      expect(preview.json()).toMatchObject({ counts: { profiles: 1 } });
+      const merged = await app.inject({ method: "POST", url: "/api/admin/users/merge", headers: adminAuth, payload: { sourceUserId: source.id, targetUserId: targetUser.id, confirm: "MERGE" } });
+      expect(merged.statusCode).toBe(200);
+
+      expect((await app.inject({ method: "GET", url: "/api/reservation-profiles", headers: sourceAuth })).statusCode).toBe(401);
+      const targetProfiles = await app.inject({ method: "GET", url: "/api/reservation-profiles", headers: targetAuth });
+      expect(targetProfiles.statusCode).toBe(200);
+      expect(targetProfiles.json().reservationProfiles).toMatchObject([{ name: "Preserved profile", userId: targetUser.id }]);
+    } finally {
+      await app.close();
+    }
   });
 
   it("uses the authenticated username instead of POST body username", async () => {
@@ -299,7 +394,7 @@ describe("API authentication context", () => {
     const response = await app.inject({
       method: "POST",
       url: "/api/reservations",
-      headers: { authorization: `Basic ${Buffer.from("actual:secret").toString("base64")}` },
+      headers: { authorization: `Basic ${Buffer.from("actual:local-test-secret").toString("base64")}` },
       payload: { username: "spoofed", modelIds: ["m1"], durationMinutes: 10 }
     });
     await app.close();
@@ -310,7 +405,7 @@ describe("API authentication context", () => {
   it("creates reservation profiles and starts reservations from them", async () => {
     process.env.USE_FAKE_PROVIDER = "true";
     const { app } = await buildApp(config, models);
-    const auth = { authorization: `Basic ${Buffer.from("actual:secret").toString("base64")}` };
+    const auth = { authorization: `Basic ${Buffer.from("actual:local-test-secret").toString("base64")}` };
 
     const createdProfile = await app.inject({
       method: "POST",
@@ -361,7 +456,7 @@ describe("API authentication context", () => {
       { id: "m3", displayName: "M3", aliases: ["m3"], targetIds: ["t2"] }
     ];
     const { app } = await buildApp(multiConfig, multiModels);
-    const auth = { authorization: `Basic ${Buffer.from("actual:secret").toString("base64")}` };
+    const auth = { authorization: `Basic ${Buffer.from("actual:local-test-secret").toString("base64")}` };
     const createdProfile = await app.inject({
       method: "POST",
       url: "/api/reservation-profiles",
@@ -390,7 +485,7 @@ describe("API authentication context", () => {
       { id: "m2", displayName: "M2", aliases: ["m2"], targetIds: ["t1"] }
     ];
     const { app } = await buildApp({ ...config, capacityTargets: [targetWithChoices] }, choiceModels);
-    const auth = { authorization: `Basic ${Buffer.from("actual:secret").toString("base64")}` };
+    const auth = { authorization: `Basic ${Buffer.from("actual:local-test-secret").toString("base64")}` };
     const response = await app.inject({ method: "POST", url: "/api/reservation-profiles", headers: auth, payload: { name: "Incomplete", selections: [{ targetId: "t1", modelIds: [] }] } });
     await app.close();
     expect(response.statusCode).toBe(400);
@@ -400,7 +495,7 @@ describe("API authentication context", () => {
   it("serves a profiles page for the current user's reservation profiles", async () => {
     process.env.USE_FAKE_PROVIDER = "true";
     const { app } = await buildApp(config, models);
-    const auth = { authorization: `Basic ${Buffer.from("actual:secret").toString("base64")}` };
+    const auth = { authorization: `Basic ${Buffer.from("actual:local-test-secret").toString("base64")}` };
     const created = await app.inject({
       method: "POST",
       url: "/api/reservation-profiles",
@@ -455,7 +550,7 @@ describe("API authentication context", () => {
   it("creates reservation profiles from the profiles page and returns there", async () => {
     process.env.USE_FAKE_PROVIDER = "true";
     const { app } = await buildApp(config, models);
-    const auth = { authorization: `Basic ${Buffer.from("actual:secret").toString("base64")}` };
+    const auth = { authorization: `Basic ${Buffer.from("actual:local-test-secret").toString("base64")}` };
 
     const response = await app.inject({
       method: "POST",
@@ -492,18 +587,18 @@ describe("API authentication context", () => {
     const response = await app.inject({
       method: "POST",
       url: "/api/reservations",
-      headers: { authorization: `Basic ${Buffer.from("actual:secret").toString("base64")}` },
+      headers: { authorization: `Basic ${Buffer.from("actual:local-test-secret").toString("base64")}` },
       payload: { modelIds: ["m1"], targetIds: ["t1"], durationMinutes: 10 }
     });
     const page = await app.inject({
       method: "GET",
       url: `/reservations/${response.json().reservationId}`,
-      headers: { authorization: `Basic ${Buffer.from("actual:secret").toString("base64")}` }
+      headers: { authorization: `Basic ${Buffer.from("actual:local-test-secret").toString("base64")}` }
     });
     const home = await app.inject({
       method: "GET",
       url: "/",
-      headers: { authorization: `Basic ${Buffer.from("actual:secret").toString("base64")}` }
+      headers: { authorization: `Basic ${Buffer.from("actual:local-test-secret").toString("base64")}` }
     });
     await app.close();
 
@@ -529,7 +624,7 @@ describe("API authentication context", () => {
   it("hides expired reservations from the default status payload", async () => {
     process.env.USE_FAKE_PROVIDER = "true";
     const { app } = await buildApp(config, models);
-    const auth = { authorization: `Basic ${Buffer.from("actual:secret").toString("base64")}` };
+    const auth = { authorization: `Basic ${Buffer.from("actual:local-test-secret").toString("base64")}` };
     const active = await app.inject({
       method: "POST",
       url: "/api/reservations",
@@ -555,7 +650,7 @@ describe("API authentication context", () => {
   it("paginates admin reservation history by expiration descending", async () => {
     process.env.USE_FAKE_PROVIDER = "true";
     const { app } = await buildApp(config, models);
-    const auth = { authorization: `Basic ${Buffer.from("actual:secret").toString("base64")}` };
+    const auth = { authorization: `Basic ${Buffer.from("actual:local-test-secret").toString("base64")}` };
     const shorter = await app.inject({
       method: "POST",
       url: "/api/reservations",
@@ -588,7 +683,7 @@ describe("API authentication context", () => {
       ...config,
       capacityTargets: [{ ...config.capacityTargets[0], costEstimate: { hourlyUsd: 12 } }]
     }, models);
-    const auth = { authorization: `Basic ${Buffer.from("actual:secret").toString("base64")}` };
+    const auth = { authorization: `Basic ${Buffer.from("actual:local-test-secret").toString("base64")}` };
     const created = await app.inject({
       method: "POST",
       url: "/api/reservations",
@@ -609,7 +704,7 @@ describe("API authentication context", () => {
   it("creates API keys, authenticates bearer requests, and revokes keys", async () => {
     process.env.USE_FAKE_PROVIDER = "true";
     const { app } = await buildApp(config, models);
-    const auth = { authorization: `Basic ${Buffer.from("actual:secret").toString("base64")}` };
+    const auth = { authorization: `Basic ${Buffer.from("actual:local-test-secret").toString("base64")}` };
 
     const created = await app.inject({
       method: "POST",
@@ -687,7 +782,7 @@ describe("API authentication context", () => {
   it("serves MCP tools over authenticated JSON-RPC", async () => {
     process.env.USE_FAKE_PROVIDER = "true";
     const { app } = await buildApp(config, models);
-    const auth = { authorization: `Basic ${Buffer.from("actual:secret").toString("base64")}` };
+    const auth = { authorization: `Basic ${Buffer.from("actual:local-test-secret").toString("base64")}` };
 
     const initialize = await app.inject({
       method: "POST",
@@ -721,7 +816,7 @@ describe("API authentication context", () => {
   it("serves admin provider management and creates persisted providers", async () => {
     process.env.USE_FAKE_PROVIDER = "true";
     const { app } = await buildApp(config, models);
-    const auth = { authorization: `Basic ${Buffer.from("actual:secret").toString("base64")}` };
+    const auth = { authorization: `Basic ${Buffer.from("actual:local-test-secret").toString("base64")}` };
 
     const page = await app.inject({ method: "GET", url: "/admin/providers", headers: auth });
     expect(page.statusCode).toBe(200);
@@ -765,7 +860,7 @@ describe("API authentication context", () => {
   it("creates AWS EC2 providers and targets for pre-created instances", async () => {
     process.env.USE_FAKE_PROVIDER = "true";
     const { app } = await buildApp(config, models);
-    const auth = { authorization: `Basic ${Buffer.from("actual:secret").toString("base64")}` };
+    const auth = { authorization: `Basic ${Buffer.from("actual:local-test-secret").toString("base64")}` };
 
     const providersPage = await app.inject({ method: "GET", url: "/admin/providers", headers: auth });
     expect(providersPage.body).toContain('<option value="aws-ec2"');
@@ -832,7 +927,7 @@ describe("API authentication context", () => {
   it("serves admin auth management and creates persisted GitHub methods", async () => {
     process.env.USE_FAKE_PROVIDER = "true";
     const { app } = await buildApp(config, models);
-    const auth = { authorization: `Basic ${Buffer.from("actual:secret").toString("base64")}` };
+    const auth = { authorization: `Basic ${Buffer.from("actual:local-test-secret").toString("base64")}` };
 
     const page = await app.inject({ method: "GET", url: "/admin/auth", headers: auth });
     expect(page.statusCode).toBe(200);
@@ -892,7 +987,7 @@ describe("API authentication context", () => {
   it("serves update safety controls and enters drain mode before restart", async () => {
     process.env.USE_FAKE_PROVIDER = "true";
     const { app } = await buildApp(config, models);
-    const auth = { authorization: `Basic ${Buffer.from("actual:secret").toString("base64")}` };
+    const auth = { authorization: `Basic ${Buffer.from("actual:local-test-secret").toString("base64")}` };
 
     const page = await app.inject({ method: "GET", url: "/admin/updates", headers: auth });
     expect(page.statusCode).toBe(200);
@@ -921,7 +1016,7 @@ describe("API authentication context", () => {
   it("creates OIDC methods with secret references and never renders stored secret values", async () => {
     process.env.USE_FAKE_PROVIDER = "true";
     const { app } = await buildApp(config, models);
-    const auth = { authorization: `Basic ${Buffer.from("actual:secret").toString("base64")}` };
+    const auth = { authorization: `Basic ${Buffer.from("actual:local-test-secret").toString("base64")}` };
 
     const created = await app.inject({
       method: "POST",
@@ -959,7 +1054,7 @@ describe("API authentication context", () => {
   it("copies declarative providers into persisted storage from the admin UI", async () => {
     process.env.USE_FAKE_PROVIDER = "true";
     const { app } = await buildApp(config, models);
-    const auth = { authorization: `Basic ${Buffer.from("actual:secret").toString("base64")}` };
+    const auth = { authorization: `Basic ${Buffer.from("actual:local-test-secret").toString("base64")}` };
 
     const copied = await app.inject({ method: "POST", url: "/admin/providers/aws-ecs/copy-to-db", headers: auth });
     expect(copied.statusCode).toBe(302);
@@ -989,7 +1084,7 @@ describe("API authentication context", () => {
   it("serves admin target management and creates persisted targets", async () => {
     process.env.USE_FAKE_PROVIDER = "true";
     const { app } = await buildApp(config, models);
-    const auth = { authorization: `Basic ${Buffer.from("actual:secret").toString("base64")}` };
+    const auth = { authorization: `Basic ${Buffer.from("actual:local-test-secret").toString("base64")}` };
 
     const page = await app.inject({ method: "GET", url: "/admin/targets", headers: auth });
     expect(page.statusCode).toBe(200);
@@ -1058,7 +1153,7 @@ describe("API authentication context", () => {
   it("creates PreFer Docker targets with model volume and discovery URLs", async () => {
     process.env.USE_FAKE_PROVIDER = "true";
     const { app } = await buildApp(config, models);
-    const auth = { authorization: `Basic ${Buffer.from("actual:secret").toString("base64")}` };
+    const auth = { authorization: `Basic ${Buffer.from("actual:local-test-secret").toString("base64")}` };
 
     const created = await app.inject({
       method: "POST",
@@ -1088,7 +1183,7 @@ describe("API authentication context", () => {
   it("copies declarative targets into persisted storage from the admin UI", async () => {
     process.env.USE_FAKE_PROVIDER = "true";
     const { app } = await buildApp(config, models);
-    const auth = { authorization: `Basic ${Buffer.from("actual:secret").toString("base64")}` };
+    const auth = { authorization: `Basic ${Buffer.from("actual:local-test-secret").toString("base64")}` };
 
     const copied = await app.inject({ method: "POST", url: "/admin/targets/t1/copy-to-db", headers: auth });
     expect(copied.statusCode).toBe(302);
@@ -1164,7 +1259,7 @@ describe("HassleOff admin safety UI", () => {
       failSafeTestTargetId: "hassleoff-failsafe-test"
     }
   };
-  const auth = { authorization: `Basic ${Buffer.from("actual:secret").toString("base64")}` };
+  const auth = { authorization: `Basic ${Buffer.from("actual:local-test-secret").toString("base64")}` };
 
   it("shows an actionable unconfigured state without changing the default deployment", async () => {
     process.env.USE_FAKE_PROVIDER = "true";
@@ -1261,7 +1356,7 @@ describe("HassleOff admin safety UI", () => {
     vi.stubGlobal("fetch", request);
     const { app } = await buildApp(safetyConfig, models);
     try {
-      const nonAdminAuth = { authorization: `Basic ${Buffer.from("other:secret").toString("base64")}` };
+      const nonAdminAuth = { authorization: `Basic ${Buffer.from("other:local-test-secret").toString("base64")}` };
       const page = await app.inject({ method: "GET", url: "/admin/hassleoff", headers: nonAdminAuth });
       expect(page.statusCode).toBe(403);
       expect(request).not.toHaveBeenCalled();
@@ -1289,13 +1384,13 @@ describe("HassleOff admin safety UI", () => {
         }]
       });
     }));
-    const { app } = await buildApp(safetyConfig, models);
+    const { app, authProvider } = await buildApp(safetyConfig, models);
 
     try {
       const page = await app.inject({ method: "GET", url: "/admin/hassleoff", headers: auth });
       expect(page.body).not.toContain(">Run fail-safe test</button>");
       expect(page.body).not.toContain("name=\"csrfToken\"");
-      const csrfToken = new SharedPasswordAuthProvider("secret", ["actual"], "test-cookie-secret").createState({
+      const csrfToken = authProvider.createState({
         purpose: "hassleoff-fail-safe-test",
         username: "actual",
         targetId: "hassleoff-failsafe-test",
@@ -1336,7 +1431,7 @@ describe("runtime model bootstrap selection", () => {
     };
     const { app, bootstrapRuntimeModels, runtimeModelDiscovery } = await buildApp(discoveryConfig, models);
     const bootstrap = vi.spyOn(runtimeModelDiscovery, "bootstrapTarget").mockResolvedValue(undefined);
-    const auth = { authorization: `Basic ${Buffer.from("actual:secret").toString("base64")}` };
+    const auth = { authorization: `Basic ${Buffer.from("actual:local-test-secret").toString("base64")}` };
     try {
       const outcomes = await bootstrapRuntimeModels();
       const explicit = await app.inject({ method: "POST", url: "/api/admin/targets/t1/discover", headers: auth });
@@ -1355,7 +1450,7 @@ describe("runtime model bootstrap selection", () => {
     process.env.USE_FAKE_PROVIDER = "true";
     const { app, runtimeModelDiscovery } = await buildApp(config, models);
     vi.spyOn(runtimeModelDiscovery, "bootstrapTarget").mockRejectedValue(new Error("runtime catalog authentication failed"));
-    const auth = { authorization: `Basic ${Buffer.from("actual:secret").toString("base64")}` };
+    const auth = { authorization: `Basic ${Buffer.from("actual:local-test-secret").toString("base64")}` };
     try {
       const response = await app.inject({ method: "POST", url: "/api/admin/targets/t1/discover", headers: auth });
       const page = await app.inject({ method: "GET", url: "/admin/targets", headers: auth });
@@ -1371,7 +1466,7 @@ describe("runtime model bootstrap selection", () => {
   it("returns HTTP 409 when force-stop is requested during discovery", async () => {
     process.env.USE_FAKE_PROVIDER = "true";
     const { app, targetOperations } = await buildApp(config, models);
-    const auth = { authorization: `Basic ${Buffer.from("actual:secret").toString("base64")}` };
+    const auth = { authorization: `Basic ${Buffer.from("actual:local-test-secret").toString("base64")}` };
     let finishOperation: (() => void) | undefined;
     const pendingDiscovery = targetOperations.runRuntimeModelDiscovery(
       "t1",

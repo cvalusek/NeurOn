@@ -58,14 +58,14 @@ describe("provider definitions", () => {
     expect(config.adminStatusPollSeconds).toBe(5);
   });
 
-  it("allows shared password authentication to be disabled without a password", async () => {
-    process.env.SHARED_PASSWORD_ENABLED = "false";
-    delete process.env.SHARED_PASSWORD;
+  it("does not expose the retired shared-password configuration", async () => {
+    process.env.SHARED_PASSWORD_ENABLED = "true";
+    process.env.SHARED_PASSWORD = "legacy-value";
 
     const { config } = await loadConfig();
 
-    expect(config.sharedPasswordEnabled).toBe(false);
-    expect(config.sharedPassword).toBeUndefined();
+    expect(config).not.toHaveProperty("sharedPasswordEnabled");
+    expect(config).not.toHaveProperty("sharedPassword");
   });
 
   it("enables update checks for revision-stamped published images", async () => {

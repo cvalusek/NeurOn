@@ -14,6 +14,7 @@
     "changes:check": "node scripts/check-release-notes.js",
     "docs:screenshots": "tsx scripts/capture-doc-screenshots.ts",
     "migrate:sqlite-to-postgres": "node dist/scripts/migrateSqliteToPostgres.js",
+    "users": "node dist/scripts/users.js",
     "postgres:local-config": "node scripts/create-postgres-local-config.js"
   },
   "dependencies": {

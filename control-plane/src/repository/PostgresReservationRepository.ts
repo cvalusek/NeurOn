@@ -6,6 +6,7 @@ import { parseReservationTargetSelections } from "../domain/reservationSelection
 
 interface ReservationRow {
   id: string;
+  user_id: string | null;
   username: string;
   api_key_name: string | null;
   profile_id: string | null;
@@ -34,9 +35,9 @@ export class PostgresReservationRepository implements ReservationRepository {
     const values = toSqlValues(reservation);
     await this.pool.query(
       `insert into reservations (
-        id, username, api_key_name, profile_id, profile_name, model_ids, target_ids, target_selections, created_at, expires_at,
+        id, user_id, username, api_key_name, profile_id, profile_name, model_ids, target_ids, target_selections, created_at, expires_at,
         keepalive_minutes, ended_at, status, failure_message, synthetic
-      ) values ($1, $2, $3, $4, $5, $6::jsonb, $7::jsonb, $8::jsonb, $9, $10, $11, $12, $13, $14, $15)`,
+      ) values ($1, $2, $3, $4, $5, $6, $7::jsonb, $8::jsonb, $9::jsonb, $10, $11, $12, $13, $14, $15, $16)`,
       values
     );
     return cloneReservation(reservation);
@@ -58,20 +59,21 @@ export class PostgresReservationRepository implements ReservationRepository {
     const updated = { ...current, ...patch, id };
     await this.pool.query(
       `update reservations set
-        username = $2,
-        api_key_name = $3,
-        profile_id = $4,
-        profile_name = $5,
-        model_ids = $6::jsonb,
-        target_ids = $7::jsonb,
-        target_selections = $8::jsonb,
-        created_at = $9,
-        expires_at = $10,
-        keepalive_minutes = $11,
-        ended_at = $12,
-        status = $13,
-        failure_message = $14,
-        synthetic = $15
+        user_id = $2,
+        username = $3,
+        api_key_name = $4,
+        profile_id = $5,
+        profile_name = $6,
+        model_ids = $7::jsonb,
+        target_ids = $8::jsonb,
+        target_selections = $9::jsonb,
+        created_at = $10,
+        expires_at = $11,
+        keepalive_minutes = $12,
+        ended_at = $13,
+        status = $14,
+        failure_message = $15,
+        synthetic = $16
       where id = $1`,
       toSqlValues(updated)
     );
@@ -102,6 +104,7 @@ export class PostgresReservationRepository implements ReservationRepository {
 function toSqlValues(reservation: Reservation): unknown[] {
   return [
     reservation.id,
+    reservation.userId ?? null,
     reservation.username,
     reservation.apiKeyName ?? null,
     reservation.profileId ?? null,
@@ -128,6 +131,7 @@ function fromRow(row: ReservationRow): Reservation {
   );
   return {
     id: row.id,
+    userId: row.user_id ?? undefined,
     username: row.username,
     apiKeyName: row.api_key_name ?? undefined,
     profileId: row.profile_id ?? undefined,

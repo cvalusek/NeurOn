@@ -25,6 +25,8 @@ Important fields:
 - optional `hostingMode`: `dedicated` or `multi-model`
 - optional positive `aliasPriority`: lower values win global LiteLLM
   model-group alias collisions; later targets become formal fallbacks
+- optional `audience`: `global`, selected durable team IDs, or selected durable
+  user IDs; omitted targets are global
 - provider-specific resource config, such as `docker`, `runpod`, `aws`, or `neuron`
 - `healthUrl` and `apiUrl` overrides
 - optional `modelDiscovery`
@@ -39,6 +41,14 @@ exact target/model, maps scoped `<target>/<alias>` and global friendly names to
 it with LiteLLM model-group aliases, and makes the lowest-priority-number target
 the global alias owner. Later targets form the fallback chain. The same names
 appear in profile selection and Client setup.
+
+Audience filtering is an authorization boundary, not only a display hint. It
+is enforced in the UI, REST API, MCP catalog and tools, reservation validation,
+and LiteLLM traffic attribution. A parent-team audience includes members of its
+nested descendant teams. Persisted user audiences are rewritten by a confirmed
+duplicate-account merge; configured audiences continue to resolve the disabled
+source ID through its canonical merge alias. Providers remain installation-
+global in this release. See [Identity and Access](identity-access.md).
 
 ## Runtime Profiles
 

@@ -45,6 +45,11 @@ const targetSchema = z.object({
   aliasPriority: z.number().int().positive().optional(),
   modelsMax: z.number().int().positive().optional(),
   hostingMode: z.enum(["dedicated", "multi-model"]).optional(),
+  audience: z.discriminatedUnion("scope", [
+    z.object({ scope: z.literal("global") }),
+    z.object({ scope: z.literal("teams"), teamIds: z.array(z.string().min(1)).min(1) }),
+    z.object({ scope: z.literal("users"), userIds: z.array(z.string().min(1)).min(1) })
+  ]).optional(),
   aws: z
     .object({
       cluster: z.string().optional(),
@@ -232,8 +237,8 @@ const runtimeProfileSchema = z
   }));
 
 export async function loadConfig(): Promise<{ config: AppConfig; models: ModelDefinition[] }> {
-  const sharedPasswordEnabled = boolEnv("SHARED_PASSWORD_ENABLED") ?? true;
   const maintenanceMode = boolEnv("CONTROL_PLANE_MAINTENANCE_MODE") ?? false;
+  const storage = loadStorageConfig();
   const configuredProviders = await loadCapacityProviders();
   const runtimeProfiles = loadRuntimeProfiles();
   const capacityTargets = await loadCapacityTargets(configuredProviders, { syncNeuronTargets: !maintenanceMode });
@@ -279,10 +284,8 @@ export async function loadConfig(): Promise<{ config: AppConfig; models: ModelDe
     config: {
       port: intEnv("PORT", 8090),
       publicBaseUrl: env("PUBLIC_BASE_URL")?.replace(/\/$/, ""),
-      sharedPasswordEnabled,
-      sharedPassword: sharedPasswordEnabled ? requiredEnv("SHARED_PASSWORD", "dev-password") : undefined,
       cookieSecret: process.env.COOKIE_SECRET,
-      storage: loadStorageConfig(),
+      storage,
       awsRegion: process.env.AWS_REGION ?? "us-east-1",
       litellmApiBaseUrl: process.env.LITELLM_API_BASE_URL,
       litellmApiKey: process.env.LITELLM_API_KEY,
@@ -310,7 +313,7 @@ export async function loadConfig(): Promise<{ config: AppConfig; models: ModelDe
       },
       hassleOff: loadHassleOffClientConfig(),
       maintenanceMode,
-      storageOperationLockPath: env("STORAGE_OPERATION_LOCK_PATH") ?? path.resolve(process.cwd(), "data", "neuron-storage.lock")
+      storageOperationLockPath: resolveStorageOperationLockPath(storage, env("STORAGE_OPERATION_LOCK_PATH"))
     },
     models: Array.from(modelsById.values()).sort((a, b) => a.id.localeCompare(b.id))
   };
@@ -833,7 +836,7 @@ function normalizeProviderType(provider: string): CapacityProviderDefinition["ty
   return normalizeProvider(provider);
 }
 
-function loadStorageConfig(): StorageConfig {
+export function loadStorageConfig(): StorageConfig {
   const driver = (env("STORAGE_DRIVER") ?? "memory").toLowerCase();
   if (driver === "memory") return { driver: "memory" };
   if (driver === "sqlite") return { driver: "sqlite", path: env("SQLITE_PATH") ?? path.resolve(process.cwd(), "data", "neuron.db") };
@@ -881,6 +884,11 @@ function boolEnv(name: string): boolean | undefined {
   return ["1", "true", "yes", "on"].includes(value.toLowerCase());
 }
 
+export function resolveStorageOperationLockPath(storage: StorageConfig, configuredPath?: string): string {
+  if (configuredPath?.trim()) return path.resolve(configuredPath.trim());
+  if (storage.driver === "sqlite") return path.join(path.dirname(path.resolve(storage.path)), "neuron-storage.lock");
+  return path.resolve(process.cwd(), "data", "neuron-storage.lock");
+}
 function enumOptionalEnv<T extends string>(name: string, values: readonly T[]): T | undefined {
   const value = env(name);
   if (value === undefined) return undefined;
@@ -937,11 +945,4 @@ function compactObject<T extends Record<string, unknown>>(value: T): Partial<T> 
       return true;
     })
   ) as Partial<T>;
-}
-
-function requiredEnv(name: string, localFallback: string): string {
-  const value = process.env[name];
-  if (value) return value;
-  if (process.env.NODE_ENV === "production") throw new Error(`${name} is required`);
-  return localFallback;
 }

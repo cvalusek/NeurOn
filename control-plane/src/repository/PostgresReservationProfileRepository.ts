@@ -5,6 +5,7 @@ import type { ReservationProfile, ReservationProfileSelection } from "../domain/
 
 interface ReservationProfileRow {
   id: string;
+  user_id: string;
   username: string;
   name: string;
   description: string | null;
@@ -27,9 +28,9 @@ export class PostgresReservationProfileRepository implements ReservationProfileR
     const profile = { ...input, id: input.id ?? nanoid(12), createdAt: input.createdAt ?? now, updatedAt: input.updatedAt ?? now };
     await this.pool.query(
       `insert into reservation_profiles (
-        id, username, name, description, selections, default_duration_minutes,
+        id, user_id, username, name, description, selections, default_duration_minutes,
         default_keepalive_minutes, created_at, updated_at
-      ) values ($1, $2, $3, $4, $5::jsonb, $6, $7, $8, $9)`,
+      ) values ($1, $2, $3, $4, $5, $6::jsonb, $7, $8, $9, $10)`,
       toSqlValues(profile)
     );
     return cloneProfile(profile);
@@ -40,8 +41,8 @@ export class PostgresReservationProfileRepository implements ReservationProfileR
     return result.rows[0] ? fromRow(result.rows[0]) : undefined;
   }
 
-  async listForUser(username: string): Promise<ReservationProfile[]> {
-    const result = await this.pool.query<ReservationProfileRow>("select * from reservation_profiles where username = $1 order by name asc, id asc", [username]);
+  async listForUser(userId: string): Promise<ReservationProfile[]> {
+    const result = await this.pool.query<ReservationProfileRow>("select * from reservation_profiles where user_id = $1 order by name asc, id asc", [userId]);
     return result.rows.map(fromRow);
   }
 
@@ -53,22 +54,23 @@ export class PostgresReservationProfileRepository implements ReservationProfileR
   async update(id: string, input: ReservationProfile): Promise<ReservationProfile> {
     await this.pool.query(
       `update reservation_profiles set
-        username = $2,
-        name = $3,
-        description = $4,
-        selections = $5::jsonb,
-        default_duration_minutes = $6,
-        default_keepalive_minutes = $7,
-        created_at = $8,
-        updated_at = $9
+        user_id = $2,
+        username = $3,
+        name = $4,
+        description = $5,
+        selections = $6::jsonb,
+        default_duration_minutes = $7,
+        default_keepalive_minutes = $8,
+        created_at = $9,
+        updated_at = $10
       where id = $1`,
       toSqlValues({ ...input, id })
     );
     return cloneProfile({ ...input, id });
   }
 
-  async deleteForUser(id: string, username: string): Promise<boolean> {
-    const result = await this.pool.query("delete from reservation_profiles where id = $1 and username = $2", [id, username]);
+  async deleteForUser(id: string, userId: string): Promise<boolean> {
+    const result = await this.pool.query("delete from reservation_profiles where id = $1 and user_id = $2", [id, userId]);
     return (result.rowCount ?? 0) > 0;
   }
 
@@ -77,6 +79,7 @@ export class PostgresReservationProfileRepository implements ReservationProfileR
 function toSqlValues(profile: ReservationProfile): unknown[] {
   return [
     profile.id,
+    profile.userId,
     profile.username,
     profile.name,
     profile.description ?? null,
@@ -92,6 +95,7 @@ function fromRow(row: ReservationProfileRow): ReservationProfile {
   const selections = typeof row.selections === "string" ? JSON.parse(row.selections) as ReservationProfileSelection[] : row.selections;
   return {
     id: row.id,
+    userId: row.user_id,
     username: row.username,
     name: row.name,
     description: row.description ?? undefined,

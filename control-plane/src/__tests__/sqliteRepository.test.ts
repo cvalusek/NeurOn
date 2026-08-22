@@ -15,6 +15,7 @@ import { SqliteTargetActivationRepository } from "../repository/SqliteTargetActi
 import { SqliteModelMetadataRepository } from "../repository/SqliteModelMetadataRepository.js";
 import { SqliteModelFavoriteRepository } from "../repository/SqliteModelFavoriteRepository.js";
 import { SqliteAssistantConfigRepository } from "../repository/SqliteAssistantConfigRepository.js";
+import { testUser } from "./testUsers.js";
 
 let tempDir: string | undefined;
 
@@ -77,15 +78,15 @@ describe("SqliteApiKeyRepository", () => {
   it("persists API keys across repository restarts", async () => {
     tempDir = await mkdtemp(path.join(os.tmpdir(), "neuron-sqlite-"));
     const databasePath = path.join(tempDir, "neuron.db");
-    const user: AuthenticatedUser = { username: "clint", isAdmin: true };
+    const user: AuthenticatedUser = testUser("clint", true);
 
     const first = new SqliteApiKeyRepository(databasePath);
     const created = await new ApiKeyService(first).createForUser(user, { name: "Plugin key" });
     first.close();
 
     const second = new SqliteApiKeyRepository(databasePath);
-    const authenticated = await authenticateApiKey(second, created.token, () => true);
-    const keys = await second.listForUser("clint");
+    const authenticated = await authenticateApiKey(second, created.token, async () => user);
+    const keys = await second.listForUser(user.id);
     second.close();
 
     expect(authenticated).toEqual({ ...user, apiKeyName: "Plugin key" });
@@ -336,14 +337,14 @@ describe("SQLite model-selection repositories", () => {
     const favorites = new SqliteModelFavoriteRepository(databasePath);
     await metadata.upsertCapability({ modelId: "model-1", intelligence: 87, domains: { coding: 92 }, quantization: { format: "Q6", qualityRetentionPercent: 98.5 }, provenance: { source: "manual", version: "2026-08" } }, updatedAt);
     await metadata.upsertDeployment({ targetId: "target-1", modelId: "model-1", performance: { decodeTokensPerSecond: 42, prefillTokensPerSecond: 800, sampleCount: 3 } }, updatedAt);
-    await favorites.add({ username: "clint", targetId: "target-1", modelId: "model-1", createdAt: updatedAt });
+    await favorites.add({ userId: "usr_clint", username: "clint", targetId: "target-1", modelId: "model-1", createdAt: updatedAt });
     metadata.close(); favorites.close();
 
     const reopenedMetadata = new SqliteModelMetadataRepository(databasePath);
     const reopenedFavorites = new SqliteModelFavoriteRepository(databasePath);
     expect(await reopenedMetadata.listCapabilities()).toMatchObject([{ modelId: "model-1", intelligence: 87, domains: { coding: 92 }, quantization: { format: "Q6", qualityRetentionPercent: 98.5 }, updatedAt }]);
     expect(await reopenedMetadata.listDeployments()).toMatchObject([{ targetId: "target-1", modelId: "model-1", performance: { decodeTokensPerSecond: 42 }, updatedAt }]);
-    expect(await reopenedFavorites.listForUser("clint")).toEqual([{ username: "clint", targetId: "target-1", modelId: "model-1", createdAt: updatedAt }]);
+    expect(await reopenedFavorites.listForUser("usr_clint")).toEqual([{ userId: "usr_clint", username: "clint", targetId: "target-1", modelId: "model-1", createdAt: updatedAt }]);
     reopenedMetadata.close(); reopenedFavorites.close();
   });
 });

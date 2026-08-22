@@ -44,7 +44,6 @@ describe("startup runtime model discovery cache", () => {
 
     const config: AppConfig = {
       port: 0,
-      sharedPassword: "secret",
       storage: { driver: "sqlite", path: databasePath },
       awsRegion: "us-east-1",
       litellmTrafficPollSeconds: 0,
@@ -69,9 +68,11 @@ describe("startup runtime model discovery cache", () => {
       authMethods: []
     };
 
-    const built = await buildApp(config, []);
+    const built = await buildApp(config, [], {
+      developmentLocalAccounts: [{ username: "operator", password: "local-test-secret", owner: true }]
+    });
     const infoLog = vi.spyOn(built.app.log, "info");
-    const auth = { authorization: `Basic ${Buffer.from("operator:secret").toString("base64")}` };
+    const auth = { authorization: `Basic ${Buffer.from("operator:local-test-secret").toString("base64")}` };
     try {
       const outcomes = await built.bootstrapRuntimeModels();
 

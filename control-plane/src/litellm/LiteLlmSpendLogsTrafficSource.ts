@@ -11,6 +11,8 @@ interface LiteLlmSpendLog {
   completion_tokens?: number | null;
   cache_hit?: string | boolean | null;
   status?: string | null;
+  /** Stable LiteLLM user identifier attached to the virtual key/request. */
+  user?: string | null;
 }
 
 interface SpendLogsResponse {
@@ -37,6 +39,7 @@ export class LiteLlmSpendLogsTrafficSource implements TrafficSource {
         prefillTokensPerSecond?: number;
         timeToFirstTokenSeconds?: number;
       };
+      externalUserSubject?: string;
     }> = [];
     for (const log of logs) {
       const seenAt = parseDate(log.endTime ?? log.startTime);
@@ -46,6 +49,7 @@ export class LiteLlmSpendLogsTrafficSource implements TrafficSource {
         events.push({
           modelId,
           seenAt,
+          ...(externalUserSubject(log) ? { externalUserSubject: externalUserSubject(log) } : {}),
           ...(index === 0 && performance && log.request_id ? { requestId: log.request_id, performance } : {})
         });
       }
@@ -110,6 +114,11 @@ function utcDateOnly(date: Date): string {
   return date.toISOString().slice(0, 10);
 }
 
+function externalUserSubject(log: LiteLlmSpendLog): string | undefined {
+  const value = log.user?.trim();
+  return value && value.length <= 500 ? value : undefined;
+}
+
 function performanceForLog(log: LiteLlmSpendLog): {
   decodeTokensPerSecond?: number;
   prefillTokensPerSecond?: number;
@@ -143,10 +152,10 @@ function isCacheHit(value: LiteLlmSpendLog["cache_hit"]): boolean {
   return ["true", "1", "yes", "hit"].includes(value.trim().toLowerCase());
 }
 
-function dedupeTrafficEvents<T extends { modelId: string; seenAt: Date; requestId?: string; performance?: unknown }>(events: T[]): T[] {
+function dedupeTrafficEvents<T extends { modelId: string; seenAt: Date; requestId?: string; externalUserSubject?: string; performance?: unknown }>(events: T[]): T[] {
   const byKey = new Map<string, T>();
   for (const event of events) {
-    const key = `${event.requestId ?? "traffic"}\0${event.modelId}\0${event.seenAt.toISOString()}`;
+    const key = `${event.requestId ?? "traffic"}\0${event.modelId}\0${event.externalUserSubject ?? "anonymous"}\0${event.seenAt.toISOString()}`;
     const existing = byKey.get(key);
     if (!existing || (!existing.performance && event.performance)) byKey.set(key, event);
   }

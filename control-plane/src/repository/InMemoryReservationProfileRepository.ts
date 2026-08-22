@@ -17,9 +17,9 @@ export class InMemoryReservationProfileRepository implements ReservationProfileR
     return profile ? cloneProfile(profile) : undefined;
   }
 
-  async listForUser(username: string): Promise<ReservationProfile[]> {
+  async listForUser(userId: string): Promise<ReservationProfile[]> {
     return Array.from(this.profiles.values())
-      .filter((profile) => profile.username === username)
+      .filter((profile) => profile.userId === userId)
       .sort((left, right) => left.name.localeCompare(right.name) || left.id.localeCompare(right.id))
       .map(cloneProfile);
   }
@@ -36,10 +36,15 @@ export class InMemoryReservationProfileRepository implements ReservationProfileR
     return cloneProfile(input);
   }
 
-  async deleteForUser(id: string, username: string): Promise<boolean> {
+  async deleteForUser(id: string, userId: string): Promise<boolean> {
     const profile = this.profiles.get(id);
-    if (!profile || profile.username !== username) return false;
+    if (!profile || profile.userId !== userId) return false;
     return this.profiles.delete(id);
+  }
+
+  countForUser(userId: string): number { return Array.from(this.profiles.values()).filter((value) => value.userId === userId).length; }
+  reassignUser(sourceUserId: string, targetUserId: string, username: string): void {
+    for (const profile of this.profiles.values()) if (profile.userId === sourceUserId) Object.assign(profile, { userId: targetUserId, username });
   }
 }
 

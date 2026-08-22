@@ -10,7 +10,7 @@ NeurOn supports one control-plane database owner at a time. Never run SQLite
 and PostgreSQL application writers concurrently. HassleOff owns a separate
 SQLite database; this procedure does not read, stop, migrate, or restart it.
 
-PostgreSQL schema version 5 is managed by the transactional
+PostgreSQL schema version 6 is managed by the transactional
 `neuron_schema_migrations` ledger. The application uses one bounded shared pool
 for all repositories. The explicit transfer command records a completed source
 identity in `neuron_data_migrations`; an exact rerun verifies and exits as a
@@ -20,32 +20,39 @@ reservations. Version 3 adds durable model capabilities, exact target-model
 deployment measurements, and user model favorites. Version 4 adds the
 independent singleton assistant configuration and transactionally moves any
 legacy `profileAdvisor` value out of target JSON. Startup upgrades an
-already-current version 1, 2, 3, or 4 database in order and in a transaction
+already-current version 1 through 5 database in order and in a transaction
 before repositories begin serving requests. Version 5 adds optional trusted
-operator guidance to the independent Assistant record. The explicit SQLite
-transfer contract remains source schema version 2: the additive guidance column
-is accepted when present, and its value participates in semantic fingerprints,
-while a source without guidance retains its prior exact-migration identity.
-The startup validator permits columns owned by pending, known migrations, so a
-version 4 deployment upgrades to version 5 automatically without operator SQL.
+operator guidance to the independent Assistant record. Version 6 adds durable
+users, external identities, per-user local credentials, roles, nested teams,
+membership automation, invitations, LiteLLM subject links, audit events, stable
+ownership foreign keys, and target audiences. Legacy usernames are backfilled
+without changing owned record IDs; every backfilled user receives Member and
+is never implicitly promoted to Owner.
+
+The explicit SQLite transfer contract is source schema version 4. It includes
+all identity entities and ownership links when present, accepts legacy
+pre-identity databases for safe backfill, validates target-selection JSON, and
+includes every transferred value in privacy-safe semantic fingerprints. The
+startup validator permits only columns owned by known migrations, so an older
+supported PostgreSQL deployment upgrades through version 6 automatically
+without operator SQL.
 
 ## Durable scope
 
 The command transfers:
 
-1. reservations;
-2. reservation profiles;
-3. hashed API keys;
-4. GitHub auth methods;
-5. provider definitions;
-6. target definitions;
-7. target provisioning jobs;
-8. target model-discovery records;
-9. model capability records;
-10. exact target-model deployment records;
-11. user model favorites; and
-12. singleton assistant configuration; and
-13. target activations and their reservation cost-allocation links.
+1. reservations and reservation profiles, including stable owner IDs and
+   target-specific selection snapshots;
+2. hashed API keys and all local/GitHub/OIDC authentication methods;
+3. provider definitions, target definitions and audiences, provisioning jobs,
+   and target model-discovery records;
+4. model capability records, exact target-model deployment records, and user
+   model favorites;
+5. singleton assistant configuration;
+6. target activations and their reservation cost-allocation links; and
+7. users, external identities, local credential hashes, global/team roles and
+   assignments, teams and hierarchy closure, memberships, invitations,
+   external LiteLLM links, and identity audit events.
 
 Older local databases may also contain the predecessor tables `target_runs`
 and `target_run_reservation_links`. When both tables have the exact recognized
@@ -97,7 +104,9 @@ that make an outage unsafe. Stop and resolve ambiguity rather than forcing the
 cutover. Do not use provider, inference, LiteLLM, PreFer, or model endpoints as
 a database test.
 
-Build the new image, then stop only NeurOn. Do not stop HassleOff:
+Build the new image. Before the first normal version-6 start, stop only NeurOn
+and create or verify an Owner recovery path as described in
+[Identity and Access](identity-access.md). Do not stop HassleOff:
 
 ```powershell
 docker compose -f docker-compose.yml -f docker-compose.postgres.yml build neuron neuron-migrate

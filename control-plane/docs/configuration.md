@@ -119,8 +119,6 @@ RUNTIME_PROFILES_JSON=[{"id":"prefer-nightly","name":"PreFer Nightly","type":"do
 ## Core Environment
 
 - `PORT`
-- `SHARED_PASSWORD_ENABLED`
-- `SHARED_PASSWORD`
 - `COOKIE_SECRET`
 - `ADMIN_USERS`
 - `PUBLIC_BASE_URL`
@@ -176,8 +174,11 @@ stored; it does not wait for provider startup.
 
 ## Storage
 
-All twelve durable repository families use the same configured driver. Storage
-defaults to memory for direct local runs:
+All durable control-plane state uses the same configured driver. This includes
+users, identity links, local credentials, roles, teams, invitations, external
+traffic-user links, ownership records, and audit events in addition to the
+reservation, catalog, provider, target, assistant, and activation families.
+Storage defaults to memory for direct local runs:
 
 ```env
 STORAGE_DRIVER=memory
@@ -204,7 +205,9 @@ active reservations, reservation profiles, `sk-neuron-...` API keys, configured
 providers, persisted targets, target provisioning jobs, target model discovery
 results, model capability/deployment metadata, user model favorites, target
 activations, reservation cost allocation records, and the singleton Assistant
-configuration across NeurOn restarts.
+configuration across NeurOn restarts. Durable users own real reservations,
+profiles, API keys, and favorites by ID; provider usernames remain identity
+attributes rather than ownership keys.
 Target status and startup estimates remain in memory because they are
 observational and rebuilt by reconciliation.
 
@@ -226,17 +229,16 @@ NeurOn control-plane storage driver.
 
 ## Auth And API Keys
 
-Interactive users can sign in with a username plus the shared password. API
-clients can use Basic Auth with the same shared password:
-
-```bash
-curl -u clint:dev-password http://localhost:8090/api/models
-```
-
-Set `SHARED_PASSWORD_ENABLED=false` to disable both the shared-password form and
-HTTP Basic authentication. `SHARED_PASSWORD` is then optional. Keep
-`COOKIE_SECRET` configured because GitHub and OIDC sign-in still use it to sign
-authorization state and the resulting NeurOn session cookie.
+NeurOn has one durable local authentication method and one durable user entity
+per person. Local accounts have individual scrypt password hashes; the former
+deployment-wide shared password is no longer supported. Administrators manage
+local password sign-in and invitation registration under **Admin >
+Authentication**. Disabling the local method hides the password form, rejects
+HTTP Basic authentication, and blocks local invitation registration. Verify an
+external Owner login first. The offline command's one-time Owner recovery link
+remains redeemable and creates a bounded recovery session without enabling
+ordinary registration. Keep `COOKIE_SECRET` configured because all browser
+methods use it to sign bounded NeurOn sessions.
 
 Users can create personal API keys from `/api-keys`. The generated key is shown
 once, starts with `sk-neuron-...`, and is stored as a hash. API keys authenticate
@@ -246,9 +248,12 @@ REST and MCP calls with:
 Authorization: Bearer sk-neuron-...
 ```
 
-`ADMIN_USERS` controls admin status for Basic, cookie, and API-key auth. When
-`ADMIN_USERS` is empty, any authenticated user is treated as an admin, matching
-the existing local-development behavior.
+Permissions come from durable global roles and are re-resolved for every
+session or API-key request. `ADMIN_USERS` is an optional bootstrap/recovery
+list: matching normalized usernames receive the protected Owner role at
+startup. An empty value grants nobody Owner. For a new installation or recovery,
+prefer the offline one-time Owner-link command documented in
+[Identity and Access](identity-access.md).
 
 GitHub sign-in can be configured from environment or from Admin > Auth. Create a
 GitHub OAuth app with this callback URL:
@@ -276,8 +281,9 @@ GITHUB_AUTH_ALLOWED_ORGS=my-org
 If both allow lists are empty, any GitHub user who completes OAuth can sign in.
 If `GITHUB_AUTH_ALLOWED_USERS` is set, the GitHub login must be listed. If
 `GITHUB_AUTH_ALLOWED_ORGS` is set, the user must belong to at least one listed
-organization. GitHub-authenticated users use their GitHub login as the NeurOn
-username, so `ADMIN_USERS` should list GitHub logins for admin access.
+organization. NeurOn keys the link by GitHub's immutable numeric user ID. On the
+first sign-in it attaches to an existing account when the normalized GitHub
+login matches that account; later login changes do not change ownership.
 
 Admins can add, edit, disable, or delete persisted GitHub methods from
 `/admin/auth`. Persisted methods are stored by the configured storage driver.
@@ -304,8 +310,8 @@ The issuer can be the Okta organization issuer
 (`https://<tenant>.okta.com/oauth2/<server-id>`). The defaults request
 `openid profile email`; NeurOn also requests `groups` when an allowed-groups
 list is configured. The default username claim is `preferred_username`.
-`ADMIN_USERS` must contain values from the configured username claim for those
-users to receive NeurOn admin access.
+The validated OIDC `sub` claim is the stable identity key. A first sign-in may
+attach to a same-normalized-username account; durable roles then control access.
 
 OIDC client secrets have three sources:
 

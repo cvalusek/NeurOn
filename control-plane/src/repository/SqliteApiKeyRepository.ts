@@ -7,6 +7,7 @@ import type { ApiKey } from "../domain/types.js";
 
 interface ApiKeyRow {
   id: string;
+  user_id: string;
   username: string;
   name: string;
   prefix: string;
@@ -30,9 +31,9 @@ export class SqliteApiKeyRepository implements ApiKeyRepository {
     this.db
       .prepare(
         `insert into api_keys (
-          id, username, name, prefix, key_hash, created_at, last_used_at
+          id, user_id, username, name, prefix, key_hash, created_at, last_used_at
         ) values (
-          @id, @username, @name, @prefix, @keyHash, @createdAt, @lastUsedAt
+          @id, @userId, @username, @name, @prefix, @keyHash, @createdAt, @lastUsedAt
         )`
       )
       .run(toSqlParams(key));
@@ -44,13 +45,13 @@ export class SqliteApiKeyRepository implements ApiKeyRepository {
     return row ? fromRow(row) : undefined;
   }
 
-  async listForUser(username: string): Promise<ApiKey[]> {
-    const rows = this.db.prepare("select * from api_keys where username = ? order by created_at asc, id asc").all(username) as ApiKeyRow[];
+  async listForUser(userId: string): Promise<ApiKey[]> {
+    const rows = this.db.prepare("select * from api_keys where user_id = ? order by created_at asc, id asc").all(userId) as ApiKeyRow[];
     return rows.map(fromRow);
   }
 
-  async deleteForUser(id: string, username: string): Promise<boolean> {
-    const result = this.db.prepare("delete from api_keys where id = ? and username = ?").run(id, username);
+  async deleteForUser(id: string, userId: string): Promise<boolean> {
+    const result = this.db.prepare("delete from api_keys where id = ? and user_id = ?").run(id, userId);
     return result.changes > 0;
   }
 
@@ -66,6 +67,7 @@ export class SqliteApiKeyRepository implements ApiKeyRepository {
     this.db.exec(`
       create table if not exists api_keys (
         id text primary key,
+        user_id text,
         username text not null,
         name text not null,
         prefix text not null,
@@ -77,12 +79,15 @@ export class SqliteApiKeyRepository implements ApiKeyRepository {
       create index if not exists idx_api_keys_username_created_at
         on api_keys(username, created_at);
     `);
+    const columns = this.db.prepare("pragma table_info(api_keys)").all() as Array<{ name: string }>;
+    if (!columns.some((column) => column.name === "user_id")) this.db.exec("alter table api_keys add column user_id text");
   }
 }
 
 function toSqlParams(key: ApiKey) {
   return {
     id: key.id,
+    userId: key.userId,
     username: key.username,
     name: key.name,
     prefix: key.prefix,
@@ -95,6 +100,7 @@ function toSqlParams(key: ApiKey) {
 function fromRow(row: ApiKeyRow): ApiKey {
   return {
     id: row.id,
+    userId: row.user_id,
     username: row.username,
     name: row.name,
     prefix: row.prefix,

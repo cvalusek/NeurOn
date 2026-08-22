@@ -9,9 +9,10 @@ import { ModelCatalog } from "../services/ModelCatalog.js";
 import { ReservationService } from "../services/ReservationService.js";
 import { ShutdownCoordinator } from "../services/ShutdownCoordinator.js";
 import { TargetOperationCoordinator } from "../services/TargetOperationCoordinator.js";
+import { testUser } from "./testUsers.js";
 
 const target: CapacityTarget = { id: "gpu", displayName: "GPU", provider: "fake", modelIds: ["m1"] };
-const admin: AuthenticatedUser = { username: "admin", isAdmin: true };
+const admin: AuthenticatedUser = testUser("admin", true);
 
 afterEach(() => {
   vi.useRealTimers();

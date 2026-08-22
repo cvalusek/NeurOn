@@ -5,6 +5,7 @@ import { ModelCatalog } from "../services/ModelCatalog.js";
 import { ModelSelectionService, rankModelDeployments } from "../services/ModelSelectionService.js";
 import { ProfileAdvisorService } from "../services/ProfileAdvisorService.js";
 import { InMemoryAssistantConfigRepository } from "../repository/InMemoryAssistantConfigRepository.js";
+import { testUser } from "./testUsers.js";
 
 const targets: CapacityTarget[] = [
   { id: "small", displayName: "Small", provider: "docker", modelIds: ["fast"] },
@@ -163,11 +164,11 @@ describe("profile advisor", () => {
 
   it("runs assistant requests asynchronously and scopes their status to the requesting user", async () => {
     const { advisor, fetchMock } = profileAdvisorHarness([{ name: "answer_question", value: { message: "Use the profile builder." } }]);
-    const owner = { username: "owner", isAdmin: false };
+    const owner = testUser("owner");
     const started = await advisor.startInterpret("Where do I begin?", {}, owner);
     expect(started).toMatchObject({ phase: "thinking", message: "The Assistant is awake and thinking…" });
     await expect(advisor.startInterpret("Start another request", {}, owner)).rejects.toThrow("already running");
-    expect(advisor.getInterpretRequest(started.id, { username: "other", isAdmin: false })).toBeUndefined();
+    expect(advisor.getInterpretRequest(started.id, testUser("other"))).toBeUndefined();
     await vi.waitFor(() => expect(advisor.getInterpretRequest(started.id, owner)).toMatchObject({
       phase: "complete", result: { type: "answer", message: "Use the profile builder." }
     }));
@@ -179,7 +180,7 @@ describe("profile advisor", () => {
       { name: "answer_question", value: { message: "The fast model is available." } },
       { name: "answer_question", value: { message: "You are now on Profiles." } }
     ]);
-    const owner = { username: "owner", isAdmin: false };
+    const owner = testUser("owner");
     const firstContext = { screen: { path: "/", title: "Home", surface: "home" as const }, savedProfiles: [] };
     const started = await advisor.startInterpret("Which models are available?", firstContext, owner);
     expect(started.conversation?.contextMessage).toContain("state snapshot");
@@ -222,9 +223,9 @@ describe("profile advisor", () => {
         ? { targetId: "small", desired: "off", observed: "healthy", message: "Stopping" }
         : { targetId: "small", desired: "on", observed: "healthy", message: "Ready" }
     );
-    const started = await advisor.startInterpret("Are you awake?", {}, { username: "owner", isAdmin: false });
+    const started = await advisor.startInterpret("Are you awake?", {}, testUser("owner"));
     expect(started).toMatchObject({ phase: "waking", message: "The Assistant is sleeping. NeurOn is waking it…" });
-    await vi.waitFor(() => expect(advisor.getInterpretRequest(started.id, { username: "owner", isAdmin: false })).toMatchObject({ phase: "complete" }));
+    await vi.waitFor(() => expect(advisor.getInterpretRequest(started.id, testUser("owner"))).toMatchObject({ phase: "complete" }));
   });
 
   it("reports warm-model response timeouts separately from cold-start duration", async () => {

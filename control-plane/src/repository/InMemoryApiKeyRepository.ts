@@ -16,16 +16,16 @@ export class InMemoryApiKeyRepository implements ApiKeyRepository {
     return key ? cloneApiKey(key) : undefined;
   }
 
-  async listForUser(username: string): Promise<ApiKey[]> {
+  async listForUser(userId: string): Promise<ApiKey[]> {
     return Array.from(this.keys.values())
-      .filter((key) => key.username === username)
+      .filter((key) => key.userId === userId)
       .sort((left, right) => left.createdAt.getTime() - right.createdAt.getTime() || left.id.localeCompare(right.id))
       .map(cloneApiKey);
   }
 
-  async deleteForUser(id: string, username: string): Promise<boolean> {
+  async deleteForUser(id: string, userId: string): Promise<boolean> {
     const key = this.keys.get(id);
-    if (!key || key.username !== username) return false;
+    if (!key || key.userId !== userId) return false;
     return this.keys.delete(id);
   }
 
@@ -33,6 +33,11 @@ export class InMemoryApiKeyRepository implements ApiKeyRepository {
     const key = this.keys.get(id);
     if (!key) return;
     this.keys.set(id, cloneApiKey({ ...key, lastUsedAt }));
+  }
+
+  countForUser(userId: string): number { return Array.from(this.keys.values()).filter((value) => value.userId === userId).length; }
+  reassignUser(sourceUserId: string, targetUserId: string, username: string): void {
+    for (const key of this.keys.values()) if (key.userId === sourceUserId) Object.assign(key, { userId: targetUserId, username });
   }
 }
 

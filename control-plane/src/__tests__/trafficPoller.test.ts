@@ -7,6 +7,8 @@ import { ModelCatalog } from "../services/ModelCatalog.js";
 import { ModelSelectionService } from "../services/ModelSelectionService.js";
 import { TrafficKeepaliveService } from "../services/TrafficKeepaliveService.js";
 import { TrafficPoller } from "../services/TrafficPoller.js";
+import type { IdentityService } from "../services/IdentityService.js";
+import { testUser } from "./testUsers.js";
 
 const target: CapacityTarget = {
   id: "local-runtime",
@@ -234,6 +236,59 @@ describe("TrafficPoller", () => {
     await poller.poll(new Date("2026-06-24T20:02:00.000Z"));
 
     expect(record).toHaveBeenCalledTimes(1);
-    expect(record).toHaveBeenCalledWith(target, ["qwen-3.6-35b-a3b"], new Date("2026-06-24T20:01:00.000Z"), new Date("2026-06-24T20:02:00.000Z"));
+    expect(record).toHaveBeenCalledWith(target, ["qwen-3.6-35b-a3b"], new Date("2026-06-24T20:01:00.000Z"), new Date("2026-06-24T20:02:00.000Z"), undefined);
+  });
+
+  it("turns known LiteLLM traffic into the user's existing reservation keepalive", async () => {
+    const repository = new InMemoryReservationRepository();
+    const statuses = new InMemoryTargetStatusRepository();
+    const user = testUser("alice");
+    statuses.set({ targetId: target.id, desired: "on", observed: "healthy", message: "Ready" });
+    await repository.create({
+      id: "alice-main",
+      userId: user.id,
+      username: user.username,
+      modelIds: [],
+      targetIds: [target.id],
+      createdAt: new Date("2026-06-24T19:00:00.000Z"),
+      expiresAt: new Date("2026-06-24T20:02:00.000Z"),
+      keepaliveMinutes: 7,
+      status: "active"
+    });
+    const identities = { resolveLiteLlmUser: vi.fn(async () => user), canAccessTarget: vi.fn(async () => true) } as unknown as IdentityService;
+    const poller = new TrafficPoller({
+      async pollRecentTraffic() {
+        return [{ modelId: "qwen-3.6-35b-a3b", seenAt: new Date("2026-06-24T20:00:30.000Z"), externalUserSubject: "alice@example.test" }];
+      }
+    }, new ModelCatalog(models, [target]), new TrafficKeepaliveService(repository, statuses), undefined, identities);
+
+    await poller.poll(new Date("2026-06-24T20:01:00.000Z"));
+
+    expect(identities.resolveLiteLlmUser).toHaveBeenCalledWith("alice@example.test");
+    const reservations = await repository.list();
+    expect(reservations).toMatchObject([{
+      id: "alice-main",
+      userId: user.id,
+      modelIds: ["qwen-3.6-35b-a3b"],
+      expiresAt: new Date("2026-06-24T20:07:30.000Z")
+    }]);
+    expect(reservations[0].synthetic).not.toBe(true);
+  });
+
+  it("does not attribute private-target traffic to a resolved user without target access", async () => {
+    const privateTarget: CapacityTarget = { ...target, audience: { scope: "teams", teamIds: ["team-private"] } };
+    const repository = new InMemoryReservationRepository();
+    const statuses = new InMemoryTargetStatusRepository();
+    const user = testUser("alice");
+    statuses.set({ targetId: target.id, desired: "on", observed: "healthy", message: "Ready" });
+    const identities = { resolveLiteLlmUser: vi.fn(async () => user), canAccessTarget: vi.fn(async () => false) } as unknown as IdentityService;
+    const poller = new TrafficPoller({ async pollRecentTraffic() { return [{ modelId: target.modelIds[0], seenAt: new Date("2026-06-24T20:00:30.000Z"), externalUserSubject: "alice@example.test" }]; } }, new ModelCatalog(models, [privateTarget]), new TrafficKeepaliveService(repository, statuses), undefined, identities);
+
+    await poller.poll(new Date("2026-06-24T20:01:00.000Z"));
+
+    expect(identities.canAccessTarget).toHaveBeenCalledWith(user, privateTarget, "use");
+    const reservations = await repository.list();
+    expect(reservations).toMatchObject([{ username: "traffic", synthetic: true }]);
+    expect(reservations[0].userId).toBeUndefined();
   });
 });

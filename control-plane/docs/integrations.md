@@ -33,10 +33,11 @@ Use keys with Bearer auth:
 Authorization: Bearer sk-neuron-...
 ```
 
-API keys resolve to the username that created them. Their admin status follows
-the same `ADMIN_USERS` rule as cookie and Basic auth. For safety, the MCP
-`end_reservation` tool only ends reservations owned by the key's user, even if
-that user is an admin.
+API keys belong to a durable user ID. Every request re-resolves that user's
+current status, roles, permissions, username, and target visibility, so a
+disable, merge, or role change takes effect without rotating the key. For
+safety, the MCP `end_reservation` tool only ends reservations owned by the
+key's user, even if that user is an administrator.
 
 API keys are stored through the configured storage driver:
 
@@ -64,6 +65,13 @@ GET /docs
 The OpenAPI document includes Basic and Bearer authentication schemes and
 schemas for the main plugin-facing endpoints, including models, reservations,
 status, API keys, and MCP.
+
+Local HTTP Basic authentication uses an individual user's password and is
+rejected when the durable local authentication method is disabled. Personal
+Bearer keys remain available for automation. Owners and Administrators with
+`users.merge` may preview and confirm duplicate-account merges at
+`POST /api/admin/users/merge/preview` and `POST /api/admin/users/merge`; see
+[Identity and Access](identity-access.md).
 
 Reservation responses may include `costEstimate` after the reconciler has
 allocated estimated target activation cost to that reservation. This is best-effort

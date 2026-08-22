@@ -1,4 +1,4 @@
-import type { ApiKey, AppConfig, AssistantConfig, AuthMethod, AuthenticatedUser, CapacityTarget, ModelDefinition, ModelSelectionCatalogConfig, Reservation, ReservationProfile, RuntimeProfile, TargetStatus } from "../domain/types.js";
+import type { ApiKey, AppConfig, AssistantConfig, AuthMethod, AuthenticatedUser, CapacityTarget, ModelDefinition, ModelSelectionCatalogConfig, RegistrationInvitation, Reservation, ReservationProfile, Role, RuntimeProfile, TargetStatus, Team, UserAccount, UserIdentity, UserMergePreview } from "../domain/types.js";
 import { DEFAULT_AWS_EC2_INSTANCE_NAME_PATTERN } from "../capacity/AwsEc2CapacityProvider.js";
 import type { AuthMethodView } from "../services/AuthMethodService.js";
 import type { ProviderView } from "../services/ProviderService.js";
@@ -301,32 +301,7 @@ export function layout(title: string, user: AuthenticatedUser | undefined, body:
           ${user ? `<form method="post" action="/logout"><button class="drawer-action" type="submit">Sign out</button></form>` : ""}
         </div>
       </details>
-      ${user?.isAdmin ? `<details class="drawer-tree" open>
-        <summary>Admin</summary>
-        <div class="drawer-branch">
-          <a href="/admin/auth">Authentication</a>
-          <a href="/admin/hassleoff">HassleOff safety</a>
-          <a href="/admin/updates">Updates</a>
-        </div>
-      </details>
-      <details class="drawer-tree" open>
-        <summary>Configuration</summary>
-        <div class="drawer-branch">
-          <a href="/admin/auth">Auth</a>
-          <a href="/admin/providers">Providers</a>
-          <a href="/admin/targets">Targets</a>
-          <a href="/admin/models">Model data</a>
-          <a href="/admin/assistant">Assistant</a>
-        </div>
-      </details>
-      <details class="drawer-tree">
-        <summary>History</summary>
-        <div class="drawer-branch">
-          <a href="/admin/reservations">Reservations</a>
-          <a href="/admin/activations">Activations</a>
-          <a href="/admin/usage">Usage</a>
-        </div>
-      </details>` : ""}
+      ${adminNavigation(user)}
     </nav>
   </aside>
   <main>${body}</main>
@@ -549,23 +524,124 @@ function assistantClientScript(username: string, isAdmin: boolean): string {
     })();`;
 }
 
-export function loginPage(error = "", methods: Array<Pick<AuthMethod, "id" | "displayName" | "type">> = [], sharedPasswordEnabled = true): string {
+function adminNavigation(user: AuthenticatedUser | undefined): string {
+  if (!user?.isAdmin) return "";
+  const can = (permission: string) => user.permissions.includes("*") || user.permissions.includes(permission);
+  const section = (title: string, links: string[], open = false) => links.length === 0 ? "" : `<details class="drawer-tree"${open ? " open" : ""}>
+        <summary>${title}</summary>
+        <div class="drawer-branch">${links.join("")}</div>
+      </details>`;
+  const link = (href: string, label: string) => `<a href="${href}">${label}</a>`;
+  return [
+    section("Admin", [
+      can("users.manage") ? link("/admin/users", "Users and teams") : "",
+      can("auth.manage") ? link("/admin/auth", "Authentication") : "",
+      can("system.manage") ? link("/admin/hassleoff", "HassleOff safety") : "",
+      can("system.manage") ? link("/admin/updates", "Updates") : ""
+    ].filter(Boolean), true),
+    section("Configuration", [
+      can("targets.manage") ? link("/admin/providers", "Providers") : "",
+      can("targets.manage") ? link("/admin/targets", "Targets") : "",
+      can("targets.read_all") || can("discovery.run") ? link("/admin/models", "Model data") : "",
+      can("assistant.configure") ? link("/admin/assistant", "Assistant") : ""
+    ].filter(Boolean), true),
+    section("History", can("reports.read_all") ? [
+      link("/admin/reservations", "Reservations"),
+      link("/admin/activations", "Activations"),
+      link("/admin/usage", "Usage")
+    ] : [])
+  ].join("");
+}
+
+export function loginPage(error = "", methods: Array<Pick<AuthMethod, "id" | "displayName" | "type">> = [], localEnabled = true): string {
   const authButtons = methods.length
     ? `<div class="inline-actions" style="margin-top: 14px;">${methods.map((method) => `<form method="get" action="/auth/${escapeHtml(method.type)}/start"><input type="hidden" name="method" value="${escapeHtml(method.id)}"><button class="secondary" type="submit">Sign in with ${escapeHtml(method.displayName)}</button></form>`).join("")}</div>`
     : "";
-  const passwordForm = sharedPasswordEnabled ? `<form method="post" action="/login">
-      <p><label>Username<br><input name="username" required></label></p>
-      <p><label>Password<br><input name="password" type="password" required></label></p>
+  const passwordForm = `<form method="post" action="/login">
+      <p><label>Username<br><input name="username" autocomplete="username" required></label></p>
+      <p><label>Password<br><input name="password" type="password" autocomplete="current-password" required></label></p>
       <button type="submit">Sign in</button>
-    </form>` : "";
-  const noMethods = !sharedPasswordEnabled && methods.length === 0 ? `<p class="status">No interactive sign-in methods are enabled.</p>` : "";
+    </form>`;
   return layout("Login", undefined, `<section class="panel">
     <h1>Sign in</h1>
     ${error ? `<p class="status">${escapeHtml(error)}</p>` : ""}
-    ${passwordForm}
+    ${localEnabled ? passwordForm : `<p class="muted">Username and password sign-in is disabled for this deployment.</p>`}
     ${authButtons}
-    ${noMethods}
   </section>`);
+}
+
+export function registrationPage(error = "", submittedToken = ""): string {
+  return layout("Create account", undefined, `<section class="panel">
+    <h1>Create your NeurOn account</h1>
+    <p class="muted">Open the registration link supplied by a NeurOn administrator. The invitation is read from the link without sending it in the page request.</p>
+    ${error ? `<p class="status">${escapeHtml(error)}</p>` : ""}
+    <form method="post" action="/register" data-registration-form>
+      <input name="token" type="hidden">
+      <div class="field-grid">
+        <p><label>Username<br><input name="username" autocomplete="username" required></label></p>
+        <p><label>Display name (optional)<br><input name="displayName" autocomplete="name"></label></p>
+      </div>
+      <div class="field-grid">
+        <p><label>Password<br><input name="password" type="password" minlength="10" autocomplete="new-password" required></label></p>
+        <p><label>Confirm password<br><input name="confirmPassword" type="password" minlength="10" autocomplete="new-password" required></label></p>
+      </div>
+      <p class="status" data-registration-status></p>
+      <button type="submit">Create account</button>
+    </form>
+  </section><script>
+    (() => {
+      const token = new URLSearchParams(location.hash.slice(1)).get('token') || ${JSON.stringify(submittedToken)};
+      const form = document.querySelector('[data-registration-form]');
+      form.querySelector('[name="token"]').value = token;
+      const status = form.querySelector('[data-registration-status]');
+      if (!token) { status.textContent = 'This page needs a valid registration link.'; form.querySelector('button').disabled = true; }
+      history.replaceState(null, '', location.pathname + location.search);
+    })();
+  </script>`);
+}
+
+export function userAdminPage(
+  user: AuthenticatedUser,
+  users: Array<UserAccount & { roles: Role[]; identities: UserIdentity[] }>,
+  roles: Role[],
+  teams: Team[],
+  invitations: RegistrationInvitation[],
+  notice: { error?: string; registrationUrl?: string; mergePreview?: UserMergePreview } = {}
+): string {
+  const globalRoles = roles.filter((role) => role.scope === "global");
+  const assignableGlobalRoles = user.permissions.includes("*") ? globalRoles : globalRoles.filter((role) => !role.permissions.includes("*"));
+  const userRows = users.map((account) => `<details class="drilldown"><summary><div><strong>${escapeHtml(account.displayName ?? account.username)}</strong><div class="muted"><code>${escapeHtml(account.username)}</code> · ${escapeHtml(account.id)}</div></div><span class="badge ${account.status === "active" ? "active" : "failed"}">${escapeHtml(account.status)}</span></summary><div class="drilldown-body">
+    <p><strong>Roles:</strong> ${account.roles.map((role) => `<span class="pill">${escapeHtml(role.name)}</span>`).join(" ") || `<span class="muted">None</span>`}</p>
+    <p><strong>Sign-in methods:</strong> ${account.identities.map((identity) => `<span class="pill">${escapeHtml(identity.providerType)} · ${escapeHtml(identity.providerId)}</span>`).join(" ") || `<span class="muted">Not claimed</span>`}</p>
+    <div class="inline-actions">
+      <form method="post" action="/admin/users/${escapeHtml(account.id)}/roles"><select name="roleId">${assignableGlobalRoles.map((role) => `<option value="${escapeHtml(role.id)}">${escapeHtml(role.name)}</option>`).join("")}</select><button type="submit">Assign role</button></form>
+      <form method="post" action="/admin/users/${escapeHtml(account.id)}/status"><input type="hidden" name="status" value="${account.status === "active" ? "disabled" : "active"}"><button class="${account.status === "active" ? "danger" : "secondary"}" type="submit">${account.status === "active" ? "Disable" : "Enable"}</button></form>
+      <form method="post" action="/admin/users/invitations"><input type="hidden" name="userId" value="${escapeHtml(account.id)}"><input type="hidden" name="expiresInMinutes" value="1440"><button class="secondary" type="submit">Create claim/reset link</button></form>
+    </div>
+  </div></details>`).join("");
+  const activeInvitations = invitations.filter((invitation) => !invitation.revokedAt && invitation.expiresAt > new Date() && invitation.useCount < invitation.maxUses);
+  return layout("Users and teams", user, `<section class="panel">
+    <h1>Users and teams</h1>
+    <p class="muted">NeurOn users own durable profiles, reservations, favorites, and API keys. Local, GitHub, and OIDC sign-in methods attach to the same account.</p>
+    ${notice.error ? `<p class="status">${escapeHtml(notice.error)}</p>` : ""}
+    ${notice.registrationUrl ? `<div class="secret-box"><code>${escapeHtml(notice.registrationUrl)}</code><button type="button" data-copy-registration>Copy registration link</button></div><script>document.querySelector('[data-copy-registration]').addEventListener('click',async event=>{await navigator.clipboard.writeText(${JSON.stringify(notice.registrationUrl)});event.currentTarget.textContent='Copied';});</script>` : ""}
+  </section>
+  <section class="panel"><h2>Invite a user</h2><form method="post" action="/admin/users/invitations"><div class="field-grid">
+    <p><label>Username (optional)<br><input name="intendedUsername" placeholder="alice"></label></p>
+    <p><label>Initial role<br><select name="initialRoleId"><option value="role_member">Member</option>${assignableGlobalRoles.filter((role) => role.id !== "role_member").map((role) => `<option value="${escapeHtml(role.id)}">${escapeHtml(role.name)}</option>`).join("")}</select></label></p>
+    <p><label>Expires after<br><select name="expiresInMinutes"><option value="60">1 hour</option><option value="1440" selected>1 day</option><option value="10080">7 days</option></select></label></p>
+  </div><button type="submit">Create registration link</button></form><p class="muted">${activeInvitations.length} active invitation${activeInvitations.length === 1 ? "" : "s"}. Tokens are never shown again.</p></section>
+  <section class="panel"><h2>Accounts</h2><div class="summary-list">${userRows || `<p class="muted">No users yet.</p>`}</div></section>
+  ${user.permissions.includes("*") || user.permissions.includes("users.merge") ? mergeUsersPanel(users, notice.mergePreview) : ""}
+  <section class="panel"><h2>Teams</h2><p>${teams.length ? teams.map((team) => `<span class="pill">${escapeHtml(team.name)}</span>`).join(" ") : `<span class="muted">No teams configured yet.</span>`}</p><p class="muted">Team hierarchy and OIDC-managed membership are durable. Team administration is also available through the admin API.</p></section>`);
+}
+
+function userSelect(name: string, users: UserAccount[]): string { return `<select name="${name}" required><option value="">Choose a user</option>${users.filter((user) => !user.mergedIntoUserId).map((user) => `<option value="${escapeHtml(user.id)}">${escapeHtml(user.username)} · ${escapeHtml(user.id)}</option>`).join("")}</select>`; }
+
+function mergeUsersPanel(users: UserAccount[], preview?: UserMergePreview): string {
+  if (!preview) return `<section class="panel"><h2>Merge duplicate accounts</h2><p class="status">Merging moves durable ownership and sign-in methods to the destination account and disables the source. It cannot be automatically reversed.</p><form method="post" action="/admin/users/merge"><div class="field-grid"><p><label>Source user<br>${userSelect("sourceUserId", users)}</label></p><p><label>Destination user<br>${userSelect("targetUserId", users)}</label></p></div><button class="secondary" type="submit">Preview merge</button></form></section>`;
+  const counts = Object.entries(preview.counts).map(([name, count]) => `<span class="pill">${escapeHtml(name)}: ${count}</span>`).join(" ");
+  return `<section class="panel"><h2>Confirm account merge</h2><p>Move all listed data from <strong>${escapeHtml(preview.sourceUser.username)}</strong> to <strong>${escapeHtml(preview.targetUser.username)}</strong>, then disable the source account.</p><p>${counts}</p><form method="post" action="/admin/users/merge"><input type="hidden" name="sourceUserId" value="${escapeHtml(preview.sourceUser.id)}"><input type="hidden" name="targetUserId" value="${escapeHtml(preview.targetUser.id)}"><p><label>Type <code>MERGE</code><br><input name="confirm" autocomplete="off" required></label></p><div class="actions"><button class="danger" type="submit">Merge accounts</button><a href="/admin/users">Cancel</a></div></form></section>`;
 }
 
 export function welcomePage(user: AuthenticatedUser, hasProfiles: boolean, helpMode: boolean): string {
@@ -1546,7 +1622,8 @@ export function adminAuthPage(user: AuthenticatedUser, methods: AuthMethodView[]
       usernameClaim: "preferred_username",
       groupsClaim: "groups",
       allowedUsers: "",
-      allowedGroups: ""
+      allowedGroups: "",
+      teamMembershipRulesJson: ""
     }, "Add OIDC provider")}
   </section>
   <section class="panel">
@@ -1616,6 +1693,7 @@ interface OidcAuthFormValues {
   groupsClaim: string;
   allowedUsers: string;
   allowedGroups: string;
+  teamMembershipRulesJson: string;
 }
 
 function oidcAuthForm(action: string, values: OidcAuthFormValues, buttonLabel: string): string {
@@ -1648,24 +1726,41 @@ function oidcAuthForm(action: string, values: OidcAuthFormValues, buttonLabel: s
       <p><label>Allowed groups<br><input name="allowedGroups" type="text" value="${escapeHtml(values.allowedGroups)}" placeholder="neuron-users"></label></p>
       <p><label>Allowed users<br><input name="allowedUsers" type="text" value="${escapeHtml(values.allowedUsers)}" placeholder="alice@example.com"></label></p>
     </div>
+    <p><label>OIDC-managed team membership rules (JSON)<br><textarea name="teamMembershipRulesJson" placeholder='[{"id":"engineering","claim":"groups","match":"exact","value":"engineering-ai","teamId":"team_engineering","roleId":"role_team_member"}]'>${escapeHtml(values.teamMembershipRulesJson)}</textarea></label></p>
+    <p class="muted">Memberships created by these rules are reconciled at login. Removing a claim removes only the OIDC-managed assignment; manual membership remains intact.</p>
     <div class="actions"><button type="submit">${escapeHtml(buttonLabel)}</button></div>
   </form>`;
 }
 
 function authMethodRow(method: AuthMethodView): string {
+  const local = method.config.local;
   const github = method.config.github;
   const oidc = method.config.oidc;
   const editAction = method.editable
     ? authMethodEditPanel(method)
     : `<form method="post" action="/admin/auth/${escapeHtml(method.id)}/copy-to-db"><button class="secondary" type="submit">Copy config auth to DB</button></form>`;
-  const deleteAction = method.editable ? authMethodDeletePanel(method) : `<p class="muted">This method is loaded from environment config. Remove it from configuration or copy it to the database before deleting it here.</p>`;
-  const details = oidc
+  const deleteAction = method.type === "local"
+    ? `<p class="muted">Local authentication can be disabled, but the built-in method cannot be deleted.</p>`
+    : method.editable ? authMethodDeletePanel(method) : `<p class="muted">This method is loaded from environment config. Remove it from configuration or copy it to the database before deleting it here.</p>`;
+  const details = method.type === "local"
+    ? `<p><strong>Password sign-in:</strong> ${method.enabled ? "Enabled" : "Disabled"}</p><p><strong>Invitation registration:</strong> ${local?.registrationEnabled === false ? "Disabled" : "Enabled"}</p><p class="muted">Disabling this method blocks the login form, HTTP Basic authentication, and invitation-based password registration. API keys and external identity providers are unaffected.</p>`
+    : oidc
     ? `<p><strong>Issuer:</strong> <code>${escapeHtml(oidc.issuer)}</code></p><p><strong>Client ID:</strong> <code>${escapeHtml(oidc.clientId)}</code></p><p><strong>Secret source:</strong> ${escapeHtml(oidcSecretSummary(oidc.clientSecret))}</p><p><strong>Username claim:</strong> <code>${escapeHtml(oidc.usernameClaim ?? "preferred_username")}</code></p><p><strong>Allowed groups:</strong> ${oidc.allowedGroups?.length ? escapeHtml(oidc.allowedGroups.join(", ")) : "<span class=\"muted\">None required</span>"}</p><p><strong>Allowed users:</strong> ${oidc.allowedUsers?.length ? escapeHtml(oidc.allowedUsers.join(", ")) : "<span class=\"muted\">Any assigned user</span>"}</p>`
     : `<p><strong>Client ID:</strong> <code>${escapeHtml(github?.clientId ?? "")}</code></p><p><strong>Allowed users:</strong> ${github?.allowedUsers?.length ? escapeHtml(github.allowedUsers.join(", ")) : "<span class=\"muted\">Any GitHub user</span>"}</p><p><strong>Allowed organizations:</strong> ${github?.allowedOrganizations?.length ? escapeHtml(github.allowedOrganizations.join(", ")) : "<span class=\"muted\">None required</span>"}</p>`;
   return `<details class="drilldown"><summary><div><strong>${escapeHtml(method.displayName)}</strong><div class="muted"><code>${escapeHtml(method.id)}</code> | ${escapeHtml(method.type)} | ${method.enabled ? "enabled" : "disabled"}</div></div><span class="badge ${method.source === "persisted" ? "active" : "done"}">${escapeHtml(method.source)}</span></summary><div class="drilldown-body" data-tabs><div class="tabbar"><button type="button" data-tab="view" aria-selected="true">View</button><button type="button" data-tab="edit" aria-selected="false">Edit</button><button type="button" data-tab="delete" aria-selected="false">Delete</button></div><section class="tab-panel" data-tab-panel="view">${details}</section><section class="tab-panel" data-tab-panel="edit" hidden>${editAction}</section><section class="tab-panel" data-tab-panel="delete" hidden>${deleteAction}</section></div></details>`;
 }
 
 function authMethodEditPanel(method: AuthMethodView): string {
+  if (method.type === "local") {
+    return `<form method="post" action="/admin/auth/${escapeHtml(method.id)}/update">
+      <input name="id" type="hidden" value="${escapeHtml(method.id)}"><input name="type" type="hidden" value="local">
+      <p><label>Display name<br><input name="displayName" type="text" value="${escapeHtml(method.displayName)}"></label></p>
+      <p><label><input name="enabled" type="checkbox" ${method.enabled ? "checked" : ""}> Enable username and password sign-in</label></p>
+      <p><label><input name="registrationEnabled" type="checkbox" ${method.config.local?.registrationEnabled === false ? "" : "checked"}> Allow invited users to register a local password</label></p>
+      <p class="status">Before disabling local sign-in, verify at least one Owner can sign in through an enabled external provider. The offline owner-link command remains the recovery path.</p>
+      <div class="actions"><button type="submit">Save local authentication</button></div>
+    </form>`;
+  }
   const oidc = method.config.oidc;
   if (oidc) {
     const reference = oidc.clientSecret;
@@ -1683,7 +1778,8 @@ function authMethodEditPanel(method: AuthMethodView): string {
       usernameClaim: oidc.usernameClaim ?? "preferred_username",
       groupsClaim: oidc.groupsClaim ?? "groups",
       allowedUsers: oidc.allowedUsers?.join(",") ?? "",
-      allowedGroups: oidc.allowedGroups?.join(",") ?? ""
+      allowedGroups: oidc.allowedGroups?.join(",") ?? "",
+      teamMembershipRulesJson: oidc.teamMembershipRules?.length ? JSON.stringify(oidc.teamMembershipRules, null, 2) : ""
     }, "Save auth method");
   }
   const github = method.config.github;
@@ -1785,6 +1881,9 @@ function targetCreateModal(providers: ProviderView[], runtimeProfiles: RuntimePr
         <p><label>Hourly cost override (USD)<br><input name="estimatedHourlyCostUsd" type="number" min="0" step="0.000001" placeholder="leave empty for provider discovery"></label></p>
         <p><label>Configured model IDs<br><input name="modelIds" type="text" placeholder="qwen-3.6,gemma-4"></label></p>
         <p><label>Hosting mode<br><select name="hostingMode"><option value="">Unknown</option><option value="dedicated">Dedicated model host</option><option value="multi-model">Multi-model host</option></select></label></p>
+        <p><label>Target audience<br><select name="audienceScope"><option value="global">Global</option><option value="teams">Specific teams</option><option value="users">Specific users</option></select></label></p>
+        <p><label>Team IDs<br><input name="audienceTeamIds" type="text" placeholder="engineering,research"></label></p>
+        <p><label>User IDs<br><input name="audienceUserIds" type="text" placeholder="usr_..."></label></p>
         <p><label>LiteLLM model-group alias priority<br><input name="aliasPriority" type="number" min="1" step="1" value="100"></label></p>
         <p class="muted">Lower priorities own a colliding alias; later targets become formal LiteLLM fallbacks.</p>
         <p><label>LiteLLM model route prefixes<br><input name="trafficModelPrefixes" type="text" placeholder="defaults to &lt;target-id&gt;/"></label></p>
@@ -2167,6 +2266,9 @@ function targetEditPanel(target: TargetView, providers: ProviderView[], runtimeP
       <p><label>Hourly cost override (USD)<br><input name="estimatedHourlyCostUsd" type="number" min="0" step="0.000001" value="${escapeHtml(String(target.costEstimate?.hourlyUsd ?? ""))}" placeholder="leave empty for provider discovery"></label></p>
       <p><label>Configured model IDs<br><input name="modelIds" type="text" value="${escapeHtml(target.modelIds.join(","))}"></label></p>
       <p><label>Hosting mode<br><select name="hostingMode"><option value="" ${target.hostingMode ? "" : "selected"}>Unknown</option><option value="dedicated" ${target.hostingMode === "dedicated" ? "selected" : ""}>Dedicated model host</option><option value="multi-model" ${target.hostingMode === "multi-model" ? "selected" : ""}>Multi-model host</option></select></label></p>
+      <p><label>Target audience<br><select name="audienceScope"><option value="global" ${(target.audience?.scope ?? "global") === "global" ? "selected" : ""}>Global</option><option value="teams" ${target.audience?.scope === "teams" ? "selected" : ""}>Specific teams</option><option value="users" ${target.audience?.scope === "users" ? "selected" : ""}>Specific users</option></select></label></p>
+      <p><label>Team IDs<br><input name="audienceTeamIds" type="text" value="${escapeHtml(target.audience?.scope === "teams" ? target.audience.teamIds.join(",") : "")}"></label></p>
+      <p><label>User IDs<br><input name="audienceUserIds" type="text" value="${escapeHtml(target.audience?.scope === "users" ? target.audience.userIds.join(",") : "")}"></label></p>
       <p><label>LiteLLM model-group alias priority<br><input name="aliasPriority" type="number" min="1" step="1" value="${target.aliasPriority ?? 100}"></label></p>
       <p class="muted">Lower priorities own a colliding alias; matching aliases on higher-numbered targets are formal fallbacks.</p>
       <p><label>LiteLLM model route prefixes<br><input name="trafficModelPrefixes" type="text" value="${escapeHtml(target.trafficModelPrefixes?.join(",") ?? "")}" placeholder="defaults to ${escapeHtml(target.id)}/"></label></p>

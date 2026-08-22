@@ -3,7 +3,7 @@ import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import type { AppConfig, AuthMethod, CapacityProviderDefinition, CapacityTarget, ReservationProfileSelection, RuntimeProfile } from "../domain/types.js";
 import type { CapacityProvider } from "../domain/interfaces.js";
-import { SharedPasswordAuthProvider } from "../auth/SharedPasswordAuthProvider.js";
+import { IdentityAuthProvider, SESSION_MAX_AGE_SECONDS } from "../auth/IdentityAuthProvider.js";
 import { OidcAuthService, type OidcLoginState } from "../auth/OidcAuthService.js";
 import { ShutdownCoordinator } from "../services/ShutdownCoordinator.js";
 import { UpdateChecker } from "../services/UpdateChecker.js";
@@ -14,6 +14,7 @@ import type { ModelSelectionService } from "../services/ModelSelectionService.js
 import type { ModelFavoriteService } from "../services/ModelFavoriteService.js";
 import type { UsageAnalyticsService } from "../services/UsageAnalyticsService.js";
 import type { ProfileAdvisorService } from "../services/ProfileAdvisorService.js";
+import type { IdentityService } from "../services/IdentityService.js";
 import { ProviderService } from "../services/ProviderService.js";
 import { ReservationService } from "../services/ReservationService.js";
 import { ReservationProfileService } from "../services/ReservationProfileService.js";
@@ -21,14 +22,14 @@ import { CostEstimationService } from "../services/CostEstimationService.js";
 import { TargetService } from "../services/TargetService.js";
 import { TargetProvisioningService } from "../services/TargetProvisioningService.js";
 import type { HassleOffSafetyView } from "../ui/html.js";
-import { activationPage, adminAuthPage, apiKeysPage, assistantConfigPage, clientSetupPage, hassleOffSafetyPage, loginPage, modelMetadataPage, profileEditorPage, profilesPage, providerAdminPage, reservationHistoryPage, reservationPage, startPage, targetAdminPage, updatesPage, usagePage, welcomePage } from "../ui/html.js";
+import { activationPage, adminAuthPage, apiKeysPage, assistantConfigPage, clientSetupPage, hassleOffSafetyPage, loginPage, modelMetadataPage, profileEditorPage, profilesPage, providerAdminPage, registrationPage, reservationHistoryPage, reservationPage, startPage, targetAdminPage, updatesPage, usagePage, userAdminPage, welcomePage } from "../ui/html.js";
 import { requireUser } from "../utils/http.js";
 import type { HassleOffClient } from "../safety/HassleOffClient.js";
 
 export function registerUiRoutes(
   app: FastifyInstance,
   config: AppConfig,
-  authProvider: SharedPasswordAuthProvider,
+  authProvider: IdentityAuthProvider,
   authMethodService: AuthMethodService,
   oidcAuthService: OidcAuthService,
   updateChecker: UpdateChecker,
@@ -46,24 +47,72 @@ export function registerUiRoutes(
   modelSelection: ModelSelectionService,
   profileAdvisor: ProfileAdvisorService,
   modelFavorites: ModelFavoriteService,
-  usageAnalytics: UsageAnalyticsService
+  usageAnalytics: UsageAnalyticsService,
+  identityService: IdentityService
 ) {
-  const sharedPasswordEnabled = config.sharedPasswordEnabled !== false;
-  const enabledAuthMethods = () => authMethodService.listEnabled();
-  const renderLoginPage = async (error = "") => loginPage(error, await enabledAuthMethods(), sharedPasswordEnabled);
+  const localLoginAttempts = new Map<string, { failures: number; resetAt: number }>();
+  const recordLocalLoginFailure = (attemptKey: string, now: number) => {
+    if (localLoginAttempts.size >= 10_000) {
+      for (const [key, attempt] of localLoginAttempts) if (attempt.resetAt <= now) localLoginAttempts.delete(key);
+      if (localLoginAttempts.size >= 10_000) {
+        const oldest = localLoginAttempts.keys().next().value as string | undefined;
+        if (oldest) localLoginAttempts.delete(oldest);
+      }
+    }
+    const current = localLoginAttempts.get(attemptKey);
+    localLoginAttempts.set(attemptKey, { failures: (current?.failures ?? 0) + 1, resetAt: current?.resetAt ?? now + 10 * 60_000 });
+  };
+  const renderLoginPage = async (error = "") => {
+    const [methods, localEnabled] = await Promise.all([authMethodService.listEnabled(), authMethodService.localEnabled()]);
+    return loginPage(error, methods.filter((method) => method.type !== "local"), localEnabled);
+  };
+  const visibleTargetsFor = async (user: ReturnType<typeof requireUser>) => {
+    const visible: CapacityTarget[] = [];
+    for (const target of catalog.listTargets()) if (await identityService.canAccessTarget(user, target)) visible.push(target);
+    return visible;
+  };
   const selectionDeploymentsForUser = async (user: ReturnType<typeof requireUser>, costs: Record<string, { hourlyUsd: number }>) => {
-    const [favorites, usage] = await Promise.all([modelFavorites.listForUser(user), usageAnalytics.deploymentUsage()]);
+    const [favorites, usage, visibleTargets] = await Promise.all([modelFavorites.listForUser(user), usageAnalytics.deploymentUsage(), visibleTargetsFor(user)]);
+    const visibleTargetIds = new Set(visibleTargets.map((target) => target.id));
     const favoriteKeys = new Set(favorites.map((value) => `${value.targetId}::${value.modelId}`));
     const usageByKey = new Map(usage.map((value) => [`${value.targetId}::${value.modelId}`, value]));
-    return modelSelection.listDeployments(costs).map((deployment) => ({ ...deployment, ...usageByKey.get(deployment.key), favorite: favoriteKeys.has(deployment.key) }));
+    return modelSelection.listDeployments(costs).filter((deployment) => visibleTargetIds.has(deployment.targetId)).map((deployment) => ({ ...deployment, ...usageByKey.get(deployment.key), favorite: favoriteKeys.has(deployment.key) }));
   };
   app.get("/login", async (_request, reply) => reply.type("text/html").send(await renderLoginPage()));
   app.post("/login", async (request, reply) => {
-    if (!sharedPasswordEnabled) return reply.code(403).type("text/html").send(await renderLoginPage("Shared password authentication is disabled"));
     const body = z.object({ username: z.string().min(1), password: z.string() }).parse(request.body);
-    if (body.password !== config.sharedPassword || !config.cookieSecret) return reply.code(401).type("text/html").send(await renderLoginPage("Invalid credentials"));
-    reply.setCookie("llm_control_auth", authProvider.createCookie(body.username), { path: "/", httpOnly: true, sameSite: "lax" });
+    if (!await authMethodService.localEnabled()) return reply.code(404).type("text/html").send(await renderLoginPage("Username and password sign-in is disabled"));
+    const attemptKey = `${request.ip}\0${body.username.trim().toLocaleLowerCase("en-US")}`;
+    const now = Date.now();
+    const attempt = localLoginAttempts.get(attemptKey);
+    if (attempt && attempt.resetAt > now && attempt.failures >= 8) return reply.code(429).type("text/html").send(await renderLoginPage("Too many sign-in attempts. Try again in a few minutes."));
+    if (attempt?.resetAt && attempt.resetAt <= now) localLoginAttempts.delete(attemptKey);
+    const user = await identityService.authenticateLocal(body.username, body.password);
+    if (!user || !config.cookieSecret) {
+      recordLocalLoginFailure(attemptKey, now);
+      return reply.code(401).type("text/html").send(await renderLoginPage("Invalid username or password"));
+    }
+    localLoginAttempts.delete(attemptKey);
+    reply.setCookie("llm_control_auth", authProvider.createCookie(user), sessionCookieOptions(request, config.publicBaseUrl));
     return reply.redirect("/");
+  });
+  app.get("/register", async (_request, reply) => reply.type("text/html").send(registrationPage(
+    await authMethodService.localRegistrationEnabled() ? "" : "Local account registration is disabled. Only a one-time Owner recovery link can be used."
+  )));
+  app.post("/register", async (request, reply) => {
+    let submittedToken = "";
+    try {
+      const body = z.object({ token: z.string().min(20), username: z.string().trim().min(1).max(120), displayName: z.string().trim().max(160).optional(), password: z.string(), confirmPassword: z.string() }).parse(request.body);
+      submittedToken = body.token;
+      if (!await authMethodService.localRegistrationEnabled() && !await identityService.isOwnerRecoveryInvitation(body.token)) throw new Error("Local account registration is disabled");
+      if (body.password !== body.confirmPassword) throw new Error("Passwords do not match");
+      if (!config.cookieSecret) throw new Error("Local account registration requires COOKIE_SECRET to be configured");
+      const user = await identityService.register(body.token, body);
+      reply.setCookie("llm_control_auth", authProvider.createCookie(user), sessionCookieOptions(request, config.publicBaseUrl));
+      return reply.redirect("/");
+    } catch (error) {
+      return reply.code(400).type("text/html").send(registrationPage(error instanceof Error ? error.message : "Registration failed", submittedToken));
+    }
   });
   app.post("/logout", async (_request, reply) => {
     reply.clearCookie("llm_control_auth", { path: "/" });
@@ -77,7 +126,7 @@ export function registerUiRoutes(
       if (!method?.config.github) throw new Error("GitHub authentication is not configured");
       const nonce = crypto.randomBytes(16).toString("base64url");
       const state = authProvider.createState({ methodId: method.id, nonce });
-      reply.setCookie("llm_control_oauth_state", state, { path: "/auth/github", httpOnly: true, sameSite: "lax", maxAge: 600 });
+      reply.setCookie("llm_control_oauth_state", state, oauthCookieOptions("/auth/github", absoluteUrl(request, "/auth/github/callback", config.publicBaseUrl)));
       const authorizeUrl = new URL("https://github.com/login/oauth/authorize");
       authorizeUrl.searchParams.set("client_id", method.config.github.clientId);
       authorizeUrl.searchParams.set("redirect_uri", absoluteUrl(request, "/auth/github/callback", config.publicBaseUrl));
@@ -98,9 +147,10 @@ export function registerUiRoutes(
       if (!state?.methodId) throw new Error("GitHub sign in state was invalid");
       const method = await authMethodService.get(state.methodId);
       if (!method?.enabled || !method.config.github) throw new Error("GitHub authentication is not enabled");
-      const username = await authenticateGitHub(method, query.code, absoluteUrl(request, "/auth/github/callback", config.publicBaseUrl));
+      const principal = await authenticateGitHub(method, query.code, absoluteUrl(request, "/auth/github/callback", config.publicBaseUrl));
+      const user = await identityService.signInExternal("github", method.id, principal);
       reply.clearCookie("llm_control_oauth_state", { path: "/auth/github" });
-      reply.setCookie("llm_control_auth", authProvider.createCookie(username), { path: "/", httpOnly: true, sameSite: "lax" });
+      reply.setCookie("llm_control_auth", authProvider.createCookie(user), sessionCookieOptions(request, config.publicBaseUrl));
       return reply.redirect("/");
     } catch (error) {
       const message = error instanceof Error ? error.message : "GitHub sign in failed";
@@ -124,7 +174,6 @@ export function registerUiRoutes(
     }
   });
   app.get("/auth/oidc/callback", async (request, reply) => {
-    const redirectUri = absoluteUrl(request, "/auth/oidc/callback", config.publicBaseUrl);
     try {
       const query = z.object({ state: z.string() }).passthrough().parse(request.query);
       const cookieState = request.cookies.llm_control_oidc_state;
@@ -133,9 +182,10 @@ export function registerUiRoutes(
       const method = await authMethodService.get(state.methodId);
       if (!method?.enabled || !method.config.oidc) throw new Error("OIDC authentication is not enabled");
       const callbackUrl = absoluteUrl(request, request.url, config.publicBaseUrl);
-      const username = await oidcAuthService.authenticate(method.config.oidc, callbackUrl, state);
+      const principal = await oidcAuthService.authenticate(method.config.oidc, callbackUrl, state);
+      const user = await identityService.signInExternal("oidc", method.id, principal, method.config.oidc.teamMembershipRules);
       reply.clearCookie("llm_control_oidc_state", { path: "/auth/oidc" });
-      reply.setCookie("llm_control_auth", authProvider.createCookie(username), { path: "/", httpOnly: true, sameSite: "lax", secure: redirectUri.startsWith("https:") });
+      reply.setCookie("llm_control_auth", authProvider.createCookie(user), sessionCookieOptions(request, config.publicBaseUrl));
       return reply.redirect("/");
     } catch (error) {
       reply.clearCookie("llm_control_oidc_state", { path: "/auth/oidc" });
@@ -149,7 +199,7 @@ export function registerUiRoutes(
     const user = requireUser(request);
     const profiles = await reservationProfileService.listForUser(user);
     if (profiles.length === 0 && (await reservationService.listActiveOwned(user)).length === 0) return reply.redirect("/welcome");
-    const targets = catalog.listTargets().map((target) => ({ target, models: catalog.listModelsForTarget(target.id) }));
+    const targets = (await visibleTargetsFor(user)).map((target) => ({ target, models: catalog.listModelsForTarget(target.id) }));
     const costEstimates = await startCostEstimates(targets.map(({ target }) => target), costEstimation);
     return reply.type("text/html").send(startPage(user, targets, profiles, query.error, costEstimates, config.adminStatusPollSeconds, await selectionDeploymentsForUser(user, costEstimates)));
   });
@@ -171,13 +221,13 @@ export function registerUiRoutes(
     const query = z.object({ create: z.string().optional(), onboarding: z.string().optional(), error: z.string().optional() }).parse(request.query);
     if (query.create === "1") return reply.redirect(`/profiles/new${query.onboarding === "1" ? "?onboarding=1" : ""}`);
     const user = requireUser(request);
-    const targets = catalog.listTargets().map((target) => ({ target, models: catalog.listModelsForTarget(target.id) }));
+    const targets = (await visibleTargetsFor(user)).map((target) => ({ target, models: catalog.listModelsForTarget(target.id) }));
     const costEstimates = await startCostEstimates(targets.map(({ target }) => target), costEstimation);
     return reply.type("text/html").send(profilesPage(user, await reservationProfileService.listForUser(user), targets, { openCreate: query.create === "1", onboarding: query.onboarding === "1", error: query.error }, await selectionDeploymentsForUser(user, costEstimates), costEstimates));
   });
   app.get("/client-setup", async (request, reply) => {
     const user = requireUser(request);
-    const targets = catalog.listTargets();
+    const targets = await visibleTargetsFor(user);
     return reply.type("text/html").send(clientSetupPage(
       user,
       await reservationProfileService.listForUser(user),
@@ -188,7 +238,7 @@ export function registerUiRoutes(
   app.get("/profiles/new", async (request, reply) => {
     const query = z.object({ onboarding: z.string().optional(), error: z.string().optional() }).parse(request.query);
     const user = requireUser(request);
-    const targets = catalog.listTargets().map((target) => ({ target, models: catalog.listModelsForTarget(target.id) }));
+    const targets = (await visibleTargetsFor(user)).map((target) => ({ target, models: catalog.listModelsForTarget(target.id) }));
     const costEstimates = await startCostEstimates(targets.map(({ target }) => target), costEstimation);
     return reply.type("text/html").send(profileEditorPage(user, targets, await selectionDeploymentsForUser(user, costEstimates), costEstimates, { onboarding: query.onboarding === "1", error: query.error }));
   });
@@ -197,7 +247,7 @@ export function registerUiRoutes(
     const query = z.object({ error: z.string().optional() }).parse(request.query);
     const user = requireUser(request);
     const profile = await reservationProfileService.getOwned(id, user);
-    const targets = catalog.listTargets().map((target) => ({ target, models: catalog.listModelsForTarget(target.id) }));
+    const targets = (await visibleTargetsFor(user)).map((target) => ({ target, models: catalog.listModelsForTarget(target.id) }));
     const costEstimates = await startCostEstimates(targets.map(({ target }) => target), costEstimation);
     return reply.type("text/html").send(profileEditorPage(user, targets, await selectionDeploymentsForUser(user, costEstimates), costEstimates, { profile, error: query.error }));
   });
@@ -308,6 +358,33 @@ export function registerUiRoutes(
     return reply.redirect("/");
   });
   app.get("/admin", async (_request, reply) => reply.redirect("/admin/auth"));
+  const renderUserAdmin = async (request: Parameters<typeof requireUser>[0], error = "", registrationUrl = "", mergePreview?: Awaited<ReturnType<IdentityService["previewMerge"]>>) => replyUserAdmin(request, error, registrationUrl, mergePreview);
+  const replyUserAdmin = async (request: Parameters<typeof requireUser>[0], error = "", registrationUrl = "", mergePreview?: Awaited<ReturnType<IdentityService["previewMerge"]>>) => userAdminPage(
+    requireUser(request), await identityService.listUsers(), await identityService.listRoles(), await identityService.listTeams(), await identityService.listInvitations(), { error, registrationUrl, mergePreview }
+  );
+  app.get("/admin/users", async (request, reply) => reply.type("text/html").send(await renderUserAdmin(request)));
+  app.post("/admin/users/invitations", async (request, reply) => {
+    try {
+      const body = z.object({ userId: z.string().optional(), intendedUsername: z.string().optional(), initialRoleId: z.string().optional(), expiresInMinutes: z.coerce.number().int().min(5).max(43_200).default(1_440) }).parse(request.body);
+      const created = await identityService.createInvitation(requireUser(request), {
+        userId: body.userId || undefined, intendedUsername: body.intendedUsername || undefined, initialRoleId: body.initialRoleId || undefined, expiresInMinutes: body.expiresInMinutes, maxUses: 1
+      });
+      const registrationUrl = `${absoluteUrl(request, "/register", config.publicBaseUrl)}#token=${encodeURIComponent(created.token)}`;
+      return reply.type("text/html").send(await renderUserAdmin(request, "", registrationUrl));
+    } catch (error) { return reply.code(400).type("text/html").send(await renderUserAdmin(request, error instanceof Error ? error.message : "Could not create invitation")); }
+  });
+  app.post("/admin/users/:id/status", async (request, reply) => {
+    try { const {id}=z.object({id:z.string()}).parse(request.params); const {status}=z.object({status:z.enum(["active","disabled"])}).parse(request.body); await identityService.setUserStatus(requireUser(request),id,status); return reply.redirect("/admin/users"); }
+    catch(error){return reply.code(400).type("text/html").send(await renderUserAdmin(request,error instanceof Error?error.message:"Could not update user"));}
+  });
+  app.post("/admin/users/:id/roles", async (request, reply) => {
+    try { const {id}=z.object({id:z.string()}).parse(request.params); const {roleId}=z.object({roleId:z.string()}).parse(request.body); await identityService.assignRole(requireUser(request),id,roleId); return reply.redirect("/admin/users"); }
+    catch(error){return reply.code(400).type("text/html").send(await renderUserAdmin(request,error instanceof Error?error.message:"Could not assign role"));}
+  });
+  app.post("/admin/users/merge", async (request, reply) => {
+    try { const body=z.object({sourceUserId:z.string(),targetUserId:z.string(),confirm:z.string().optional()}).parse(request.body); if(body.confirm==="MERGE"){await identityService.mergeUsers(requireUser(request),body.sourceUserId,body.targetUserId);return reply.redirect("/admin/users");} const preview=await identityService.previewMerge(requireUser(request),body.sourceUserId,body.targetUserId); return reply.type("text/html").send(await renderUserAdmin(request,"","",preview)); }
+    catch(error){return reply.code(400).type("text/html").send(await renderUserAdmin(request,error instanceof Error?error.message:"Could not merge users"));}
+  });
   app.get("/admin/reservations", async (request, reply) => reply.type("text/html").send(reservationHistoryPage(requireUser(request))));
   app.get("/admin/activations", async (request, reply) => reply.type("text/html").send(activationPage(requireUser(request))));
   app.get("/admin/usage", async (request, reply) => reply.type("text/html").send(usagePage(requireUser(request))));
@@ -697,8 +774,9 @@ function providerConfigFromForm(body: z.infer<typeof providerFormSchema>): Capac
 const authMethodFormSchema = z.object({
   id: z.string().min(1),
   displayName: z.string().optional(),
-  type: z.enum(["github", "oidc"]).default("github"),
+  type: z.enum(["local", "github", "oidc"]).default("github"),
   enabled: z.string().optional(),
+  registrationEnabled: z.string().optional(),
   clientId: z.string().optional(),
   clientSecret: z.string().optional(),
   clientSecretSource: z.enum(["environment", "aws-secrets-manager", "stored"]).optional(),
@@ -711,7 +789,8 @@ const authMethodFormSchema = z.object({
   groupsClaim: z.string().optional(),
   allowedUsers: z.string().optional(),
   allowedOrganizations: z.string().optional(),
-  allowedGroups: z.string().optional()
+  allowedGroups: z.string().optional(),
+  teamMembershipRulesJson: z.string().optional()
 });
 
 const optionalNumber = z.preprocess((value) => value === "" ? undefined : value, z.coerce.number().optional());
@@ -727,6 +806,9 @@ const targetFormSchema = z.object({
   trafficModelPrefixes: z.string().optional(),
   aliasPriority: optionalPositiveInteger,
   hostingMode: z.enum(["", "dedicated", "multi-model"]).optional(),
+  audienceScope: z.enum(["global", "teams", "users"]).default("global"),
+  audienceTeamIds: z.string().optional(),
+  audienceUserIds: z.string().optional(),
   litellmCredentialName: z.string().optional(),
   litellmApiKeyEnv: z.string().optional(),
   litellmSyncDisabled: z.string().optional(),
@@ -765,6 +847,15 @@ function targetFromForm(body: z.infer<typeof targetFormSchema>, provider: Capaci
   if (trafficModelPrefixes.length > 0) target.trafficModelPrefixes = trafficModelPrefixes;
   if (body.aliasPriority !== undefined) target.aliasPriority = body.aliasPriority;
   if (body.hostingMode) target.hostingMode = body.hostingMode;
+  if (body.audienceScope === "teams") {
+    const teamIds = listField(body.audienceTeamIds);
+    if (teamIds.length === 0) throw new Error("At least one team is required for a team target");
+    target.audience = { scope: "teams", teamIds };
+  } else if (body.audienceScope === "users") {
+    const userIds = listField(body.audienceUserIds);
+    if (userIds.length === 0) throw new Error("At least one user is required for a private target");
+    target.audience = { scope: "users", userIds };
+  } else target.audience = { scope: "global" };
   const litellmCredentialName = body.litellmCredentialName?.trim();
   const litellmApiKeyEnv = body.litellmApiKeyEnv?.trim();
   if (litellmCredentialName || litellmApiKeyEnv || body.litellmSyncDisabled === "on") {
@@ -923,6 +1014,15 @@ async function startCostEstimates(targets: CapacityTarget[], costEstimation: Cos
 }
 
 function authMethodFromForm(body: z.infer<typeof authMethodFormSchema>, existing?: AuthMethod): AuthMethod {
+  if (body.type === "local") {
+    return {
+      id: body.id,
+      displayName: body.displayName || "Username and password",
+      type: "local",
+      enabled: body.enabled === "on",
+      config: { local: { registrationEnabled: body.registrationEnabled === "on" } }
+    };
+  }
   if (body.type === "oidc") {
     const clientId = body.clientId?.trim();
     const issuer = body.issuer?.trim().replace(/\/$/, "");
@@ -951,7 +1051,8 @@ function authMethodFromForm(body: z.infer<typeof authMethodFormSchema>, existing
           usernameClaim: body.usernameClaim?.trim() || "preferred_username",
           groupsClaim: body.groupsClaim?.trim() || "groups",
           allowedUsers: listField(body.allowedUsers),
-          allowedGroups: listField(body.allowedGroups)
+          allowedGroups: listField(body.allowedGroups),
+          teamMembershipRules: parseOidcTeamMembershipRules(body.teamMembershipRulesJson)
         }
       }
     };
@@ -1015,7 +1116,11 @@ function oauthCookieOptions(path: string, redirectUri: string) {
   return { path, httpOnly: true, sameSite: "lax" as const, maxAge: 600, secure: redirectUri.startsWith("https:") };
 }
 
-async function authenticateGitHub(method: AuthMethod, code: string, redirectUri: string): Promise<string> {
+function sessionCookieOptions(request: Parameters<typeof absoluteUrl>[0], publicBaseUrl?: string) {
+  return { path: "/", httpOnly: true, sameSite: "lax" as const, maxAge: SESSION_MAX_AGE_SECONDS, secure: absoluteUrl(request, "/", publicBaseUrl).startsWith("https:") };
+}
+
+async function authenticateGitHub(method: AuthMethod, code: string, redirectUri: string): Promise<{ subject: string; username: string; email?: string }> {
   const github = method.config.github;
   if (!github) throw new Error("GitHub authentication is not configured");
   const tokenResponse = await fetch("https://github.com/login/oauth/access_token", {
@@ -1030,16 +1135,21 @@ async function authenticateGitHub(method: AuthMethod, code: string, redirectUri:
   });
   const tokenBody = await tokenResponse.json() as { access_token?: string; error_description?: string; error?: string };
   if (!tokenResponse.ok || !tokenBody.access_token) throw new Error(tokenBody.error_description ?? tokenBody.error ?? "GitHub did not return an access token");
-  const user = await githubRequest<{ login?: string }>("https://api.github.com/user", tokenBody.access_token);
+  const user = await githubRequest<{ id?: number; login?: string; email?: string | null }>("https://api.github.com/user", tokenBody.access_token);
   const login = user.login;
-  if (!login) throw new Error("GitHub did not return a login");
+  if (!user.id || !login) throw new Error("GitHub did not return a stable user identity");
   if (github.allowedUsers?.length && !github.allowedUsers.includes(login)) throw new Error("This GitHub user is not allowed");
   if (github.allowedOrganizations?.length) {
     const orgs = await githubRequest<Array<{ login?: string }>>("https://api.github.com/user/orgs?per_page=100", tokenBody.access_token);
     const orgLogins = new Set(orgs.map((org) => org.login).filter(Boolean));
     if (!github.allowedOrganizations.some((org) => orgLogins.has(org))) throw new Error("This GitHub user is not in an allowed organization");
   }
-  return login;
+  return { subject: String(user.id), username: login, email: user.email ?? undefined };
+}
+
+function parseOidcTeamMembershipRules(value: string | undefined) {
+  if (!value?.trim()) return [];
+  return z.array(z.object({ id: z.string().min(1), claim: z.string().min(1), match: z.enum(["exact", "regex"]), value: z.string(), teamId: z.string().min(1), roleId: z.string().min(1), enabled: z.boolean().optional() }).strict()).parse(JSON.parse(value));
 }
 
 async function githubRequest<T>(url: string, token: string): Promise<T> {

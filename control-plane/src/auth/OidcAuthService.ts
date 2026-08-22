@@ -1,6 +1,7 @@
 import * as oidc from "openid-client";
 import type { OidcAuthMethodConfig } from "../domain/types.js";
 import { AuthSecretResolver } from "./AuthSecretResolver.js";
+import type { ExternalIdentityClaims } from "../services/IdentityService.js";
 
 export interface OidcLoginState extends Record<string, unknown> {
   methodId: string;
@@ -32,7 +33,7 @@ export class OidcAuthService {
     return { url, loginState: { methodId, state, nonce, codeVerifier, issuedAt: Date.now() } };
   }
 
-  async authenticate(config: OidcAuthMethodConfig, callbackUrl: string, loginState: OidcLoginState): Promise<string> {
+  async authenticate(config: OidcAuthMethodConfig, callbackUrl: string, loginState: OidcLoginState): Promise<ExternalIdentityClaims> {
     if (Date.now() - loginState.issuedAt > 10 * 60 * 1000) throw new Error("OIDC sign in state expired");
     const client = await this.client(config);
     const tokens = await oidc.authorizationCodeGrant(client, new URL(callbackUrl), {
@@ -42,6 +43,7 @@ export class OidcAuthService {
     });
     const claims = tokens.claims();
     if (!claims) throw new Error("OIDC provider did not return an ID token");
+    if (typeof claims.sub !== "string" || !claims.sub) throw new Error("OIDC ID token did not contain a stable subject");
     const usernameClaim = config.usernameClaim ?? "preferred_username";
     const username = claims[usernameClaim];
     if (typeof username !== "string" || !username) throw new Error(`OIDC ID token did not contain string claim ${usernameClaim}`);
@@ -52,7 +54,12 @@ export class OidcAuthService {
       const groups = Array.isArray(rawGroups) ? rawGroups.filter((value): value is string => typeof value === "string") : [];
       if (!config.allowedGroups.some((group) => groups.includes(group))) throw new Error("This OIDC user is not in an allowed group");
     }
-    return username;
+    return {
+      subject: claims.sub,
+      username,
+      email: typeof claims.email === "string" ? claims.email : undefined,
+      claims: { ...claims }
+    };
   }
 
   private async client(config: OidcAuthMethodConfig): Promise<oidc.Configuration> {
@@ -63,6 +70,6 @@ export class OidcAuthService {
 
 function normalizedScopes(config: OidcAuthMethodConfig): string[] {
   const scopes = config.scopes?.length ? config.scopes : ["openid", "profile", "email"];
-  const required = config.allowedGroups?.length ? [...scopes, "groups"] : scopes;
+  const required = config.allowedGroups?.length || config.teamMembershipRules?.some((rule) => rule.claim === (config.groupsClaim ?? "groups")) ? [...scopes, "groups"] : scopes;
   return Array.from(new Set(["openid", ...required]));
 }

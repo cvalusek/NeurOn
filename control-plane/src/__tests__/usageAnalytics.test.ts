@@ -17,10 +17,10 @@ describe("UsageAnalyticsService", () => {
     const startedAt = new Date("2026-08-12T23:00:00.000Z");
     const endedAt = new Date("2026-08-14T01:00:00.000Z");
     const reservation = await reservations.create({
-      id: "reservation-1", username: "clint", modelIds: ["model-1"], targetIds: ["target-1"],
+      id: "reservation-1", userId: "usr-clint", username: "clint", modelIds: ["model-1"], targetIds: ["target-1"],
       targetSelections: [{ targetId: "target-1", modelIds: ["model-1"] }], createdAt: startedAt, expiresAt: endedAt, endedAt, status: "done"
     });
-    await profiles.create({ id: "profile-1", username: "clint", name: "Coding", selections: [{ targetId: "target-1", modelIds: ["model-1"] }], createdAt: startedAt, updatedAt: startedAt });
+    await profiles.create({ id: "profile-1", userId: "usr-clint", username: "clint", name: "Coding", selections: [{ targetId: "target-1", modelIds: ["model-1"] }], createdAt: startedAt, updatedAt: startedAt });
     const activation = await activations.createActivation({ id: "activation-1", targetId: "target-1", startedAt, endedAt, status: "closed", estimatedHourlyCostUsd: 1, estimatedCostUsd: 26, lastCostedAt: endedAt });
     await activations.addReservationCost({ targetActivationId: activation.id, reservationId: reservation.id, at: startedAt, estimatedCostUsd: 26 });
     await activations.closeReservationsForActivation(activation.id, endedAt);

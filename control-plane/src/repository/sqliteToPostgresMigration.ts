@@ -8,7 +8,7 @@ import { parseReservationTargetSelections } from "../domain/reservationSelection
 import { parseModelSelectionCatalog } from "../config/modelSelectionConfig.js";
 import { assistantConfigFromLegacyTarget, withoutLegacyAssistant } from "./assistantConfigUtils.js";
 
-export const SQLITE_SOURCE_SCHEMA_VERSION = 2;
+export const SQLITE_SOURCE_SCHEMA_VERSION = 4;
 
 export const MIGRATION_ENTITY_NAMES = [
   "reservations",
@@ -24,7 +24,18 @@ export const MIGRATION_ENTITY_NAMES = [
   "modelCapabilities",
   "modelDeployments",
   "modelFavorites",
-  "assistantConfig"
+  "assistantConfig",
+  "users",
+  "userIdentities",
+  "localCredentials",
+  "roles",
+  "userRoleAssignments",
+  "teams",
+  "teamHierarchy",
+  "teamMemberships",
+  "registrationInvitations",
+  "externalUserLinks",
+  "identityAuditEvents"
 ] as const;
 
 export type MigrationEntityName = typeof MIGRATION_ENTITY_NAMES[number];
@@ -81,10 +92,22 @@ const sqliteAdditiveExpectedColumns: Record<string, string[]> = {
   model_capability_metadata: ["model_id", "metadata_json", "updated_at"],
   model_deployment_metadata: ["target_id", "model_id", "metadata_json", "updated_at"],
   model_favorites: ["username", "target_id", "model_id", "created_at"],
-  assistant_config: ["id", "target_id", "model_id", "reservation_minutes", "keepalive_minutes", "request_timeout_seconds", "updated_at"]
+  assistant_config: ["id", "target_id", "model_id", "reservation_minutes", "keepalive_minutes", "request_timeout_seconds", "updated_at"],
+  users: ["id", "username", "normalized_username", "display_name", "status", "session_version", "merged_into_user_id", "created_at", "updated_at", "last_login_at"],
+  user_identities: ["id", "user_id", "provider_type", "provider_id", "subject", "username", "email", "created_at", "last_seen_at"],
+  local_credentials: ["user_id", "password_hash", "updated_at"],
+  roles: ["id", "name", "description", "scope", "permissions", "system_key", "created_at", "updated_at"],
+  user_role_assignments: ["user_id", "role_id", "created_at"],
+  teams: ["id", "name", "description", "parent_team_id", "created_at", "updated_at"],
+  team_hierarchy: ["ancestor_team_id", "descendant_team_id", "depth"],
+  team_memberships: ["team_id", "user_id", "role_id", "source", "source_reference", "created_at"],
+  registration_invitations: ["id", "token_hash", "user_id", "intended_username", "initial_role_id", "created_by_user_id", "expires_at", "max_uses", "use_count", "revoked_at", "created_at"],
+  external_user_links: ["integration", "external_subject", "user_id", "source", "created_at", "last_seen_at"],
+  identity_audit_events: ["id", "actor_user_id", "action", "subject_type", "subject_id", "details", "created_at"]
 };
 const sqliteAdditiveOptionalColumns: Record<string, string[]> = {
-  assistant_config: ["additional_instructions"]
+  assistant_config: ["additional_instructions"],
+  model_favorites: ["user_id"]
 };
 
 const sqliteIntegerColumns = new Set([
@@ -96,7 +119,11 @@ const sqliteIntegerColumns = new Set([
   "capacity_providers.provisioning_enabled",
   "assistant_config.reservation_minutes",
   "assistant_config.keepalive_minutes",
-  "assistant_config.request_timeout_seconds"
+  "assistant_config.request_timeout_seconds",
+  "users.session_version",
+  "team_hierarchy.depth",
+  "registration_invitations.max_uses",
+  "registration_invitations.use_count"
 ]);
 const sqliteRealColumns = new Set([
   "target_activations.estimated_hourly_cost_usd",
@@ -124,10 +151,27 @@ const sqliteNullableColumns = new Set([
   "target_activation_reservations.ended_at",
   "target_runs.ended_at",
   "target_runs.estimated_hourly_cost_usd",
-  "target_run_reservation_links.ended_at"
+  "target_run_reservation_links.ended_at",
+  "users.display_name",
+  "users.merged_into_user_id",
+  "users.last_login_at",
+  "user_identities.username",
+  "user_identities.email",
+  "roles.description",
+  "roles.system_key",
+  "teams.description",
+  "teams.parent_team_id",
+  "registration_invitations.user_id",
+  "registration_invitations.intended_username",
+  "registration_invitations.initial_role_id",
+  "registration_invitations.created_by_user_id",
+  "registration_invitations.revoked_at",
+  "identity_audit_events.actor_user_id"
 ]);
 const sqliteOptionalColumns: Record<string, string[]> = {
-  reservations: ["target_selections"]
+  reservations: ["target_selections", "user_id"],
+  reservation_profiles: ["user_id"],
+  api_keys: ["user_id"]
 };
 const sqlitePrimaryKeyColumns = new Set([
   "reservations.id", "reservation_profiles.id", "api_keys.id", "auth_methods.id", "capacity_providers.id", "capacity_targets.id",
@@ -135,7 +179,18 @@ const sqlitePrimaryKeyColumns = new Set([
   "target_runs.id", "target_run_reservation_links.id", "model_capability_metadata.model_id",
   "model_deployment_metadata.target_id", "model_deployment_metadata.model_id",
   "model_favorites.username", "model_favorites.target_id", "model_favorites.model_id",
-  "assistant_config.id"
+  "assistant_config.id",
+  "users.id",
+  "user_identities.id",
+  "local_credentials.user_id",
+  "roles.id",
+  "user_role_assignments.user_id", "user_role_assignments.role_id",
+  "teams.id",
+  "team_hierarchy.ancestor_team_id", "team_hierarchy.descendant_team_id",
+  "team_memberships.team_id", "team_memberships.user_id", "team_memberships.source", "team_memberships.source_reference",
+  "registration_invitations.id",
+  "external_user_links.integration", "external_user_links.external_subject",
+  "identity_audit_events.id"
 ]);
 
 export async function createConsistentSqliteBackup(
@@ -183,6 +238,7 @@ export async function migrateSqliteToPostgres(options: SqliteToPostgresMigration
   const sourceFingerprint = fingerprint({ schemaVersion: SQLITE_SOURCE_SCHEMA_VERSION, counts, fingerprints });
   const migrationId = `sqlite-to-postgres-v${SQLITE_SOURCE_SCHEMA_VERSION}-${sourceFingerprint.slice(0, 24)}`;
 
+  await preflightPostgresDestination(options.pool, migrationId);
   await migratePostgresSchema(options.pool);
   const schemaState = await readPostgresSchemaState(options.pool);
   if (schemaState.currentVersion !== POSTGRES_SCHEMA_VERSION) {
@@ -213,7 +269,7 @@ export async function migrateSqliteToPostgres(options: SqliteToPostgresMigration
       ) {
         throw new Error(`Migration identity ${migrationId} exists with incompatible verification metadata`);
       }
-      const destination = await readPostgresDataset(client);
+      const destination = await readPostgresDataset(client, source.roles.some((row) => row.systemKey != null));
       verifyDatasets(source, destination);
       await client.query("commit");
       return migrationResult("verified-noop", migrationId, counts);
@@ -232,7 +288,7 @@ export async function migrateSqliteToPostgres(options: SqliteToPostgresMigration
       [migrationId, sourceFingerprint, JSON.stringify(counts), JSON.stringify(fingerprints), new Date()]
     );
 
-    const destination = await readPostgresDataset(client);
+    const destination = await readPostgresDataset(client, source.roles.some((row) => row.systemKey != null));
     verifyDatasets(source, destination);
     await options.beforeCommit?.();
     await client.query("commit");
@@ -285,18 +341,31 @@ function readSqliteDataset(sqlitePath: string): MigrationDataset {
       throw new Error("SQLite stored and legacy assistant configuration disagree");
     }
     const assistantConfig = storedAssistantConfigs.length ? storedAssistantConfigs : legacyAssistantConfigs.map(assistantConfigDatasetRow);
+    const rawReservations = rows(db, "select * from reservations order by id asc");
+    const rawProfiles = rows(db, "select * from reservation_profiles order by id asc");
+    const rawApiKeys = rows(db, "select * from api_keys order by id asc");
+    const rawFavorites = optionalRows(db, "model_favorites", "select * from model_favorites order by username asc, target_id asc, model_id asc");
+    const hasIdentitySchema = sqliteTableExists(db, "users");
+    const users = hasIdentitySchema
+      ? rows(db, "select * from users order by id asc").map(sqliteUserRow)
+      : synthesizeLegacyUsers(rawReservations, rawProfiles, rawApiKeys, rawFavorites);
+    const userIdByUsername = new Map(users.map((row) => [normalizeUsername(text(row.username)), text(row.id)]));
+    const ownerId = (row: Record<string, unknown>, synthetic = false): string | null => {
+      if (synthetic) return null;
+      return row.user_id == null ? userIdByUsername.get(normalizeUsername(text(row.username))) ?? null : text(row.user_id);
+    };
     const dataset: MigrationDataset = {
-      reservations: rows(db, "select * from reservations order by id asc").map((row) => ({
-        id: text(row.id), username: text(row.username), apiKeyName: nullableText(row.api_key_name), profileId: nullableText(row.profile_id), profileName: nullableText(row.profile_name),
+      reservations: rawReservations.map((row) => ({
+        id: text(row.id), userId: ownerId(row, boolean(row.synthetic)), username: text(row.username), apiKeyName: nullableText(row.api_key_name), profileId: nullableText(row.profile_id), profileName: nullableText(row.profile_name),
         modelIds: json(row.model_ids), targetIds: json(row.target_ids), ...(row.target_selections === null || row.target_selections === undefined ? {} : { targetSelections: parseReservationTargetSelections(json(row.target_selections), "SQLite source reservations.target_selections") }), createdAt: iso(row.created_at), expiresAt: iso(row.expires_at), keepaliveMinutes: nullableNumber(row.keepalive_minutes),
         endedAt: nullableIso(row.ended_at), status: text(row.status), failureMessage: nullableText(row.failure_message), synthetic: boolean(row.synthetic)
       })),
-      reservationProfiles: rows(db, "select * from reservation_profiles order by id asc").map((row) => ({
-        id: text(row.id), username: text(row.username), name: text(row.name), description: nullableText(row.description), selections: json(row.selections),
+      reservationProfiles: rawProfiles.map((row) => ({
+        id: text(row.id), userId: ownerId(row), username: text(row.username), name: text(row.name), description: nullableText(row.description), selections: json(row.selections),
         defaultDurationMinutes: nullableNumber(row.default_duration_minutes), defaultKeepaliveMinutes: nullableNumber(row.default_keepalive_minutes), createdAt: iso(row.created_at), updatedAt: iso(row.updated_at)
       })),
-      apiKeys: rows(db, "select * from api_keys order by id asc").map((row) => ({
-        id: text(row.id), username: text(row.username), name: text(row.name), prefix: text(row.prefix), keyHash: text(row.key_hash), createdAt: iso(row.created_at), lastUsedAt: nullableIso(row.last_used_at)
+      apiKeys: rawApiKeys.map((row) => ({
+        id: text(row.id), userId: ownerId(row), username: text(row.username), name: text(row.name), prefix: text(row.prefix), keyHash: text(row.key_hash), createdAt: iso(row.created_at), lastUsedAt: nullableIso(row.last_used_at)
       })),
       authMethods: rows(db, "select * from auth_methods order by id asc").map((row) => ({
         id: text(row.id), displayName: text(row.display_name), type: text(row.type), enabled: boolean(row.enabled), config: json(row.config_json)
@@ -311,14 +380,59 @@ function readSqliteDataset(sqlitePath: string): MigrationDataset {
       targetActivationReservations,
       modelCapabilities: optionalRows(db, "model_capability_metadata", "select * from model_capability_metadata order by model_id asc").map((row) => ({ modelId: text(row.model_id), metadata: json(row.metadata_json), updatedAt: iso(row.updated_at) })),
       modelDeployments: optionalRows(db, "model_deployment_metadata", "select * from model_deployment_metadata order by target_id asc, model_id asc").map((row) => ({ targetId: text(row.target_id), modelId: text(row.model_id), metadata: json(row.metadata_json), updatedAt: iso(row.updated_at) })),
-      modelFavorites: optionalRows(db, "model_favorites", "select * from model_favorites order by username asc, target_id asc, model_id asc").map((row) => ({ username: text(row.username), targetId: text(row.target_id), modelId: text(row.model_id), createdAt: iso(row.created_at) })),
-      assistantConfig
+      modelFavorites: rawFavorites.map((row) => ({ userId: ownerId(row), username: text(row.username), targetId: text(row.target_id), modelId: text(row.model_id), createdAt: iso(row.created_at) })),
+      assistantConfig,
+      users,
+      userIdentities: optionalRows(db, "user_identities", "select * from user_identities order by id asc").map((row) => ({
+        id: text(row.id), userId: text(row.user_id), providerType: text(row.provider_type), providerId: text(row.provider_id), subject: text(row.subject),
+        username: nullableText(row.username), email: nullableText(row.email), createdAt: iso(row.created_at), lastSeenAt: iso(row.last_seen_at)
+      })),
+      localCredentials: optionalRows(db, "local_credentials", "select * from local_credentials order by user_id asc").map((row) => ({ userId: text(row.user_id), passwordHash: text(row.password_hash), updatedAt: iso(row.updated_at) })),
+      roles: optionalRows(db, "roles", "select * from roles order by id asc").map((row) => ({
+        id: text(row.id), name: text(row.name), description: nullableText(row.description), scope: text(row.scope), permissions: json(row.permissions), systemKey: nullableText(row.system_key), createdAt: iso(row.created_at), updatedAt: iso(row.updated_at)
+      })),
+      userRoleAssignments: hasIdentitySchema
+        ? rows(db, "select * from user_role_assignments order by user_id asc, role_id asc").map((row) => ({ userId: text(row.user_id), roleId: text(row.role_id), createdAt: iso(row.created_at) }))
+        : users.map((row) => ({ userId: row.id, roleId: "role_member", createdAt: row.createdAt })),
+      teams: optionalRows(db, "teams", "select * from teams order by id asc").map((row) => ({ id: text(row.id), name: text(row.name), description: nullableText(row.description), parentTeamId: nullableText(row.parent_team_id), createdAt: iso(row.created_at), updatedAt: iso(row.updated_at) })),
+      teamHierarchy: optionalRows(db, "team_hierarchy", "select * from team_hierarchy order by ancestor_team_id asc, descendant_team_id asc").map((row) => ({ ancestorTeamId: text(row.ancestor_team_id), descendantTeamId: text(row.descendant_team_id), depth: number(row.depth) })),
+      teamMemberships: optionalRows(db, "team_memberships", "select * from team_memberships order by team_id asc, user_id asc, source asc, source_reference asc").map((row) => ({ teamId: text(row.team_id), userId: text(row.user_id), roleId: text(row.role_id), source: text(row.source), sourceReference: text(row.source_reference), createdAt: iso(row.created_at) })),
+      registrationInvitations: optionalRows(db, "registration_invitations", "select * from registration_invitations order by id asc").map((row) => ({
+        id: text(row.id), tokenHash: text(row.token_hash), userId: nullableText(row.user_id), intendedUsername: nullableText(row.intended_username), initialRoleId: nullableText(row.initial_role_id),
+        createdByUserId: nullableText(row.created_by_user_id), expiresAt: iso(row.expires_at), maxUses: number(row.max_uses), useCount: number(row.use_count), revokedAt: nullableIso(row.revoked_at), createdAt: iso(row.created_at)
+      })),
+      externalUserLinks: optionalRows(db, "external_user_links", "select * from external_user_links order by integration asc, external_subject asc").map((row) => ({ integration: text(row.integration), externalSubject: text(row.external_subject), userId: text(row.user_id), source: text(row.source), createdAt: iso(row.created_at), lastSeenAt: iso(row.last_seen_at) })),
+      identityAuditEvents: optionalRows(db, "identity_audit_events", "select * from identity_audit_events order by id asc").map((row) => ({ id: text(row.id), actorUserId: nullableText(row.actor_user_id), action: text(row.action), subjectType: text(row.subject_type), subjectId: text(row.subject_id), details: json(row.details), createdAt: iso(row.created_at) }))
     };
     validateDatasetSemantics(dataset);
     return dataset;
   } finally {
     db.close();
   }
+}
+
+function sqliteUserRow(row: Record<string, unknown>): Record<string, unknown> {
+  return {
+    id: text(row.id), username: text(row.username), normalizedUsername: text(row.normalized_username), displayName: nullableText(row.display_name), status: text(row.status),
+    sessionVersion: number(row.session_version), mergedIntoUserId: nullableText(row.merged_into_user_id), createdAt: iso(row.created_at), updatedAt: iso(row.updated_at), lastLoginAt: nullableIso(row.last_login_at)
+  };
+}
+
+function synthesizeLegacyUsers(...families: Array<Array<Record<string, unknown>>>): Array<Record<string, unknown>> {
+  const byUsername = new Map<string, { username: string; createdAt: string }>();
+  for (const row of families.flat()) {
+    if (row.synthetic != null && boolean(row.synthetic)) continue;
+    const username = text(row.username).trim();
+    const normalized = normalizeUsername(username);
+    if (!normalized || ["traffic", "profile-advisor"].includes(normalized)) continue;
+    const createdAt = iso(row.created_at);
+    const existing = byUsername.get(normalized);
+    if (!existing || createdAt < existing.createdAt) byUsername.set(normalized, { username, createdAt });
+  }
+  return Array.from(byUsername.entries()).sort(([left], [right]) => left.localeCompare(right)).map(([normalizedUsername, value]) => ({
+    id: legacyUserId(normalizedUsername), username: value.username, normalizedUsername, displayName: null, status: "active", sessionVersion: 1,
+    mergedIntoUserId: null, createdAt: value.createdAt, updatedAt: value.createdAt, lastLoginAt: null
+  }));
 }
 
 function sqliteAssistantConfigRow(row: Record<string, unknown>): Record<string, unknown> {
@@ -370,7 +484,7 @@ function compareId(left: Record<string, unknown>, right: Record<string, unknown>
   return leftId < rightId ? -1 : leftId > rightId ? 1 : 0;
 }
 
-async function readPostgresDataset(client: pg.PoolClient): Promise<MigrationDataset> {
+async function readPostgresDataset(client: pg.PoolClient, includeSystemRoles: boolean): Promise<MigrationDataset> {
   const reservations = await client.query("select * from reservations order by id asc");
   const reservationProfiles = await client.query("select * from reservation_profiles order by id asc");
   const apiKeys = await client.query("select * from api_keys order by id asc");
@@ -385,18 +499,29 @@ async function readPostgresDataset(client: pg.PoolClient): Promise<MigrationData
   const modelDeployments = await client.query("select * from model_deployment_metadata order by target_id asc, model_id asc");
   const modelFavorites = await client.query("select * from model_favorites order by username asc, target_id asc, model_id asc");
   const assistantConfig = await client.query("select * from assistant_config order by id asc");
+  const users = await client.query("select * from users order by id asc");
+  const userIdentities = await client.query("select * from user_identities order by id asc");
+  const localCredentials = await client.query("select * from local_credentials order by user_id asc");
+  const roles = await client.query(includeSystemRoles ? "select * from roles order by id asc" : "select * from roles where system_key is null order by id asc");
+  const userRoleAssignments = await client.query("select * from user_role_assignments order by user_id asc,role_id asc");
+  const teams = await client.query("select * from teams order by id asc");
+  const teamHierarchy = await client.query("select * from team_hierarchy order by ancestor_team_id asc,descendant_team_id asc");
+  const teamMemberships = await client.query("select * from team_memberships order by team_id asc,user_id asc,source asc,source_reference asc");
+  const registrationInvitations = await client.query("select * from registration_invitations order by id asc");
+  const externalUserLinks = await client.query("select * from external_user_links order by integration asc,external_subject asc");
+  const identityAuditEvents = await client.query("select * from identity_audit_events order by id asc");
   return {
     reservations: reservations.rows.map((row) => ({
-      id: text(row.id), username: text(row.username), apiKeyName: nullableText(row.api_key_name), profileId: nullableText(row.profile_id), profileName: nullableText(row.profile_name),
+      id: text(row.id), userId: nullableText(row.user_id), username: text(row.username), apiKeyName: nullableText(row.api_key_name), profileId: nullableText(row.profile_id), profileName: nullableText(row.profile_name),
       modelIds: jsonObject(row.model_ids), targetIds: jsonObject(row.target_ids), ...(row.target_selections === null || row.target_selections === undefined ? {} : { targetSelections: parseReservationTargetSelections(jsonObject(row.target_selections), "PostgreSQL destination reservations.target_selections") }), createdAt: iso(row.created_at), expiresAt: iso(row.expires_at), keepaliveMinutes: nullableNumber(row.keepalive_minutes),
       endedAt: nullableIso(row.ended_at), status: text(row.status), failureMessage: nullableText(row.failure_message), synthetic: boolean(row.synthetic)
     })),
     reservationProfiles: reservationProfiles.rows.map((row) => ({
-      id: text(row.id), username: text(row.username), name: text(row.name), description: nullableText(row.description), selections: jsonObject(row.selections),
+      id: text(row.id), userId: text(row.user_id), username: text(row.username), name: text(row.name), description: nullableText(row.description), selections: jsonObject(row.selections),
       defaultDurationMinutes: nullableNumber(row.default_duration_minutes), defaultKeepaliveMinutes: nullableNumber(row.default_keepalive_minutes), createdAt: iso(row.created_at), updatedAt: iso(row.updated_at)
     })),
     apiKeys: apiKeys.rows.map((row) => ({
-      id: text(row.id), username: text(row.username), name: text(row.name), prefix: text(row.prefix), keyHash: text(row.key_hash), createdAt: iso(row.created_at), lastUsedAt: nullableIso(row.last_used_at)
+      id: text(row.id), userId: text(row.user_id), username: text(row.username), name: text(row.name), prefix: text(row.prefix), keyHash: text(row.key_hash), createdAt: iso(row.created_at), lastUsedAt: nullableIso(row.last_used_at)
     })),
     authMethods: authMethods.rows.map((row) => ({ id: text(row.id), displayName: text(row.display_name), type: text(row.type), enabled: boolean(row.enabled), config: jsonObject(row.config_json) })),
     capacityProviders: capacityProviders.rows.map((row) => ({
@@ -415,28 +540,109 @@ async function readPostgresDataset(client: pg.PoolClient): Promise<MigrationData
     })),
     modelCapabilities: modelCapabilities.rows.map((row) => ({ modelId: text(row.model_id), metadata: jsonObject(row.metadata_json), updatedAt: iso(row.updated_at) })),
     modelDeployments: modelDeployments.rows.map((row) => ({ targetId: text(row.target_id), modelId: text(row.model_id), metadata: jsonObject(row.metadata_json), updatedAt: iso(row.updated_at) })),
-    modelFavorites: modelFavorites.rows.map((row) => ({ username: text(row.username), targetId: text(row.target_id), modelId: text(row.model_id), createdAt: iso(row.created_at) })),
-    assistantConfig: assistantConfig.rows.map(sqliteAssistantConfigRow)
+    modelFavorites: modelFavorites.rows.map((row) => ({ userId: text(row.user_id), username: text(row.username), targetId: text(row.target_id), modelId: text(row.model_id), createdAt: iso(row.created_at) })),
+    assistantConfig: assistantConfig.rows.map(sqliteAssistantConfigRow),
+    users: users.rows.map((row) => ({ id: text(row.id), username: text(row.username), normalizedUsername: text(row.normalized_username), displayName: nullableText(row.display_name), status: text(row.status), sessionVersion: number(row.session_version), mergedIntoUserId: nullableText(row.merged_into_user_id), createdAt: iso(row.created_at), updatedAt: iso(row.updated_at), lastLoginAt: nullableIso(row.last_login_at) })),
+    userIdentities: userIdentities.rows.map((row) => ({ id: text(row.id), userId: text(row.user_id), providerType: text(row.provider_type), providerId: text(row.provider_id), subject: text(row.subject), username: nullableText(row.username), email: nullableText(row.email), createdAt: iso(row.created_at), lastSeenAt: iso(row.last_seen_at) })),
+    localCredentials: localCredentials.rows.map((row) => ({ userId: text(row.user_id), passwordHash: text(row.password_hash), updatedAt: iso(row.updated_at) })),
+    roles: roles.rows.map((row) => ({ id: text(row.id), name: text(row.name), description: nullableText(row.description), scope: text(row.scope), permissions: jsonObject(row.permissions), systemKey: nullableText(row.system_key), createdAt: iso(row.created_at), updatedAt: iso(row.updated_at) })),
+    userRoleAssignments: userRoleAssignments.rows.map((row) => ({ userId: text(row.user_id), roleId: text(row.role_id), createdAt: iso(row.created_at) })),
+    teams: teams.rows.map((row) => ({ id: text(row.id), name: text(row.name), description: nullableText(row.description), parentTeamId: nullableText(row.parent_team_id), createdAt: iso(row.created_at), updatedAt: iso(row.updated_at) })),
+    teamHierarchy: teamHierarchy.rows.map((row) => ({ ancestorTeamId: text(row.ancestor_team_id), descendantTeamId: text(row.descendant_team_id), depth: number(row.depth) })),
+    teamMemberships: teamMemberships.rows.map((row) => ({ teamId: text(row.team_id), userId: text(row.user_id), roleId: text(row.role_id), source: text(row.source), sourceReference: text(row.source_reference), createdAt: iso(row.created_at) })),
+    registrationInvitations: registrationInvitations.rows.map((row) => ({ id: text(row.id), tokenHash: text(row.token_hash), userId: nullableText(row.user_id), intendedUsername: nullableText(row.intended_username), initialRoleId: nullableText(row.initial_role_id), createdByUserId: nullableText(row.created_by_user_id), expiresAt: iso(row.expires_at), maxUses: number(row.max_uses), useCount: number(row.use_count), revokedAt: nullableIso(row.revoked_at), createdAt: iso(row.created_at) })),
+    externalUserLinks: externalUserLinks.rows.map((row) => ({ integration: text(row.integration), externalSubject: text(row.external_subject), userId: text(row.user_id), source: text(row.source), createdAt: iso(row.created_at), lastSeenAt: iso(row.last_seen_at) })),
+    identityAuditEvents: identityAuditEvents.rows.map((row) => ({ id: text(row.id), actorUserId: nullableText(row.actor_user_id), action: text(row.action), subjectType: text(row.subject_type), subjectId: text(row.subject_id), details: jsonObject(row.details), createdAt: iso(row.created_at) }))
   };
 }
 
 async function importDataset(client: pg.PoolClient, dataset: MigrationDataset): Promise<void> {
+  for (const row of dataset.users) {
+    await client.query(
+      `insert into users (id,username,normalized_username,display_name,status,session_version,merged_into_user_id,created_at,updated_at,last_login_at)
+       values ($1,$2,$3,$4,$5,$6,null,$7,$8,$9)`,
+      [row.id, row.username, row.normalizedUsername, row.displayName, row.status, row.sessionVersion, row.createdAt, row.updatedAt, row.lastLoginAt]
+    );
+  }
+  for (const row of dataset.users.filter((candidate) => candidate.mergedIntoUserId != null)) {
+    await client.query("update users set merged_into_user_id=$2 where id=$1", [row.id, row.mergedIntoUserId]);
+  }
+  for (const row of dataset.roles) {
+    if (row.systemKey == null) await client.query(
+      "insert into roles (id,name,description,scope,permissions,created_at,updated_at) values ($1,$2,$3,$4,$5::jsonb,$6,$7)",
+      [row.id, row.name, row.description, row.scope, JSON.stringify(row.permissions), row.createdAt, row.updatedAt]
+    );
+    else await client.query(
+      "update roles set name=$2,description=$3,scope=$4,permissions=$5::jsonb,system_key=$6,created_at=$7,updated_at=$8 where id=$1",
+      [row.id, row.name, row.description, row.scope, JSON.stringify(row.permissions), row.systemKey, row.createdAt, row.updatedAt]
+    );
+  }
+  for (const row of dataset.userRoleAssignments) {
+    await client.query("insert into user_role_assignments (user_id,role_id,created_at) values ($1,$2,$3)", [row.userId, row.roleId, row.createdAt]);
+  }
+  for (const row of dataset.userIdentities) {
+    await client.query(
+      `insert into user_identities (id,user_id,provider_type,provider_id,subject,username,email,created_at,last_seen_at)
+       values ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+      [row.id, row.userId, row.providerType, row.providerId, row.subject, row.username, row.email, row.createdAt, row.lastSeenAt]
+    );
+  }
+  for (const row of dataset.localCredentials) {
+    await client.query("insert into local_credentials (user_id,password_hash,updated_at) values ($1,$2,$3)", [row.userId, row.passwordHash, row.updatedAt]);
+  }
+  for (const row of dataset.teams) {
+    await client.query(
+      "insert into teams (id,name,description,parent_team_id,created_at,updated_at) values ($1,$2,$3,null,$4,$5)",
+      [row.id, row.name, row.description, row.createdAt, row.updatedAt]
+    );
+  }
+  for (const row of dataset.teams.filter((candidate) => candidate.parentTeamId != null)) {
+    await client.query("update teams set parent_team_id=$2 where id=$1", [row.id, row.parentTeamId]);
+  }
+  for (const row of dataset.teamHierarchy) {
+    await client.query("insert into team_hierarchy (ancestor_team_id,descendant_team_id,depth) values ($1,$2,$3)", [row.ancestorTeamId, row.descendantTeamId, row.depth]);
+  }
+  for (const row of dataset.teamMemberships) {
+    await client.query(
+      "insert into team_memberships (team_id,user_id,role_id,source,source_reference,created_at) values ($1,$2,$3,$4,$5,$6)",
+      [row.teamId, row.userId, row.roleId, row.source, row.sourceReference, row.createdAt]
+    );
+  }
+  for (const row of dataset.registrationInvitations) {
+    await client.query(
+      `insert into registration_invitations (id,token_hash,user_id,intended_username,initial_role_id,created_by_user_id,expires_at,max_uses,use_count,revoked_at,created_at)
+       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
+      [row.id, row.tokenHash, row.userId, row.intendedUsername, row.initialRoleId, row.createdByUserId, row.expiresAt, row.maxUses, row.useCount, row.revokedAt, row.createdAt]
+    );
+  }
+  for (const row of dataset.externalUserLinks) {
+    await client.query(
+      "insert into external_user_links (integration,external_subject,user_id,source,created_at,last_seen_at) values ($1,$2,$3,$4,$5,$6)",
+      [row.integration, row.externalSubject, row.userId, row.source, row.createdAt, row.lastSeenAt]
+    );
+  }
+  for (const row of dataset.identityAuditEvents) {
+    await client.query(
+      "insert into identity_audit_events (id,actor_user_id,action,subject_type,subject_id,details,created_at) values ($1,$2,$3,$4,$5,$6::jsonb,$7)",
+      [row.id, row.actorUserId, row.action, row.subjectType, row.subjectId, JSON.stringify(row.details), row.createdAt]
+    );
+  }
   for (const row of dataset.reservations) {
     await client.query(
-      `insert into reservations (id, username, api_key_name, profile_id, profile_name, model_ids, target_ids, target_selections, created_at, expires_at, keepalive_minutes, ended_at, status, failure_message, synthetic)
-       values ($1,$2,$3,$4,$5,$6::jsonb,$7::jsonb,$8::jsonb,$9,$10,$11,$12,$13,$14,$15)`,
-      [row.id, row.username, row.apiKeyName, row.profileId, row.profileName, JSON.stringify(row.modelIds), JSON.stringify(row.targetIds), row.targetSelections == null ? null : JSON.stringify(row.targetSelections), row.createdAt, row.expiresAt, row.keepaliveMinutes, row.endedAt, row.status, row.failureMessage, row.synthetic]
+      `insert into reservations (id, user_id, username, api_key_name, profile_id, profile_name, model_ids, target_ids, target_selections, created_at, expires_at, keepalive_minutes, ended_at, status, failure_message, synthetic)
+       values ($1,$2,$3,$4,$5,$6,$7::jsonb,$8::jsonb,$9::jsonb,$10,$11,$12,$13,$14,$15,$16)`,
+      [row.id, row.userId, row.username, row.apiKeyName, row.profileId, row.profileName, JSON.stringify(row.modelIds), JSON.stringify(row.targetIds), row.targetSelections == null ? null : JSON.stringify(row.targetSelections), row.createdAt, row.expiresAt, row.keepaliveMinutes, row.endedAt, row.status, row.failureMessage, row.synthetic]
     );
   }
   for (const row of dataset.reservationProfiles) {
     await client.query(
-      `insert into reservation_profiles (id, username, name, description, selections, default_duration_minutes, default_keepalive_minutes, created_at, updated_at)
-       values ($1,$2,$3,$4,$5::jsonb,$6,$7,$8,$9)`,
-      [row.id, row.username, row.name, row.description, JSON.stringify(row.selections), row.defaultDurationMinutes, row.defaultKeepaliveMinutes, row.createdAt, row.updatedAt]
+      `insert into reservation_profiles (id, user_id, username, name, description, selections, default_duration_minutes, default_keepalive_minutes, created_at, updated_at)
+       values ($1,$2,$3,$4,$5,$6::jsonb,$7,$8,$9,$10)`,
+      [row.id, row.userId, row.username, row.name, row.description, JSON.stringify(row.selections), row.defaultDurationMinutes, row.defaultKeepaliveMinutes, row.createdAt, row.updatedAt]
     );
   }
   for (const row of dataset.apiKeys) {
-    await client.query("insert into api_keys (id, username, name, prefix, key_hash, created_at, last_used_at) values ($1,$2,$3,$4,$5,$6,$7)", [row.id, row.username, row.name, row.prefix, row.keyHash, row.createdAt, row.lastUsedAt]);
+    await client.query("insert into api_keys (id, user_id, username, name, prefix, key_hash, created_at, last_used_at) values ($1,$2,$3,$4,$5,$6,$7,$8)", [row.id, row.userId, row.username, row.name, row.prefix, row.keyHash, row.createdAt, row.lastUsedAt]);
   }
   for (const row of dataset.authMethods) {
     await client.query("insert into auth_methods (id, display_name, type, enabled, config_json) values ($1,$2,$3,$4,$5::jsonb)", [row.id, row.displayName, row.type, row.enabled, JSON.stringify(row.config)]);
@@ -474,7 +680,7 @@ async function importDataset(client: pg.PoolClient, dataset: MigrationDataset): 
     await client.query("insert into model_deployment_metadata (target_id, model_id, metadata_json, updated_at) values ($1,$2,$3::jsonb,$4)", [row.targetId, row.modelId, JSON.stringify(row.metadata), row.updatedAt]);
   }
   for (const row of dataset.modelFavorites) {
-    await client.query("insert into model_favorites (username, target_id, model_id, created_at) values ($1,$2,$3,$4)", [row.username, row.targetId, row.modelId, row.createdAt]);
+    await client.query("insert into model_favorites (user_id, username, target_id, model_id, created_at) values ($1,$2,$3,$4,$5)", [row.userId, row.username, row.targetId, row.modelId, row.createdAt]);
   }
   for (const row of dataset.assistantConfig) {
     await client.query(
@@ -484,10 +690,50 @@ async function importDataset(client: pg.PoolClient, dataset: MigrationDataset): 
   }
 }
 
+async function preflightPostgresDestination(pool: pg.Pool, migrationId: string): Promise<void> {
+  const client = await pool.connect();
+  try {
+    await client.query("begin isolation level repeatable read read only");
+    const schemaState = await readPostgresSchemaState(client);
+    if (schemaState.currentVersion > POSTGRES_SCHEMA_VERSION) throw new Error(`PostgreSQL schema version ${schemaState.currentVersion} is newer than supported version ${POSTGRES_SCHEMA_VERSION}`);
+
+    const ledgerExists = await client.query<{ exists: boolean }>("select to_regclass('neuron_data_migrations') is not null as exists");
+    const completedIds = ledgerExists.rows[0]?.exists
+      ? (await client.query<{ id: string }>("select id from neuron_data_migrations order by id")).rows.map((row) => row.id)
+      : [];
+    const incompatibleIds = completedIds.filter((id) => id !== migrationId);
+    if (incompatibleIds.length) throw new Error(`PostgreSQL destination contains a different completed data migration; refusing import (${incompatibleIds.length} record(s))`);
+    if (completedIds.includes(migrationId)) {
+      await client.query("commit");
+      return;
+    }
+
+    const nonempty: string[] = [];
+    for (const table of POSTGRES_DATA_TABLES) {
+      const exists = await client.query<{ exists: boolean }>("select to_regclass($1) is not null as exists", [table]);
+      if (!exists.rows[0]?.exists) continue;
+      const result = await client.query<{ count: string }>(table === "roles"
+        ? "select count(*)::text as count from roles where system_key is null"
+        : `select count(*)::text as count from ${table}`);
+      const count = Number(result.rows[0]?.count ?? 0);
+      if (count > 0) nonempty.push(`${table}=${count}`);
+    }
+    if (nonempty.length) throw new Error(`PostgreSQL destination is nonempty without the exact completed migration record; refusing import (${nonempty.join(", ")})`);
+    await client.query("commit");
+  } catch (error) {
+    await client.query("rollback").catch(() => undefined);
+    throw error;
+  } finally { client.release(); }
+}
+
 async function countPostgresDataRows(client: pg.PoolClient): Promise<Record<string, number>> {
   const counts: Record<string, number> = {};
   for (const table of POSTGRES_DATA_TABLES) {
-    const result = await client.query<{ count: string }>(`select count(*)::text as count from ${table}`);
+    const result = await client.query<{ count: string }>(
+      table === "roles"
+        ? "select count(*)::text as count from roles where system_key is null"
+        : `select count(*)::text as count from ${table}`
+    );
     counts[table] = Number(result.rows[0].count);
   }
   return counts;
@@ -516,6 +762,11 @@ function validateSqliteSchema(db: Database.Database): void {
   }
   for (const [table, expected] of Object.entries(sqliteAdditiveExpectedColumns)) {
     if (tables.has(table)) validateSqliteTable(db, table, expected, problems, sqliteAdditiveOptionalColumns[table] ?? []);
+  }
+  const identityTables = ["users", "user_identities", "local_credentials", "roles", "user_role_assignments", "teams", "team_hierarchy", "team_memberships", "registration_invitations", "external_user_links", "identity_audit_events"];
+  const presentIdentityTables = identityTables.filter((table) => tables.has(table));
+  if (presentIdentityTables.length !== 0 && presentIdentityTables.length !== identityTables.length) {
+    problems.push("identity tables must either all be present or all be absent");
   }
   const legacyTables = Object.keys(sqliteLegacyActivationColumns);
   const presentLegacyTables = legacyTables.filter((table) => tables.has(table));
@@ -566,6 +817,31 @@ function validateDatasetSemantics(dataset: MigrationDataset): void {
     return row.metadata;
   });
   parseModelSelectionCatalog({ schemaVersion: 1, models: capabilities, deployments });
+  const users = new Map(dataset.users.map((row) => [String(row.id), row]));
+  const normalizedUsernames = new Set<string>();
+  for (const user of users.values()) {
+    const normalized = normalizeUsername(String(user.username));
+    if (!normalized || normalized !== user.normalizedUsername || normalizedUsernames.has(normalized)) throw new Error("SQLite source contains incompatible users");
+    if (!new Set(["active", "disabled"]).has(String(user.status)) || !boundedInteger(user.sessionVersion, 1, Number.MAX_SAFE_INTEGER)) throw new Error("SQLite source contains incompatible user state");
+    if (user.mergedIntoUserId != null && (!users.has(String(user.mergedIntoUserId)) || user.mergedIntoUserId === user.id)) throw new Error("SQLite source contains an incompatible user merge link");
+    normalizedUsernames.add(normalized);
+  }
+  const roleIds = new Set([...BUILTIN_ROLE_IDS, ...dataset.roles.map((row) => String(row.id))]);
+  for (const role of dataset.roles) {
+    if (!new Set(["global", "team"]).has(String(role.scope)) || !Array.isArray(role.permissions) || role.permissions.some((permission) => typeof permission !== "string" || !permission)) throw new Error("SQLite source contains an incompatible custom role");
+  }
+  for (const assignment of dataset.userRoleAssignments) if (!users.has(String(assignment.userId)) || !roleIds.has(String(assignment.roleId))) throw new Error("SQLite source contains an orphaned user role assignment");
+  for (const identity of dataset.userIdentities) if (!users.has(String(identity.userId)) || !new Set(["local", "github", "oidc"]).has(String(identity.providerType))) throw new Error("SQLite source contains an incompatible user identity");
+  for (const credential of dataset.localCredentials) if (!users.has(String(credential.userId)) || typeof credential.passwordHash !== "string" || !credential.passwordHash) throw new Error("SQLite source contains an incompatible local credential");
+  const teams = new Map(dataset.teams.map((row) => [String(row.id), row]));
+  for (const team of teams.values()) if (team.parentTeamId != null && (!teams.has(String(team.parentTeamId)) || team.parentTeamId === team.id)) throw new Error("SQLite source contains an incompatible team parent");
+  for (const link of dataset.teamHierarchy) if (!teams.has(String(link.ancestorTeamId)) || !teams.has(String(link.descendantTeamId)) || !boundedInteger(link.depth, 0, Number.MAX_SAFE_INTEGER)) throw new Error("SQLite source contains an incompatible team hierarchy");
+  for (const membership of dataset.teamMemberships) if (!teams.has(String(membership.teamId)) || !users.has(String(membership.userId)) || !roleIds.has(String(membership.roleId)) || !new Set(["manual", "oidc"]).has(String(membership.source))) throw new Error("SQLite source contains an incompatible team membership");
+  for (const invitation of dataset.registrationInvitations) {
+    if ((invitation.userId != null && !users.has(String(invitation.userId))) || (invitation.createdByUserId != null && !users.has(String(invitation.createdByUserId))) || (invitation.initialRoleId != null && !roleIds.has(String(invitation.initialRoleId))) || !boundedInteger(invitation.maxUses, 1, Number.MAX_SAFE_INTEGER) || !boundedInteger(invitation.useCount, 0, Number.MAX_SAFE_INTEGER)) throw new Error("SQLite source contains an incompatible registration invitation");
+  }
+  for (const link of dataset.externalUserLinks) if (!users.has(String(link.userId)) || !new Set(["metadata", "rule", "admin"]).has(String(link.source))) throw new Error("SQLite source contains an incompatible external user link");
+  for (const event of dataset.identityAuditEvents) if (event.actorUserId != null && !users.has(String(event.actorUserId))) throw new Error("SQLite source contains an incompatible identity audit event");
   if (dataset.assistantConfig.length > 1) throw new Error("SQLite source contains more than one assistant configuration");
   const targetIds = new Set(dataset.capacityTargets.map((row) => String(row.id)));
   for (const row of dataset.assistantConfig) {
@@ -583,6 +859,7 @@ function validateDatasetSemantics(dataset: MigrationDataset): void {
     throw new Error("SQLite source contains an unsupported reservation status");
   }
   for (const row of dataset.reservations) {
+    if (!row.synthetic && (!row.userId || !users.has(String(row.userId)))) throw new Error("SQLite source contains a reservation without a durable owner");
     const targetIds = stringArray(row.targetIds, "reservation target IDs");
     const modelIds = new Set(stringArray(row.modelIds, "reservation model IDs"));
     const selections = row.targetSelections === undefined ? undefined : parseReservationTargetSelections(row.targetSelections, "reservation target selections");
@@ -594,6 +871,9 @@ function validateDatasetSemantics(dataset: MigrationDataset): void {
         throw new Error("SQLite source reservation target selections do not match model IDs");
       }
     }
+  }
+  for (const family of [dataset.reservationProfiles, dataset.apiKeys, dataset.modelFavorites]) {
+    if (family.some((row) => !row.userId || !users.has(String(row.userId)))) throw new Error("SQLite source contains durable user data without an owner");
   }
   if (dataset.targetActivations.some((row) => !activationStatuses.has(String(row.status)))) {
     throw new Error("SQLite source contains an unsupported target activation status");
@@ -761,6 +1041,19 @@ function jsonObject<T = unknown>(value: unknown): T {
 
 function nullableJsonObject(value: unknown): unknown | null {
   return value === null || value === undefined ? null : jsonObject(value);
+}
+
+const BUILTIN_ROLE_IDS = new Set([
+  "role_owner", "role_admin", "role_operator", "role_member", "role_viewer",
+  "role_team_owner", "role_team_manager", "role_team_member", "role_team_viewer"
+]);
+
+function normalizeUsername(value: string): string {
+  return value.trim().toLocaleLowerCase("en-US");
+}
+
+function legacyUserId(normalizedUsername: string): string {
+  return `usr_${createHash("sha256").update(normalizedUsername).digest("hex").slice(0, 24)}`;
 }
 
 function stringArray(value: unknown, context: string): string[] {

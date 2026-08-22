@@ -5,6 +5,7 @@ import type { ApiKey } from "../domain/types.js";
 
 interface ApiKeyRow {
   id: string;
+  user_id: string;
   username: string;
   name: string;
   prefix: string;
@@ -24,8 +25,8 @@ export class PostgresApiKeyRepository implements ApiKeyRepository {
     const key = { ...input, id: input.id ?? nanoid(12) };
     await this.pool.query(
       `insert into api_keys (
-        id, username, name, prefix, key_hash, created_at, last_used_at
-      ) values ($1, $2, $3, $4, $5, $6, $7)`,
+        id, user_id, username, name, prefix, key_hash, created_at, last_used_at
+      ) values ($1, $2, $3, $4, $5, $6, $7, $8)`,
       toSqlValues(key)
     );
     return cloneApiKey(key);
@@ -36,13 +37,13 @@ export class PostgresApiKeyRepository implements ApiKeyRepository {
     return result.rows[0] ? fromRow(result.rows[0]) : undefined;
   }
 
-  async listForUser(username: string): Promise<ApiKey[]> {
-    const result = await this.pool.query<ApiKeyRow>("select * from api_keys where username = $1 order by created_at asc, id asc", [username]);
+  async listForUser(userId: string): Promise<ApiKey[]> {
+    const result = await this.pool.query<ApiKeyRow>("select * from api_keys where user_id = $1 order by created_at asc, id asc", [userId]);
     return result.rows.map(fromRow);
   }
 
-  async deleteForUser(id: string, username: string): Promise<boolean> {
-    const result = await this.pool.query("delete from api_keys where id = $1 and username = $2", [id, username]);
+  async deleteForUser(id: string, userId: string): Promise<boolean> {
+    const result = await this.pool.query("delete from api_keys where id = $1 and user_id = $2", [id, userId]);
     return (result.rowCount ?? 0) > 0;
   }
 
@@ -53,12 +54,13 @@ export class PostgresApiKeyRepository implements ApiKeyRepository {
 }
 
 function toSqlValues(key: ApiKey): unknown[] {
-  return [key.id, key.username, key.name, key.prefix, key.keyHash, key.createdAt, key.lastUsedAt ?? null];
+  return [key.id, key.userId, key.username, key.name, key.prefix, key.keyHash, key.createdAt, key.lastUsedAt ?? null];
 }
 
 function fromRow(row: ApiKeyRow): ApiKey {
   return {
     id: row.id,
+    userId: row.user_id,
     username: row.username,
     name: row.name,
     prefix: row.prefix,

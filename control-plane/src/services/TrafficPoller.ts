@@ -3,6 +3,7 @@ import { ModelCatalog } from "./ModelCatalog.js";
 import { TrafficKeepaliveService } from "./TrafficKeepaliveService.js";
 import { litellmRoutePrefixes } from "../litellm/modelRouting.js";
 import type { ModelSelectionService } from "./ModelSelectionService.js";
+import type { IdentityService } from "./IdentityService.js";
 
 export class TrafficPoller {
   private running = false;
@@ -13,7 +14,8 @@ export class TrafficPoller {
     private readonly source: TrafficSource,
     private readonly catalog: ModelCatalog,
     private readonly keepalive: TrafficKeepaliveService,
-    private readonly modelSelection?: ModelSelectionService
+    private readonly modelSelection?: ModelSelectionService,
+    private readonly identities?: IdentityService
   ) {}
 
   async poll(now = new Date()): Promise<void> {
@@ -23,7 +25,7 @@ export class TrafficPoller {
       const events = await this.source.pollRecentTraffic(now);
       const latestTraffic = new Map<
         string,
-        { match: ReturnType<TrafficPoller["resolveTraffic"]>[number]; seenAt: Date }
+        { match: ReturnType<TrafficPoller["resolveTraffic"]>[number]; seenAt: Date; externalUserSubject?: string }
       >();
       for (const event of events) {
         if (this.stopped) return;
@@ -36,16 +38,18 @@ export class TrafficPoller {
           });
         }
         for (const match of matches) {
-          const key = `${match.target.id}\u0000${match.modelId}`;
+          const key = `${match.target.id}\u0000${match.modelId}\u0000${event.externalUserSubject ?? "anonymous"}`;
           const current = latestTraffic.get(key);
           if (!current || current.seenAt.getTime() < event.seenAt.getTime()) {
-            latestTraffic.set(key, { match, seenAt: event.seenAt });
+            latestTraffic.set(key, { match, seenAt: event.seenAt, externalUserSubject: event.externalUserSubject });
           }
         }
       }
-      for (const { match, seenAt } of latestTraffic.values()) {
+      for (const { match, seenAt, externalUserSubject } of latestTraffic.values()) {
         if (this.stopped) return;
-        await this.keepalive.recordTraffic(match.target, [match.modelId], seenAt, now);
+        const resolvedUser = externalUserSubject ? await this.identities?.resolveLiteLlmUser(externalUserSubject) : undefined;
+        const user = resolvedUser && await this.identities!.canAccessTarget(resolvedUser, match.target, "use") ? resolvedUser : undefined;
+        await this.keepalive.recordTraffic(match.target, [match.modelId], seenAt, now, user);
       }
     } finally {
       this.running = false;

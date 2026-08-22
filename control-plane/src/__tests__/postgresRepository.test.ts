@@ -11,13 +11,15 @@ describePostgres("PostgreSQL schema and repositories", () => {
     try {
       await migratePostgresSchema(database.pool);
       await migratePostgresSchema(database.pool);
-      expect(await readPostgresSchemaState(database.pool)).toEqual({ currentVersion: POSTGRES_SCHEMA_VERSION, appliedVersions: [1, 2, 3, 4, 5] });
+      expect(await readPostgresSchemaState(database.pool)).toEqual({ currentVersion: POSTGRES_SCHEMA_VERSION, appliedVersions: [1, 2, 3, 4, 5, 6] });
 
       const first = await createReservationRepository({ driver: "postgres", connectionString: database.connectionString, maxConnections: 3 });
       const createdAt = new Date("2026-07-01T12:30:00-05:00");
       const endedAt = new Date("2026-07-01T13:00:00-05:00");
+      await first.identities.createUser({ id: "usr-clint", username: "clint", status: "active", createdAt, updatedAt: createdAt });
       const profile = await first.reservationProfiles.create({
         id: "profile-1",
+        userId: "usr-clint",
         username: "clint",
         name: "Production profile",
         selections: [{ targetId: "target-1", modelIds: ["model-1"] }],
@@ -26,6 +28,7 @@ describePostgres("PostgreSQL schema and repositories", () => {
       });
       const reservation = await first.repository.create({
         id: "reservation-1",
+        userId: "usr-clint",
         username: "clint",
         apiKeyName: "operator-key",
         profileId: profile.id,
@@ -41,6 +44,7 @@ describePostgres("PostgreSQL schema and repositories", () => {
       });
       await first.apiKeys.create({
         id: "key-1",
+        userId: "usr-clint",
         username: "clint",
         name: "operator-key",
         prefix: "sk-neuron-example",
@@ -107,7 +111,7 @@ describePostgres("PostgreSQL schema and repositories", () => {
       await first.targetActivations.closeReservationsForActivation(activation.id, endedAt);
       await first.modelMetadata.upsertCapability({ modelId: "model-1", intelligence: 88, domains: { coding: 93 }, quantization: { format: "Q6", qualityRetentionPercent: 98 }, provenance: { source: "manual", version: "2026-08" } }, createdAt);
       await first.modelMetadata.upsertDeployment({ targetId: "target-1", modelId: "model-1", performance: { decodeTokensPerSecond: 40, prefillTokensPerSecond: 900, sampleCount: 3 } }, endedAt);
-      await first.modelFavorites.add({ username: "clint", targetId: "target-1", modelId: "model-1", createdAt });
+      await first.modelFavorites.add({ userId: "usr-clint", username: "clint", targetId: "target-1", modelId: "model-1", createdAt });
       await first.assistantConfig.save({ targetId: "target-1", modelId: "model-1", reservationMinutes: 12, keepaliveMinutes: 5, requestTimeoutSeconds: 90, additionalInstructions: "Use local pool names.", updatedAt: endedAt });
       await first.close();
 
@@ -125,7 +129,7 @@ describePostgres("PostgreSQL schema and repositories", () => {
       ]);
       expect(await second.modelMetadata.listCapabilities()).toMatchObject([{ modelId: "model-1", intelligence: 88, domains: { coding: 93 }, quantization: { format: "Q6", qualityRetentionPercent: 98 }, updatedAt: createdAt }]);
       expect(await second.modelMetadata.listDeployments()).toMatchObject([{ targetId: "target-1", modelId: "model-1", performance: { decodeTokensPerSecond: 40 }, updatedAt: endedAt }]);
-      expect(await second.modelFavorites.listForUser("clint")).toEqual([{ username: "clint", targetId: "target-1", modelId: "model-1", createdAt }]);
+      expect(await second.modelFavorites.listForUser("usr-clint")).toEqual([{ userId: "usr-clint", username: "clint", targetId: "target-1", modelId: "model-1", createdAt }]);
       expect(await second.assistantConfig.get()).toEqual({ id: "default", targetId: "target-1", modelId: "model-1", reservationMinutes: 12, keepaliveMinutes: 5, requestTimeoutSeconds: 90, additionalInstructions: "Use local pool names.", updatedAt: endedAt });
       await second.close();
     } finally {
@@ -163,7 +167,117 @@ describePostgres("PostgreSQL schema and repositories", () => {
     }
   });
 
-  it("moves an embedded legacy assistant selection through schema v5 without losing the model", async () => {
+  it("persists nested teams and transactionally merges duplicate PostgreSQL users", async () => {
+    const database = await createPostgresTestSchema();
+    try {
+      const handle = await createReservationRepository({ driver: "postgres", connectionString: database.connectionString, maxConnections: 3 });
+      const now = new Date("2026-08-21T12:00:00.000Z");
+      const source = await handle.identities.createUser({ id: "usr-source", username: "source", status: "active", createdAt: now, updatedAt: now });
+      const target = await handle.identities.createUser({ id: "usr-target", username: "target", status: "active", createdAt: now, updatedAt: now });
+      await handle.identities.setLocalPasswordHash(source.id, "source-password-hash");
+      await handle.identities.setLocalPasswordHash(target.id, "target-password-hash");
+      await handle.identities.saveIdentity({ userId: source.id, providerType: "github", providerId: "work", subject: "github-42", username: "source", createdAt: now, lastSeenAt: now });
+      const customRole = await handle.identities.createRole({ id: "role-custom", name: "Custom", scope: "global", permissions: ["reports.read_own"], createdAt: now, updatedAt: now });
+      await handle.identities.assignGlobalRole(source.id, customRole.id);
+      const parent = await handle.identities.createTeam({ id: "team-parent", name: "Engineering", createdAt: now, updatedAt: now });
+      const child = await handle.identities.createTeam({ id: "team-child", name: "Platform", parentTeamId: parent.id, createdAt: now, updatedAt: now });
+      await handle.identities.setTeamMembership({ teamId: child.id, userId: source.id, roleId: "role_team_member", source: "manual", createdAt: now });
+      await handle.identities.createInvitation({ id: "claim-source", tokenHash: "opaque-claim-hash", userId: source.id, intendedUsername: source.username, expiresAt: new Date("2027-01-01T00:00:00Z"), maxUses: 1, createdAt: now });
+      await handle.identities.saveExternalUserLink({ integration: "litellm", externalSubject: "external-source", userId: source.id, source: "admin", createdAt: now, lastSeenAt: now });
+      await handle.capacityTargets.create({ id: "private", displayName: "Private", provider: "fake", modelIds: [], audience: { scope: "users", userIds: [source.id] } });
+      await handle.reservationProfiles.create({ id: "source-profile", userId: source.id, username: source.username, name: "Profile", selections: [{ targetId: "private", modelIds: [] }], createdAt: now, updatedAt: now });
+      await handle.modelFavorites.add({ userId: source.id, username: source.username, targetId: "private", modelId: "model", createdAt: now });
+      await handle.modelFavorites.add({ userId: target.id, username: target.username, targetId: "private", modelId: "model", createdAt: now });
+
+      await handle.identities.mergeUsers(source.id, target.id, new Date("2026-08-21T13:00:00.000Z"));
+
+      expect(await handle.identities.getUser(source.id)).toMatchObject({ status: "disabled", mergedIntoUserId: target.id, sessionVersion: 2 });
+      expect(await handle.identities.getUser(target.id)).toMatchObject({ status: "active", sessionVersion: 2 });
+      expect(await handle.identities.getLocalPasswordHash(source.id)).toBeUndefined();
+      expect(await handle.identities.getLocalPasswordHash(target.id)).toBe("target-password-hash");
+      expect(await handle.identities.findIdentity("github", "work", "github-42")).toMatchObject({ userId: target.id });
+      expect(await handle.identities.listGlobalRolesForUser(target.id)).toEqual(expect.arrayContaining([expect.objectContaining({ id: customRole.id })]));
+      expect(await handle.identities.isUserInAnyTeam(target.id, [parent.id])).toBe(true);
+      expect(await handle.identities.getExternalUserLink("litellm", "external-source")).toMatchObject({ userId: target.id });
+      expect((await handle.identities.listInvitations())[0]).toMatchObject({ userId: target.id });
+      expect(await handle.capacityTargets.get("private")).toMatchObject({ audience: { scope: "users", userIds: [target.id] } });
+      expect(await handle.reservationProfiles.get("source-profile")).toMatchObject({ userId: target.id, username: target.username });
+      expect(await handle.modelFavorites.listForUser(target.id)).toHaveLength(1);
+      await expect(handle.identities.updateTeam(parent.id, { name: "Engineering", parentTeamId: child.id })).rejects.toThrow("cycle");
+      await handle.close();
+    } finally {
+      await database.cleanup();
+    }
+  });
+
+  it("serializes concurrent attempts to remove the final PostgreSQL Owner", async () => {
+    const database = await createPostgresTestSchema();
+    try {
+      const handle = await createReservationRepository({ driver: "postgres", connectionString: database.connectionString, maxConnections: 4 });
+      const first = await handle.identities.createUser({ id: "owner-first", username: "owner-first", status: "active" });
+      const second = await handle.identities.createUser({ id: "owner-second", username: "owner-second", status: "active" });
+      await handle.identities.assignGlobalRole(first.id, "role_owner");
+      await handle.identities.assignGlobalRole(second.id, "role_owner");
+
+      const disables = await Promise.allSettled([handle.identities.updateUser(first.id, { status: "disabled" }), handle.identities.updateUser(second.id, { status: "disabled" })]);
+      expect(disables.filter((result) => result.status === "fulfilled")).toHaveLength(1);
+      expect(disables.filter((result) => result.status === "rejected")).toHaveLength(1);
+      expect(await handle.identities.countEnabledUsersWithPermission("*")).toBe(1);
+
+      await handle.identities.updateUser(first.id, { status: "active" });
+      await handle.identities.updateUser(second.id, { status: "active" });
+      const revocations = await Promise.allSettled([handle.identities.revokeGlobalRole(first.id, "role_owner"), handle.identities.revokeGlobalRole(second.id, "role_owner")]);
+      expect(revocations.filter((result) => result.status === "fulfilled")).toHaveLength(1);
+      expect(revocations.filter((result) => result.status === "rejected")).toHaveLength(1);
+      expect(await handle.identities.countEnabledUsersWithPermission("*")).toBe(1);
+      await handle.close();
+    } finally { await database.cleanup(); }
+  });
+
+  it("upgrades schema v5 ownership in place without losing legacy profiles, keys, favorites, or reservations", async () => {
+    const database = await createPostgresTestSchema();
+    try {
+      await migratePostgresSchema(database.pool);
+      await database.pool.query(`
+        alter table reservations drop constraint if exists reservations_user_fk;
+        alter table reservations drop constraint if exists reservations_real_owner;
+        alter table reservation_profiles drop constraint if exists reservation_profiles_user_fk;
+        alter table api_keys drop constraint if exists api_keys_user_fk;
+        alter table model_favorites drop constraint if exists model_favorites_user_fk;
+        alter table reservations drop column user_id;
+        alter table reservation_profiles drop column user_id;
+        alter table api_keys drop column user_id;
+        alter table model_favorites drop column user_id;
+        drop table identity_audit_events, external_user_links, registration_invitations, team_memberships,
+          team_hierarchy, teams, user_role_assignments, roles, local_credentials, user_identities, users cascade;
+        delete from neuron_schema_migrations where version = 6;
+
+        insert into reservation_profiles (id,username,name,selections,created_at,updated_at)
+          values ('legacy-profile','Clint','Legacy','[{"targetId":"target-1","modelIds":["model-1"]}]','2026-08-01T12:00:00Z','2026-08-01T12:00:00Z');
+        insert into reservations (id,username,profile_id,profile_name,model_ids,target_ids,target_selections,created_at,expires_at,status,synthetic)
+          values ('legacy-reservation','clint','legacy-profile','Legacy','["model-1"]','["target-1"]','[{"targetId":"target-1","modelIds":["model-1"]}]','2026-08-01T12:00:00Z','2026-08-01T13:00:00Z','done',false);
+        insert into api_keys (id,username,name,prefix,key_hash,created_at)
+          values ('legacy-key','CLINT','Plugin','sk-neuron-old','opaque-hash','2026-08-01T12:00:00Z');
+        insert into model_favorites (username,target_id,model_id,created_at)
+          values ('Clint','target-1','model-1','2026-08-01T12:00:00Z');
+      `);
+
+      expect(await migratePostgresSchema(database.pool)).toMatchObject({ currentVersion: POSTGRES_SCHEMA_VERSION });
+      const handle = await createReservationRepository({ driver: "postgres", connectionString: database.connectionString, maxConnections: 3 });
+      const users = await handle.identities.listUsers();
+      expect(users).toHaveLength(1);
+      expect(users[0]).toMatchObject({ normalizedUsername: "clint", status: "active" });
+      expect(await handle.repository.get("legacy-reservation")).toMatchObject({ userId: users[0].id, username: "clint", profileId: "legacy-profile" });
+      expect(await handle.reservationProfiles.get("legacy-profile")).toMatchObject({ userId: users[0].id, username: "Clint", name: "Legacy" });
+      expect(await handle.apiKeys.get("legacy-key")).toMatchObject({ userId: users[0].id, username: "CLINT", keyHash: "opaque-hash" });
+      expect(await handle.modelFavorites.listForUser(users[0].id)).toMatchObject([{ username: "Clint", targetId: "target-1", modelId: "model-1" }]);
+      await handle.close();
+    } finally {
+      await database.cleanup();
+    }
+  });
+
+  it("moves an embedded legacy assistant selection through the current schema without losing the model", async () => {
     const database = await createPostgresTestSchema();
     try {
       await migratePostgresSchema(database.pool);
@@ -174,7 +288,7 @@ describePostgres("PostgreSQL schema and repositories", () => {
         ["advisor-target", JSON.stringify({ id: "advisor-target", displayName: "Advisor", provider: "docker", modelIds: ["advisor-model"], profileAdvisor: { modelId: "advisor-model", reservationMinutes: 12, startupTimeoutSeconds: 300, requestTimeoutSeconds: 90 } })]
       );
       const state = await migratePostgresSchema(database.pool);
-      expect(state.currentVersion).toBe(5);
+      expect(state.currentVersion).toBe(POSTGRES_SCHEMA_VERSION);
       const handle = await createReservationRepository({ driver: "postgres", connectionString: database.connectionString, maxConnections: 2 });
       expect(await handle.assistantConfig.get()).toMatchObject({ targetId: "advisor-target", modelId: "advisor-model", reservationMinutes: 12, keepaliveMinutes: 12, requestTimeoutSeconds: 90 });
       expect(await handle.capacityTargets.get("advisor-target")).not.toHaveProperty("profileAdvisor");
@@ -184,7 +298,7 @@ describePostgres("PostgreSQL schema and repositories", () => {
     }
   });
 
-  it("upgrades a schema v4 assistant record through schema v5 without manual SQL", async () => {
+  it("upgrades a schema v4 assistant record through the current schema without manual SQL", async () => {
     const database = await createPostgresTestSchema();
     try {
       await migratePostgresSchema(database.pool);
@@ -199,7 +313,7 @@ describePostgres("PostgreSQL schema and repositories", () => {
 
       const state = await migratePostgresSchema(database.pool);
 
-      expect(state).toEqual({ currentVersion: 5, appliedVersions: [1, 2, 3, 4, 5] });
+      expect(state).toEqual({ currentVersion: POSTGRES_SCHEMA_VERSION, appliedVersions: [1, 2, 3, 4, 5, 6] });
       const assistant = await database.pool.query<{ target_id: string; model_id: string; additional_instructions: string | null }>(`
         select target_id, model_id, additional_instructions
         from assistant_config
@@ -215,8 +329,9 @@ describePostgres("PostgreSQL schema and repositories", () => {
     const database = await createPostgresTestSchema();
     try {
       const handle = await createReservationRepository({ driver: "postgres", connectionString: database.connectionString, maxConnections: 3 });
+      await handle.identities.createUser({ id: "usr-clint", username: "clint", status: "active" });
       const reservation = await handle.repository.create({
-        id: "invalid-selections", username: "clint", modelIds: ["model-1"], targetIds: ["target-1"],
+        id: "invalid-selections", userId: "usr-clint", username: "clint", modelIds: ["model-1"], targetIds: ["target-1"],
         createdAt: new Date(), expiresAt: new Date(Date.now() + 60_000), status: "active"
       });
       await database.pool.query("update reservations set target_selections = $1::jsonb where id = $2", [JSON.stringify({ targetId: "target-1", modelIds: ["model-1"] }), reservation.id]);

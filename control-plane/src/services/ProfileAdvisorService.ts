@@ -7,7 +7,13 @@ import type { ModelCatalog } from "./ModelCatalog.js";
 import type { ModelDeploymentSelectionView, ModelSelectionRequirements } from "./ModelSelectionService.js";
 import type { ReservationService } from "./ReservationService.js";
 
-const SYSTEM_USER: AuthenticatedUser = { username: "profile-advisor", isAdmin: true };
+const SYSTEM_USER: AuthenticatedUser = {
+  id: "system:profile-advisor",
+  username: "profile-advisor",
+  isAdmin: true,
+  permissions: ["*"],
+  sessionVersion: 0
+};
 const MAX_RESPONSE_BYTES = 64 * 1024;
 const MAX_HISTORY_MESSAGES = 32;
 const MAX_HISTORY_CHARACTERS = 18_000;
@@ -89,7 +95,7 @@ export interface ProfileAssistantRequestStatus {
 export class ProfileAssistantRequestConflictError extends Error {}
 
 interface StoredProfileAssistantRequest extends ProfileAssistantRequestStatus {
-  username: string;
+  userId: string;
   updatedAt: number;
 }
 
@@ -169,7 +175,7 @@ export interface ProfileAdvisorServiceOptions {
   statuses: TargetStatusRepository;
   capacityProvider: CapacityProvider;
   availableDomains: () => string[];
-  availableDeployments: () => Promise<ModelDeploymentSelectionView[]> | ModelDeploymentSelectionView[];
+  availableDeployments: (user?: AuthenticatedUser) => Promise<ModelDeploymentSelectionView[]> | ModelDeploymentSelectionView[];
   fetchImpl?: typeof fetch;
   sleep?: (milliseconds: number) => Promise<void>;
 }
@@ -220,7 +226,7 @@ export class ProfileAdvisorService {
     const safeConversation = sanitizeConversationInput(conversation);
     const contextUpdate = buildContextUpdate(safeConversation.previousContext, context);
     this.pruneRequests();
-    const existing = Array.from(this.requests.values()).find((candidate) => candidate.username === user.username && (candidate.phase === "waking" || candidate.phase === "thinking"));
+    const existing = Array.from(this.requests.values()).find((candidate) => candidate.userId === user.id && (candidate.phase === "waking" || candidate.phase === "thinking"));
     if (existing) throw new ProfileAssistantRequestConflictError("An Assistant request is already running for this user");
     const activeCount = Array.from(this.requests.values()).filter((candidate) => candidate.phase === "waking" || candidate.phase === "thinking").length;
     if (activeCount >= 100) throw new Error("The Assistant is busy. Please try again shortly.");
@@ -229,7 +235,7 @@ export class ProfileAdvisorService {
     const startedAt = Date.now();
     const stored: StoredProfileAssistantRequest = {
       id: randomUUID(),
-      username: user.username,
+      userId: user.id,
       phase: ready ? "thinking" : "waking",
       message: ready ? "The Assistant is awake and thinking…" : "The Assistant is sleeping. NeurOn is waking it…",
       conversation: { contextMessage: contextUpdate.message, contextSnapshot: context },
@@ -244,7 +250,7 @@ export class ProfileAdvisorService {
       updatedAt: Date.now()
     };
     this.requests.set(stored.id, stored);
-    void this.interpretDetailed(request, context, user.isAdmin, (phase, message) => this.updateRequest(stored.id, phase, message), safeConversation, contextUpdate.message, stored.debug)
+    void this.interpretDetailed(request, context, user.isAdmin, (phase, message) => this.updateRequest(stored.id, phase, message), safeConversation, contextUpdate.message, stored.debug, user)
       .then((outcome) => {
         if (stored.debug) {
           stored.debug.completionAttempts = outcome.attempts;
@@ -263,7 +269,18 @@ export class ProfileAdvisorService {
   getInterpretRequest(id: string, user: AuthenticatedUser): ProfileAssistantRequestStatus | undefined {
     this.pruneRequests();
     const stored = this.requests.get(id);
-    return stored?.username === user.username ? requestView(stored, user.isAdmin) : undefined;
+    return stored?.userId === user.id ? requestView(stored, user.isAdmin) : undefined;
+  }
+
+  async interpretForUser(
+    request: string,
+    context: ProfileAssistantContext,
+    user: AuthenticatedUser,
+    conversation: ProfileAssistantConversationInput = {}
+  ): Promise<ProfileAssistantResult> {
+    const safeConversation = sanitizeConversationInput(conversation);
+    const contextUpdate = buildContextUpdate(safeConversation.previousContext, context);
+    return (await this.interpretDetailed(request, context, user.isAdmin, undefined, safeConversation, contextUpdate.message, undefined, user)).result;
   }
 
   async interpret(
@@ -285,11 +302,12 @@ export class ProfileAdvisorService {
     onProgress: ((phase: "waking" | "thinking", message: string) => void) | undefined,
     conversation: Required<Pick<ProfileAssistantConversationInput, "history">> & Pick<ProfileAssistantConversationInput, "summary" | "previousContext">,
     contextMessage?: string,
-    debug?: ProfileAssistantDebug
+    debug?: ProfileAssistantDebug,
+    user?: AuthenticatedUser
   ): Promise<CompletionOutcome> {
     const backend = await this.configuration();
     if (!backend) throw new Error("AI profile guidance is not configured");
-    const deployments = await this.options.availableDeployments();
+    const deployments = await this.options.availableDeployments(user);
     const acquired = await this.acquireBackend(backend);
     onProgress?.("thinking", "The Assistant is awake and thinking…");
     const model = this.options.catalog.getModel(backend.config.modelId);

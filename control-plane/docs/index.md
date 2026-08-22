@@ -7,6 +7,7 @@
 * [Architecture](architecture.md) - Domain objects, services, and request flow.
 * [Reconciler](reconciler.md) - Desired-state loop and lifecycle decisions.
 * [Configuration](configuration.md) - JSON, file, and env-expanded config.
+* [Identity and Access](identity-access.md) - Durable users, sign-in methods, roles, teams, audiences, merge, and recovery.
 * [Integrations](integrations.md) - API keys, OpenAPI, Swagger UI, and MCP.
 * [Providers](providers.md) - Lifecycle boundaries for Docker, AWS, RunPod, upstream NeurOn, and LiteLLM.
 * [Targets](targets.md) - Target config, provider relationships, and runtime profiles.

@@ -16,7 +16,9 @@ small interaction helpers.
 
 ### Reservation
 
-A reservation represents intent from an authenticated user.
+A reservation represents intent from an authenticated user. Every real
+reservation is owned by a durable `userId`; `username` remains a denormalized
+display/compatibility field. Synthetic system reservations have no user owner.
 
 Important fields:
 
@@ -40,6 +42,21 @@ Important fields:
 
 A reservation contributes to desired capacity only when it is active and its
 expiration is in the future.
+
+### User, roles, and teams
+
+A `User` is NeurOn's stable ownership root. Local credentials and external
+GitHub/OIDC identities are separate authentication links to it. Profiles,
+reservations, API keys, favorites, LiteLLM subjects, global roles, and team
+memberships use the durable user ID, so a provider username change does not
+orphan state.
+
+Global roles grant application permissions. Owner is the protected wildcard
+role; final-Owner removal is serialized in PostgreSQL and guarded in every
+repository. Teams form an acyclic hierarchy backed by a closure table, which
+allows an audience granted to a parent to include descendant-team members.
+Targets declare a global, team, or user audience, and the same visibility check
+is applied by UI, REST, MCP, reservation creation, and traffic attribution.
 
 ### ReservationProfile
 
@@ -139,6 +156,7 @@ The core interfaces keep replaceable parts isolated:
 - `ModelMetadataRepository`
 - `ModelFavoriteRepository`
 - `AssistantConfigRepository`
+- `IdentityRepository`
 - `AuthProvider`
 - `TrafficSource`
 - `TargetStatusRepository`
@@ -157,6 +175,13 @@ into AWS, Docker, LiteLLM, or a concrete repository from unrelated code.
   per-reservation cost allocations from reconciler state.
 - `ApiKeyService`: generates personal API keys, stores only hashed key
   material, lists key metadata, and revokes keys.
+- `IdentityService`: authenticates local credentials, attaches stable external
+  subjects, resolves live roles and nested-team membership, protects Owner
+  authority, manages invitations and external LiteLLM links, and atomically
+  previews/merges duplicate users.
+- `AuthMethodService`: combines environment-backed external methods with
+  durable local/GitHub/OIDC methods and validates OIDC membership rules before
+  persistence.
 - `ModelCatalog`: maps selectable model IDs, aliases, backend IDs, and runtime
   IDs to model definitions and targets.
 - `ModelSelectionService`: combines durable capability metadata, exact
@@ -215,7 +240,8 @@ into AWS, Docker, LiteLLM, or a concrete repository from unrelated code.
 
 ## Request Flow
 
-1. Auth resolves an `AuthenticatedUser`.
+1. Auth resolves the credential or signed session to a durable user, then
+   refreshes current status, roles, permissions, and team closure.
 2. UI or API creates a reservation with model IDs, duration, and keepalive
    window, or with a `profileId` plus duration/keepalive.
 3. `ReservationService` validates target-specific model selections through
@@ -238,8 +264,9 @@ creation response. NeurOn stores a SHA-256 hash plus a display prefix, so later
 list responses can show which key exists without revealing the secret again.
 
 API keys authenticate REST calls with `Authorization: Bearer <key>` and resolve
-to the same username and admin status as the user that created them. Revoking a
-key removes it immediately from the configured API key repository.
+to the current durable user state. Disabling or merging the user, changing a
+role, or changing a target audience takes effect on the next request. Revoking
+a key removes it immediately from the configured API key repository.
 
 ## Integration Surfaces
 
@@ -277,11 +304,12 @@ estimates remain in-memory observational state. Provider state is still
 observed on the next reconciliation loop, and startup estimates are not used
 for scheduling decisions.
 
-The durable driver is one control-plane ownership boundary covering twelve
-repository families: reservations, profiles, hashed API keys, auth methods,
-provider definitions, target definitions, provisioning jobs, model-discovery
-records, model capability/deployment metadata, model favorites, the singleton
-assistant configuration, and target activation/cost allocation history.
+The durable driver is one control-plane ownership boundary covering
+reservations, profiles, hashed API keys, auth methods, provider and target
+definitions, provisioning jobs, model discovery, model capability/deployment
+metadata, favorites, assistant configuration, activation/cost history, and the
+identity graph (users, identities, local credentials, roles, assignments,
+nested teams, memberships, invitations, external links, and audit events).
 PostgreSQL uses one bounded shared pool.
 Ordered transactional schema changes are recorded in
 `neuron_schema_migrations`; the data-transfer ledger is separate so an exact

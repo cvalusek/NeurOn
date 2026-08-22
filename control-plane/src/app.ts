@@ -3,7 +3,7 @@ import formbody from "@fastify/formbody";
 import swagger from "@fastify/swagger";
 import swaggerUi from "@fastify/swagger-ui";
 import Fastify from "fastify";
-import { SharedPasswordAuthProvider } from "./auth/SharedPasswordAuthProvider.js";
+import { IdentityAuthProvider } from "./auth/IdentityAuthProvider.js";
 import { AuthSecretResolver } from "./auth/AuthSecretResolver.js";
 import { OidcAuthService } from "./auth/OidcAuthService.js";
 import { AwsEc2CapacityProvider } from "./capacity/AwsEc2CapacityProvider.js";
@@ -32,6 +32,7 @@ import { ModelWarmupService } from "./services/ModelWarmupService.js";
 import { ModelSelectionService } from "./services/ModelSelectionService.js";
 import { ModelFavoriteService } from "./services/ModelFavoriteService.js";
 import { UsageAnalyticsService } from "./services/UsageAnalyticsService.js";
+import { IdentityService } from "./services/IdentityService.js";
 import { ModelBenchmarkService } from "./services/ModelBenchmarkService.js";
 import { ProfileAdvisorService } from "./services/ProfileAdvisorService.js";
 import { ProviderCatalog } from "./services/ProviderCatalog.js";
@@ -52,21 +53,43 @@ import { HassleOffClient } from "./safety/HassleOffClient.js";
 
 export interface BuildAppOptions {
   requestShutdown?: (reason: string) => void | Promise<void>;
+  /** Programmatic test/documentation fixture only. Production bootstrapping uses the explicit users command. */
+  developmentLocalAccounts?: Array<{ username: string; password: string; owner?: boolean }>;
 }
 
 export async function buildApp(config: AppConfig, models: ModelDefinition[], options: BuildAppOptions = {}) {
   const app = Fastify({ logger: true });
   const reservationRepository = await createReservationRepository(config.storage);
+  const identityService = new IdentityService(reservationRepository.identities);
+  await identityService.initialize(config.adminUsers);
+  for (const account of options.developmentLocalAccounts ?? []) {
+    let user = await reservationRepository.identities.getUserByUsername(account.username);
+    if (!user) user = await reservationRepository.identities.createUser({ username: account.username, status: "active" });
+    await identityService.setPassword(user.id, account.password);
+    if (account.owner || config.adminUsers.some((username) => username.toLocaleLowerCase("en-US") === account.username.toLocaleLowerCase("en-US"))) {
+      await reservationRepository.identities.assignGlobalRole(user.id, "role_owner");
+    }
+  }
   const apiKeys = reservationRepository.apiKeys;
-  const authMethodService = new AuthMethodService(config.authMethods, reservationRepository.authMethods);
+  const authMethodService = new AuthMethodService(config.authMethods, reservationRepository.authMethods, reservationRepository.identities);
+  await authMethodService.initialize();
   const providerCatalog = new ProviderCatalog(config.capacityProviders);
   const providerService = new ProviderService(config.capacityProviders, reservationRepository.capacityProviders, providerCatalog);
   await providerService.initialize();
-  const authProvider = new SharedPasswordAuthProvider(config.sharedPasswordEnabled === false ? undefined : config.sharedPassword, config.adminUsers, config.cookieSecret, apiKeys);
+  const authProvider = new IdentityAuthProvider(identityService, config.cookieSecret, apiKeys, () => authMethodService.localEnabled());
   const oidcAuthService = new OidcAuthService(new AuthSecretResolver(config.awsRegion));
   const catalog = new ModelCatalog(models, config.capacityTargets);
   const targetService = new TargetService([...config.capacityTargets], reservationRepository.capacityTargets, catalog, config.capacityTargets, reservationRepository.targetModelDiscoveries);
   await targetService.initialize();
+  identityService.onUsersMerged((sourceUserId, targetUserId) => {
+    for (const target of catalog.listTargets()) {
+      if (target.audience?.scope !== "users" || !target.audience.userIds.includes(sourceUserId)) continue;
+      catalog.upsertTarget({
+        ...target,
+        audience: { scope: "users", userIds: Array.from(new Set(target.audience.userIds.map((id) => id === sourceUserId ? targetUserId : id))) }
+      });
+    }
+  });
   const targetProvisioningService = new TargetProvisioningService(reservationRepository.targetProvisioningJobs);
   const reservations = reservationRepository.repository;
   const statuses = new InMemoryTargetStatusRepository();
@@ -88,8 +111,8 @@ export async function buildApp(config: AppConfig, models: ModelDefinition[], opt
     applyReplacementPatch: (targetId, patch) => targetService.applyReplacementPatch(targetId, patch)
   });
   const backendConfigSync = config.litellmApiBaseUrl && config.litellmApiKey ? new LiteLlmBackendConfigSync(config.litellmApiBaseUrl, config.litellmApiKey) : new NoopBackendConfigSync();
-  const reservationProfileService = new ReservationProfileService(reservationRepository.reservationProfiles, catalog);
-  const apiKeyService = new ApiKeyService(apiKeys);
+  const reservationProfileService = new ReservationProfileService(reservationRepository.reservationProfiles, catalog, identityService);
+  const apiKeyService = new ApiKeyService(apiKeys, identityService);
   const trafficKeepalive = new TrafficKeepaliveService(reservations, statuses);
   const healthChecker = new HealthChecker(config.healthCheckTimeoutSeconds);
   const targetOperations = new TargetOperationCoordinator();
@@ -111,7 +134,7 @@ export async function buildApp(config: AppConfig, models: ModelDefinition[], opt
   const modelSelection = new ModelSelectionService(catalog, config.modelSelectionCatalog, reservationRepository.modelMetadata);
   await modelSelection.initialize();
   runtimeModelDiscovery.setBenchmarkService(new ModelBenchmarkService(catalog, modelSelection));
-  const modelFavorites = new ModelFavoriteService(reservationRepository.modelFavorites, catalog);
+  const modelFavorites = new ModelFavoriteService(reservationRepository.modelFavorites, catalog, identityService);
   const usageAnalytics = new UsageAnalyticsService(reservations, reservationRepository.reservationProfiles, reservationRepository.targetActivations, catalog);
   const modelWarmup = new ModelWarmupService(catalog);
   const costEstimation = new CostEstimationService(
@@ -121,7 +144,7 @@ export async function buildApp(config: AppConfig, models: ModelDefinition[], opt
   );
   const trafficPoller =
     config.litellmApiBaseUrl && config.litellmApiKey && config.litellmTrafficPollSeconds > 0
-      ? new TrafficPoller(new LiteLlmSpendLogsTrafficSource(config.litellmApiBaseUrl, config.litellmApiKey, config.litellmTrafficLookbackSeconds), catalog, trafficKeepalive, modelSelection)
+      ? new TrafficPoller(new LiteLlmSpendLogsTrafficSource(config.litellmApiBaseUrl, config.litellmApiKey, config.litellmTrafficLookbackSeconds), catalog, trafficKeepalive, modelSelection, identityService)
       : undefined;
   const reconciler = new Reconciler(
     config.capacityTargets,
@@ -151,7 +174,8 @@ export async function buildApp(config: AppConfig, models: ModelDefinition[], opt
             )
           );
         },
-    () => shutdownControl.current?.acceptingReservations() ?? true
+    () => shutdownControl.current?.acceptingReservations() ?? true,
+    identityService
   );
   const profileAdvisor = new ProfileAdvisorService({
     assistantConfig: reservationRepository.assistantConfig,
@@ -160,13 +184,17 @@ export async function buildApp(config: AppConfig, models: ModelDefinition[], opt
     statuses,
     capacityProvider,
     availableDomains: () => modelSelection.availableDomains(),
-    availableDeployments: async () => {
+    availableDeployments: async (user) => {
+      const candidateTargets = user
+        ? (await Promise.all(catalog.listTargets().map(async (target) => await identityService.canAccessTarget(user, target) ? target : undefined))).filter((target): target is NonNullable<typeof target> => Boolean(target))
+        : catalog.listTargets();
       const costs: Record<string, { hourlyUsd: number }> = {};
-      await Promise.all(catalog.listTargets().map(async (target) => {
+      await Promise.all(candidateTargets.map(async (target) => {
         const estimate = await costEstimation.resolveTargetCostEstimate(target);
         if (estimate?.hourlyUsd !== undefined) costs[target.id] = { hourlyUsd: estimate.hourlyUsd };
       }));
-      return modelSelection.listDeployments(costs);
+      const targetIds = new Set(candidateTargets.map((target) => target.id));
+      return modelSelection.listDeployments(costs).filter((deployment) => targetIds.has(deployment.targetId));
     }
   });
   targetOperations.setDemandController({
@@ -222,7 +250,7 @@ export async function buildApp(config: AppConfig, models: ModelDefinition[], opt
   });
 
   app.addHook("preHandler", async (request, reply) => {
-    const mutationAllowedInMaintenance = request.url === "/login" || request.url === "/logout" || request.url.startsWith("/auth/");
+    const mutationAllowedInMaintenance = request.url === "/login" || request.url === "/logout" || request.url.startsWith("/auth/") || request.url.startsWith("/register");
     if (
       config.maintenanceMode &&
       !["GET", "HEAD", "OPTIONS"].includes(request.method) &&
@@ -233,15 +261,16 @@ export async function buildApp(config: AppConfig, models: ModelDefinition[], opt
       }
       return reply.code(503).type("text/html").send("NeurOn is in maintenance mode; state changes are disabled");
     }
-    if (request.url === "/healthz" || request.url === "/login" || request.url === "/logout" || request.url.startsWith("/auth/") || request.url === "/openapi.json" || request.url.startsWith("/docs")) return;
+    if (request.url === "/healthz" || request.url === "/login" || request.url === "/logout" || request.url.startsWith("/auth/") || request.url.startsWith("/register") || request.url === "/openapi.json" || request.url.startsWith("/docs")) return;
     const user = await authProvider.authenticate({ headers: request.headers, cookies: request.cookies });
     if (!user) {
       if (request.url.startsWith("/api/")) return reply.code(401).send({ error: "Authentication required" });
       return reply.redirect("/login");
     }
-    if ((request.url.startsWith("/admin") || request.url.startsWith("/api/admin/")) && !user.isAdmin) {
-      if (request.url.startsWith("/api/")) return reply.code(403).send({ error: "Admin access required" });
-      return reply.code(403).type("text/html").send("Admin access required");
+    const permission = adminPermissionFor(request.method, request.url);
+    if (permission && !identityService.hasPermission(user, permission)) {
+      if (request.url.startsWith("/api/")) return reply.code(403).send({ error: `Permission required: ${permission}` });
+      return reply.code(403).type("text/html").send("You do not have permission to use this administrative screen");
     }
     request.user = user;
     if (shutdownCoordinator?.isDraining() && shutdownUnsafeMutation(request.method, request.url)) {
@@ -273,9 +302,10 @@ export async function buildApp(config: AppConfig, models: ModelDefinition[], opt
     modelSelection,
     profileAdvisor,
     modelFavorites,
-    usageAnalytics
+    usageAnalytics,
+    identityService
   );
-  registerMcpRoutes(app, catalog, reservations, statuses, reservationService);
+  registerMcpRoutes(app, catalog, reservations, statuses, reservationService, identityService);
   registerUiRoutes(
     app,
     config,
@@ -297,7 +327,8 @@ export async function buildApp(config: AppConfig, models: ModelDefinition[], opt
     modelSelection,
     profileAdvisor,
     modelFavorites,
-    usageAnalytics
+    usageAnalytics,
+    identityService
   );
 
   const bootstrapRuntimeModels = async (): Promise<StartupRuntimeModelDiscoveryOutcome[]> => {
@@ -331,7 +362,23 @@ export async function buildApp(config: AppConfig, models: ModelDefinition[], opt
     return outcomes;
   };
 
-  return { app, reconciler, trafficPoller, bootstrapRuntimeModels, runtimeModelDiscovery, targetOperations, updateChecker, shutdownCoordinator };
+  return { app, reconciler, trafficPoller, bootstrapRuntimeModels, runtimeModelDiscovery, targetOperations, updateChecker, shutdownCoordinator, identityService, authProvider };
+}
+
+function adminPermissionFor(method: string, url: string): string | undefined {
+  if (!url.startsWith("/admin") && !url.startsWith("/api/admin/")) return undefined;
+  if (url.startsWith("/api/admin/users/merge") || url.startsWith("/admin/users/merge")) return "users.merge";
+  if (url.startsWith("/admin/users") || url.startsWith("/api/admin/users")) return "users.manage";
+  if (url.startsWith("/api/admin/external-users")) return "users.manage";
+  if (url.startsWith("/admin/roles") || url.startsWith("/api/admin/roles")) return "roles.manage";
+  if (url.startsWith("/admin/teams") || url.startsWith("/api/admin/teams")) return "teams.manage";
+  if (url.startsWith("/admin/auth")) return "auth.manage";
+  if (/^\/api\/admin\/targets\/[^/]+\/discover(?:\?|$)/.test(url)) return "discovery.run";
+  if (url.startsWith("/admin/targets") || url.startsWith("/admin/providers") || url.startsWith("/api/admin/targets") || url.startsWith("/api/admin/providers")) return "targets.manage";
+  if (url.startsWith("/admin/models") || url.startsWith("/api/admin/model-metadata")) return method === "GET" ? "targets.read_all" : "discovery.run";
+  if (url.startsWith("/admin/assistant") || url.startsWith("/api/admin/assistant")) return "assistant.configure";
+  if (url.startsWith("/admin/usage") || url.startsWith("/admin/reservations") || url.startsWith("/admin/activations") || url.startsWith("/api/admin/usage") || url.startsWith("/api/admin/status") || url.startsWith("/api/admin/reservations") || url.startsWith("/api/admin/activations")) return "reports.read_all";
+  return "system.manage";
 }
 
 function errorForLog(error: unknown): { message: string; name?: string; stack?: string } {

@@ -22,12 +22,14 @@ For pure app development without touching real capacity:
 ```bash
 cd control-plane
 npm install
-SHARED_PASSWORD=dev-password USE_FAKE_PROVIDER=true CAPACITY_TARGETS_FILE=examples/capacity-targets.local-fake.json npm run dev
+npm run build
+STORAGE_DRIVER=sqlite SQLITE_PATH=./data/neuron-dev.db npm run users -- create-owner-link --username admin --base-url http://localhost:8090 --confirm-application-stopped
+STORAGE_DRIVER=sqlite SQLITE_PATH=./data/neuron-dev.db USE_FAKE_PROVIDER=true CAPACITY_TARGETS_FILE=examples/capacity-targets.local-fake.json npm run dev
 ```
 
-Open `http://localhost:8090`, sign in with any username and `dev-password`, or
-use Basic Auth for API calls. Users can create API keys from `/api-keys` for
-Bearer-auth plugin and MCP integrations.
+Open the one-time URL printed by the Owner-link command, choose the first local
+password, and sign in. Each account has its own password. Users can create API
+keys from `/api-keys` for Bearer-auth plugin and MCP integrations.
 
 From the repository root, Docker Compose runs NeurOn without starter providers
 or targets. Local Compose stores reservations in `./data/neuron.db` so
@@ -121,12 +123,10 @@ Environment variables:
 | Name | Default | Notes |
 | --- | --- | --- |
 | `PORT` | `8090` | HTTP port inside the container |
-| `SHARED_PASSWORD_ENABLED` | `true` | Set `false` to hide and reject shared-password and Basic authentication |
-| `SHARED_PASSWORD` | required when enabled in production | Shared-password form and Basic authentication password |
 | `COOKIE_SECRET` | unset | Enables login cookie auth |
-| `ADMIN_USERS` | any authenticated user | Comma-separated admin usernames |
+| `ADMIN_USERS` | unset | Optional comma-separated Owner bootstrap/recovery usernames; empty grants nobody Owner |
 | `PUBLIC_BASE_URL` | forwarded request origin | External origin used for OAuth/OIDC callback URLs |
-| `AUTH_METHOD_KEYS` | unset | Comma-separated scoped GitHub/OIDC method keys; see `docs/configuration.md` |
+| `AUTH_METHOD_KEYS` | unset | Comma-separated scoped GitHub/OIDC method keys; local auth is durable and managed in Admin |
 | `NEURON_UPDATE_CHECK_ENABLED` | enabled for published images | Check the latest successful main image build |
 | `NEURON_UPDATE_REPOSITORY` | `cvalusek/NeurOn` | GitHub repository used for update checks |
 | `NEURON_UPDATE_CHECK_SECONDS` | `900` | Minimum interval between GitHub update checks |
@@ -195,24 +195,12 @@ Full configuration details live in [docs/configuration.md](docs/configuration.md
 ## API Examples
 
 ```bash
-curl -u clint:dev-password http://localhost:8090/api/models
-```
-
-Generate API keys from `/api-keys`, then call the API with Bearer auth:
-
-```bash
 curl -H "Authorization: Bearer sk-neuron-..." http://localhost:8090/api/models
 ```
 
 ```bash
-curl -u clint:dev-password -H 'content-type: application/json' \
-  -d '{"modelIds":["qwen"],"durationMinutes":15}' \
-  http://localhost:8090/api/reservations
-```
-
-```bash
-curl -u clint:dev-password http://localhost:8090/api/status
-curl -u clint:dev-password -X POST http://localhost:8090/api/reservations/<id>/done
+curl -H "Authorization: Bearer sk-neuron-..." http://localhost:8090/api/status
+curl -H "Authorization: Bearer sk-neuron-..." -X POST http://localhost:8090/api/reservations/<id>/done
 ```
 
 OpenAPI UI is available at `/docs`, and the OpenAPI 3.0 document is available
@@ -265,10 +253,12 @@ Run NeurOn separately from the LLM host, for example as its own ECS/Fargate
 service. It scales the configured LLM ECS service and Auto Scaling Group; it
 should not run on the same capacity that it turns off.
 
-The app is intended for internal/Tailscale access. v1 auth is shared-password
-Basic Auth plus optional signed HTTP-only login cookie. Users can generate
-hashed `sk-neuron-...` API keys for Bearer-auth integrations. `AuthProvider` is
-isolated so GitHub/AuthentiK/Okta/Tailscale identity can replace it later.
+The app is intended for internal/Tailscale access. Interactive sign-in supports
+individual local passwords plus configured GitHub and OIDC methods. Browser
+sessions are signed, HTTP-only, and bounded; users can generate hashed
+`sk-neuron-...` API keys for Bearer-auth integrations. See
+[Identity and Access](docs/identity-access.md) before disabling local auth or
+rolling an existing deployment forward.
 
 ## IAM
 

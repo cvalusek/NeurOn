@@ -59,23 +59,34 @@ EC2 deployment integration.
 
 ## Quick start
 
-Copy the safe example configuration and run the local control plane:
+Copy the safe example configuration and build the local control plane:
 
 ```bash
 cp .env.example .env
-docker compose up --build neuron
+docker compose build neuron
 ```
 
-Open `http://localhost:8090`, sign in with a username and the configured shared
-password, then add providers and targets from Admin. The first login without a
-profile opens a short explanation and guides the user into profile creation.
+With NeurOn stopped, create the first one-time Owner registration link, then
+start the service:
+
+```bash
+docker compose run --rm neuron node dist/scripts/users.js create-owner-link --username admin --base-url http://localhost:8090 --confirm-application-stopped
+docker compose up -d neuron
+```
+
+Open the one-time URL printed by the first command. Each local user has an
+individual password; GitHub and OIDC identities attach to the same durable user
+when their normalized username matches. The first login without a profile opens
+a short explanation and guides the user into profile creation.
 
 For application development without Docker:
 
 ```bash
 cd control-plane
 npm install
-SHARED_PASSWORD=dev-password USE_FAKE_PROVIDER=true npm run dev
+npm run build
+# Set durable storage variables, run the offline owner-link command, then:
+USE_FAKE_PROVIDER=true npm run dev
 ```
 
 The base Compose file defaults to durable SQLite for a simple single-node
@@ -84,6 +95,10 @@ dry-run, backup, one-writer cutover, and rollback procedure are documented in
 [SQLite to PostgreSQL migration](control-plane/docs/postgres-migration.md).
 HassleOff is a separate watchdog with its own SQLite state and is never part of
 that control-plane database migration.
+
+Durable users, roles, teams, external identities, target audiences, and the
+admin-only duplicate-account merge API are described in the
+[Identity and access guide](control-plane/docs/identity-access.md).
 
 ## Integrations
 

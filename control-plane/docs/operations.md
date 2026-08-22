@@ -21,8 +21,12 @@ must survive NeurOn restarts. See [HassleOff](hassleoff.md).
 ## Networking
 
 NeurOn is designed for internal/Tailscale-style access. Interactive
-authentication supports the shared password and configured GitHub or OIDC
-providers, including Okta, using a signed HTTP-only NeurOn session cookie.
+authentication supports individual local passwords and configured GitHub or
+OIDC providers, including Okta, using a signed HTTP-only NeurOn session cookie.
+Sessions expire after twelve hours and re-resolve current account status,
+roles, and team membership on every request. Local sign-in may be disabled only
+after an external Owner path is verified; the offline one-time Owner-link
+command is the recovery path.
 The navigation's **Sign out** action posts to `/logout`, clears only the local
 NeurOn session, and does not sign the user out of GitHub or the upstream OIDC
 provider.
@@ -46,8 +50,16 @@ targets on after the process comes back. Durable API keys allow plugin and MCP
 clients to survive control-plane restarts. The selected driver also owns
 reservation profiles, auth methods, provider and target definitions,
 provisioning jobs, runtime model-discovery records, durable model capability and
-deployment measurements, user model favorites, and target activation/cost
-history.
+deployment measurements, user model favorites, the singleton assistant
+configuration, target activation/cost history, and the full identity graph:
+users, credentials, external identities, roles, nested teams, memberships,
+invitations, external traffic links, and audit events.
+
+Schema version 6 introduces this durable identity graph and backfills stable
+owners from legacy usernames without changing profile, reservation, API-key,
+favorite, or activation IDs. It assigns Member—not Owner—to backfilled users.
+Create or recover the first Owner while NeurOn is stopped, then confirm that
+login before normal reconciliation. See [Identity and Access](identity-access.md).
 
 Target startup estimates and target status remain in memory. They are
 observational state and are rebuilt by reconciliation; they are not used for
