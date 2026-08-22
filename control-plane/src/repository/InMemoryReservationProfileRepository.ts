@@ -36,6 +36,10 @@ export class InMemoryReservationProfileRepository implements ReservationProfileR
     return cloneProfile(input);
   }
 
+  async delete(id: string): Promise<boolean> {
+    return this.profiles.delete(id);
+  }
+
   async deleteForUser(id: string, userId: string): Promise<boolean> {
     const profile = this.profiles.get(id);
     if (!profile || profile.userId !== userId) return false;

@@ -170,7 +170,7 @@ const sqliteNullableColumns = new Set([
 ]);
 const sqliteOptionalColumns: Record<string, string[]> = {
   reservations: ["target_selections", "user_id"],
-  reservation_profiles: ["user_id"],
+  reservation_profiles: ["user_id", "team_id"],
   api_keys: ["user_id"]
 };
 const sqlitePrimaryKeyColumns = new Set([
@@ -361,7 +361,7 @@ function readSqliteDataset(sqlitePath: string): MigrationDataset {
         endedAt: nullableIso(row.ended_at), status: text(row.status), failureMessage: nullableText(row.failure_message), synthetic: boolean(row.synthetic)
       })),
       reservationProfiles: rawProfiles.map((row) => ({
-        id: text(row.id), userId: ownerId(row), username: text(row.username), name: text(row.name), description: nullableText(row.description), selections: json(row.selections),
+        id: text(row.id), userId: ownerId(row), username: text(row.username), ...(nullableText(row.team_id) ? { teamId: nullableText(row.team_id) } : {}), name: text(row.name), description: nullableText(row.description), selections: json(row.selections),
         defaultDurationMinutes: nullableNumber(row.default_duration_minutes), defaultKeepaliveMinutes: nullableNumber(row.default_keepalive_minutes), createdAt: iso(row.created_at), updatedAt: iso(row.updated_at)
       })),
       apiKeys: rawApiKeys.map((row) => ({
@@ -517,7 +517,7 @@ async function readPostgresDataset(client: pg.PoolClient, includeSystemRoles: bo
       endedAt: nullableIso(row.ended_at), status: text(row.status), failureMessage: nullableText(row.failure_message), synthetic: boolean(row.synthetic)
     })),
     reservationProfiles: reservationProfiles.rows.map((row) => ({
-      id: text(row.id), userId: text(row.user_id), username: text(row.username), name: text(row.name), description: nullableText(row.description), selections: jsonObject(row.selections),
+      id: text(row.id), userId: text(row.user_id), username: text(row.username), ...(nullableText(row.team_id) ? { teamId: nullableText(row.team_id) } : {}), name: text(row.name), description: nullableText(row.description), selections: jsonObject(row.selections),
       defaultDurationMinutes: nullableNumber(row.default_duration_minutes), defaultKeepaliveMinutes: nullableNumber(row.default_keepalive_minutes), createdAt: iso(row.created_at), updatedAt: iso(row.updated_at)
     })),
     apiKeys: apiKeys.rows.map((row) => ({
@@ -636,9 +636,9 @@ async function importDataset(client: pg.PoolClient, dataset: MigrationDataset): 
   }
   for (const row of dataset.reservationProfiles) {
     await client.query(
-      `insert into reservation_profiles (id, user_id, username, name, description, selections, default_duration_minutes, default_keepalive_minutes, created_at, updated_at)
-       values ($1,$2,$3,$4,$5,$6::jsonb,$7,$8,$9,$10)`,
-      [row.id, row.userId, row.username, row.name, row.description, JSON.stringify(row.selections), row.defaultDurationMinutes, row.defaultKeepaliveMinutes, row.createdAt, row.updatedAt]
+      `insert into reservation_profiles (id, user_id, username, team_id, name, description, selections, default_duration_minutes, default_keepalive_minutes, created_at, updated_at)
+       values ($1,$2,$3,$4,$5,$6,$7::jsonb,$8,$9,$10,$11)`,
+      [row.id, row.userId, row.username, row.teamId ?? null, row.name, row.description, JSON.stringify(row.selections), row.defaultDurationMinutes, row.defaultKeepaliveMinutes, row.createdAt, row.updatedAt]
     );
   }
   for (const row of dataset.apiKeys) {
@@ -875,6 +875,7 @@ function validateDatasetSemantics(dataset: MigrationDataset): void {
   for (const family of [dataset.reservationProfiles, dataset.apiKeys, dataset.modelFavorites]) {
     if (family.some((row) => !row.userId || !users.has(String(row.userId)))) throw new Error("SQLite source contains durable user data without an owner");
   }
+  for (const profile of dataset.reservationProfiles) if (profile.teamId != null && !teams.has(String(profile.teamId))) throw new Error("SQLite source contains a profile assigned to an unknown team");
   if (dataset.targetActivations.some((row) => !activationStatuses.has(String(row.status)))) {
     throw new Error("SQLite source contains an unsupported target activation status");
   }

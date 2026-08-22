@@ -38,8 +38,10 @@ configuration or in the external runtime project.
   history, durable users and identity links, local credentials, roles, nested
   teams, memberships, invitations, external user links, and identity audit
   events. SQLite and Postgres are durable; memory storage is process-local.
-- Stable user IDs own profiles, real reservations, API keys, and favorites.
-  Provider usernames are identity attributes, not durable ownership keys.
+- Stable user IDs own personal profiles and remain the creator/audit owner of
+  team-shared profiles, real reservations, API keys, and favorites. An optional
+  durable team ID controls profile sharing. Provider usernames are identity
+  attributes, not durable ownership keys.
 - Local authentication uses per-user credentials; do not reintroduce a
   deployment-wide shared password. Protect wildcard Owner authority and keep an
   offline, lock-taking Owner recovery path.

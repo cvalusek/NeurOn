@@ -175,7 +175,10 @@ export class SqliteIdentityRepository implements IdentityRepository {
       this.rebuildTeamHierarchy();
     })(); return (await this.getTeam(id))!;
   }
-  async deleteTeam(id: string): Promise<boolean> { return this.db.prepare("delete from teams where id=?").run(id).changes > 0; }
+  async deleteTeam(id: string): Promise<boolean> {
+    if (this.hasColumn("reservation_profiles", "team_id") && this.db.prepare("select 1 from reservation_profiles where team_id=? limit 1").get(id)) throw new Error("Move or delete this team's shared profiles before deleting the team");
+    return this.db.prepare("delete from teams where id=?").run(id).changes > 0;
+  }
 
   async setTeamMembership(input: Omit<TeamMembership, "createdAt"> & { createdAt?: Date }): Promise<TeamMembership> {
     const role = await this.getRole(input.roleId); if (!role || role.scope !== "team") throw new Error("Team role not found"); const reference = input.sourceReference ?? "";

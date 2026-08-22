@@ -196,6 +196,8 @@ export interface ReservationProfile {
   id: string;
   userId: string;
   username: string;
+  /** Optional sharing scope. The durable user remains the creator/audit owner. */
+  teamId?: string;
   name: string;
   description?: string;
   selections: ReservationProfileSelection[];

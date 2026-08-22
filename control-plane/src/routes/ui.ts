@@ -201,7 +201,7 @@ export function registerUiRoutes(
     if (profiles.length === 0 && (await reservationService.listActiveOwned(user)).length === 0) return reply.redirect("/welcome");
     const targets = (await visibleTargetsFor(user)).map((target) => ({ target, models: catalog.listModelsForTarget(target.id) }));
     const costEstimates = await startCostEstimates(targets.map(({ target }) => target), costEstimation);
-    return reply.type("text/html").send(startPage(user, targets, profiles, query.error, costEstimates, config.adminStatusPollSeconds, await selectionDeploymentsForUser(user, costEstimates)));
+    return reply.type("text/html").send(startPage(user, targets, profiles, query.error, costEstimates, config.adminStatusPollSeconds, await selectionDeploymentsForUser(user, costEstimates), await reservationProfileService.listAssignableTeams(user)));
   });
   app.get("/welcome", async (request, reply) => {
     const user = requireUser(request);
@@ -221,9 +221,11 @@ export function registerUiRoutes(
     const query = z.object({ create: z.string().optional(), onboarding: z.string().optional(), error: z.string().optional() }).parse(request.query);
     if (query.create === "1") return reply.redirect(`/profiles/new${query.onboarding === "1" ? "?onboarding=1" : ""}`);
     const user = requireUser(request);
+    const profiles = await reservationProfileService.listForUser(user);
     const targets = (await visibleTargetsFor(user)).map((target) => ({ target, models: catalog.listModelsForTarget(target.id) }));
     const costEstimates = await startCostEstimates(targets.map(({ target }) => target), costEstimation);
-    return reply.type("text/html").send(profilesPage(user, await reservationProfileService.listForUser(user), targets, { openCreate: query.create === "1", onboarding: query.onboarding === "1", error: query.error }, await selectionDeploymentsForUser(user, costEstimates), costEstimates));
+    const manageable = await Promise.all(profiles.map(async (profile) => await reservationProfileService.canManage(user, profile) ? profile.id : undefined));
+    return reply.type("text/html").send(profilesPage(user, profiles, targets, { openCreate: query.create === "1", onboarding: query.onboarding === "1", error: query.error }, await selectionDeploymentsForUser(user, costEstimates), costEstimates, await identityService.listProfileTeams(user, "use"), manageable.filter((id): id is string => Boolean(id))));
   });
   app.get("/client-setup", async (request, reply) => {
     const user = requireUser(request);
@@ -240,16 +242,16 @@ export function registerUiRoutes(
     const user = requireUser(request);
     const targets = (await visibleTargetsFor(user)).map((target) => ({ target, models: catalog.listModelsForTarget(target.id) }));
     const costEstimates = await startCostEstimates(targets.map(({ target }) => target), costEstimation);
-    return reply.type("text/html").send(profileEditorPage(user, targets, await selectionDeploymentsForUser(user, costEstimates), costEstimates, { onboarding: query.onboarding === "1", error: query.error }));
+    return reply.type("text/html").send(profileEditorPage(user, targets, await selectionDeploymentsForUser(user, costEstimates), costEstimates, { onboarding: query.onboarding === "1", error: query.error, teams: await reservationProfileService.listAssignableTeams(user) }));
   });
   app.get("/profiles/:id/edit", async (request, reply) => {
     const { id } = z.object({ id: z.string() }).parse(request.params);
     const query = z.object({ error: z.string().optional() }).parse(request.query);
     const user = requireUser(request);
-    const profile = await reservationProfileService.getOwned(id, user);
+    const profile = await reservationProfileService.getManageable(id, user);
     const targets = (await visibleTargetsFor(user)).map((target) => ({ target, models: catalog.listModelsForTarget(target.id) }));
     const costEstimates = await startCostEstimates(targets.map(({ target }) => target), costEstimation);
-    return reply.type("text/html").send(profileEditorPage(user, targets, await selectionDeploymentsForUser(user, costEstimates), costEstimates, { profile, error: query.error }));
+    return reply.type("text/html").send(profileEditorPage(user, targets, await selectionDeploymentsForUser(user, costEstimates), costEstimates, { profile, error: query.error, teams: await reservationProfileService.listAssignableTeams(user) }));
   });
   app.post("/api-keys", async (request, reply) => {
     const user = requireUser(request);
@@ -287,6 +289,7 @@ export function registerUiRoutes(
         .object({
           name: z.string().min(1),
           description: z.string().optional(),
+          teamId: z.string().optional(),
           modelIds: z.union([z.string(), z.array(z.string())]).optional(),
           targetId: z.string().optional(),
           selectionTargetIds: z.union([z.string(), z.array(z.string())]).optional(),
@@ -300,6 +303,7 @@ export function registerUiRoutes(
       await reservationProfileService.createForUser(requireUser(request), {
         name: raw.name,
         description: raw.description,
+        teamId: raw.teamId || undefined,
         selections,
         defaultDurationMinutes: raw.defaultDurationMinutes,
         defaultKeepaliveMinutes: raw.defaultKeepaliveMinutes
@@ -315,7 +319,7 @@ export function registerUiRoutes(
     const { id } = z.object({ id: z.string() }).parse(request.params);
     try {
       const raw = z.object({
-        name: z.string().min(1), description: z.string().optional(),
+        name: z.string().min(1), description: z.string().optional(), teamId: z.string().optional(),
         modelIds: z.union([z.string(), z.array(z.string())]).optional(), targetId: z.string().optional(),
         selectionTargetIds: z.union([z.string(), z.array(z.string())]).optional(),
         selectionModels: z.union([z.string(), z.array(z.string())]).optional(),
@@ -323,7 +327,7 @@ export function registerUiRoutes(
         defaultDurationMinutes: z.coerce.number().optional(), defaultKeepaliveMinutes: z.coerce.number().optional()
       }).parse(request.body);
       await reservationProfileService.updateForUser(id, requireUser(request), {
-        name: raw.name, description: raw.description, selections: profileSelectionsFromForm(raw),
+        name: raw.name, description: raw.description, teamId: raw.teamId || undefined, selections: profileSelectionsFromForm(raw),
         defaultDurationMinutes: raw.defaultDurationMinutes, defaultKeepaliveMinutes: raw.defaultKeepaliveMinutes
       });
       return reply.redirect(raw.returnTo);

@@ -1,6 +1,6 @@
 import crypto from "node:crypto";
-import type { IdentityRepository } from "../domain/interfaces.js";
-import type { AuthenticatedUser, CapacityTarget, OidcTeamMembershipRule, RegistrationInvitation, Role, UserAccount, UserIdentity } from "../domain/types.js";
+import type { IdentityRepository, ReservationProfileRepository } from "../domain/interfaces.js";
+import type { AuthenticatedUser, CapacityTarget, OidcTeamMembershipRule, RegistrationInvitation, Role, Team, UserAccount, UserIdentity } from "../domain/types.js";
 
 const PASSWORD_MIN_LENGTH = 10;
 const SCRYPT_KEY_LENGTH = 32;
@@ -20,7 +20,7 @@ export interface CreatedInvitation {
 
 export class IdentityService {
   private userMergeListener?: (sourceUserId: string, targetUserId: string) => void | Promise<void>;
-  constructor(private readonly repository: IdentityRepository) {}
+  constructor(private readonly repository: IdentityRepository, private readonly profiles?: ReservationProfileRepository) {}
 
   onUsersMerged(listener: (sourceUserId: string, targetUserId: string) => void | Promise<void>): void { this.userMergeListener = listener; }
 
@@ -129,7 +129,7 @@ export class IdentityService {
   async revokeSessions(actor: AuthenticatedUser,userId:string){this.requirePermission(actor,"users.manage");return this.repository.incrementSessionVersion(userId)}
   async createTeam(actor: AuthenticatedUser,input:Parameters<IdentityRepository["createTeam"]>[0]){this.requirePermission(actor,"teams.manage");return this.repository.createTeam(input)}
   async updateTeam(actor: AuthenticatedUser,id:string,input:Parameters<IdentityRepository["updateTeam"]>[1]){this.requirePermission(actor,"teams.manage");return this.repository.updateTeam(id,input)}
-  async deleteTeam(actor:AuthenticatedUser,id:string){this.requirePermission(actor,"teams.manage");return this.repository.deleteTeam(id)}
+  async deleteTeam(actor:AuthenticatedUser,id:string){this.requirePermission(actor,"teams.manage");if(this.profiles&&(await this.profiles.list()).some((profile)=>profile.teamId===id))throw new Error("Move or delete this team's shared profiles before deleting the team");return this.repository.deleteTeam(id)}
   async setTeamMembership(actor:AuthenticatedUser,input:Parameters<IdentityRepository["setTeamMembership"]>[0]){this.requirePermission(actor,"teams.manage");return this.repository.setTeamMembership(input)}
   async removeTeamMembership(actor:AuthenticatedUser,teamId:string,userId:string,source?:"manual"|"oidc",sourceReference?:string){this.requirePermission(actor,"teams.manage");return this.repository.removeTeamMembership(teamId,userId,source,sourceReference)}
   async revokeInvitation(actor:AuthenticatedUser,id:string){this.requirePermission(actor,"users.manage");return this.repository.revokeInvitation(id,new Date())}
@@ -137,6 +137,44 @@ export class IdentityService {
   async unlinkExternalUser(actor:AuthenticatedUser,integration:string,externalSubject:string){this.requirePermission(actor,"users.manage");return this.repository.deleteExternalUserLink(integration,externalSubject)}
   listExternalUserLinks(integration?:string){return this.repository.listExternalUserLinks(integration)}
   listTeamMemberships(teamId:string){return this.repository.listTeamMemberships(teamId)}
+
+  async listProfileTeams(user: AuthenticatedUser, access: "use" | "manage"): Promise<Team[]> {
+    const teams = await this.repository.listTeams();
+    if (this.hasPermission(user, "teams.manage")) return teams;
+    const memberships = await this.repository.listTeamMembershipsForUser(user.id);
+    const roles = new Map((await Promise.all(Array.from(new Set(memberships.map((membership) => membership.roleId))).map((id) => this.repository.getRole(id)))).filter((role): role is Role => Boolean(role)).map((role) => [role.id, role]));
+    const teamById = new Map(teams.map((team) => [team.id, team]));
+    const allowed = new Set<string>();
+    for (const membership of memberships) {
+      const permissions = roles.get(membership.roleId)?.permissions ?? [];
+      const canManage = permissions.includes("team.profiles.manage");
+      const canUse = canManage || permissions.includes("team.profiles.use");
+      for (const team of teams) {
+        if (access === "manage" && canManage && isTeamAncestor(membership.teamId, team.id, teamById)) allowed.add(team.id);
+        if (access === "use" && canUse && isTeamAncestor(team.id, membership.teamId, teamById)) allowed.add(team.id);
+        if (access === "use" && canManage && isTeamAncestor(membership.teamId, team.id, teamById)) allowed.add(team.id);
+      }
+    }
+    return teams.filter((team) => allowed.has(team.id));
+  }
+
+  async canUseTeamProfile(user: AuthenticatedUser, teamId: string): Promise<boolean> {
+    return (await this.listProfileTeams(user, "use")).some((team) => team.id === teamId);
+  }
+
+  async canManageTeamProfile(user: AuthenticatedUser, teamId: string): Promise<boolean> {
+    return (await this.listProfileTeams(user, "manage")).some((team) => team.id === teamId);
+  }
+
+  async canTeamAccessTarget(teamId: string, target: CapacityTarget): Promise<boolean> {
+    const teams = await this.repository.listTeams();
+    const teamById = new Map(teams.map((team) => [team.id, team]));
+    if (!teamById.has(teamId)) return false;
+    const audience = target.audience ?? { scope: "global" as const };
+    if (audience.scope === "global") return true;
+    if (audience.scope === "users") return false;
+    return audience.teamIds.some((audienceTeamId) => isTeamAncestor(audienceTeamId, teamId, teamById));
+  }
 
   async resolveLiteLlmUser(externalSubject: string): Promise<AuthenticatedUser | undefined> {
     const existing = await this.repository.getExternalUserLink("litellm", externalSubject);
@@ -193,6 +231,17 @@ async function verifyPassword(password: string, encoded: string): Promise<boolea
 function validatePassword(password: string): void { if (password.length < PASSWORD_MIN_LENGTH) throw new Error(`Password must be at least ${PASSWORD_MIN_LENGTH} characters`); if (password.length > 1_024) throw new Error("Password is too long"); }
 function hashToken(value: string): string { return crypto.createHash("sha256").update(value).digest("base64url"); }
 function unique(values: string[]): string[] { return Array.from(new Set(values)).sort(); }
+function isTeamAncestor(ancestorTeamId: string, descendantTeamId: string, teams: Map<string, Team>): boolean {
+  const seen = new Set<string>();
+  let current = teams.get(descendantTeamId);
+  while (current) {
+    if (current.id === ancestorTeamId) return true;
+    if (seen.has(current.id)) return false;
+    seen.add(current.id);
+    current = current.parentTeamId ? teams.get(current.parentTeamId) : undefined;
+  }
+  return false;
+}
 function claimMatches(value: unknown, rule: OidcTeamMembershipRule): boolean {
   const values = Array.isArray(value) ? value.filter((candidate): candidate is string => typeof candidate === "string") : typeof value === "string" ? [value] : [];
   if (rule.match === "exact") return values.includes(rule.value);

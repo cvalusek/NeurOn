@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import type pg from "pg";
 
-export const POSTGRES_SCHEMA_VERSION = 6;
+export const POSTGRES_SCHEMA_VERSION = 7;
 
 export const POSTGRES_DATA_TABLES = [
   "reservations",
@@ -405,13 +405,21 @@ const schemaVersionSixSql = `
   create unique index idx_model_favorites_user_deployment on model_favorites(user_id, target_id, model_id);
 `;
 
+const schemaVersionSevenSql = `
+  alter table reservation_profiles
+    add column team_id text references teams(id) on delete restrict;
+  create index idx_reservation_profiles_team on reservation_profiles(team_id, name)
+    where team_id is not null;
+`;
+
 const migrations = [
   { version: 1, name: "initial-centralized-schema", sql: schemaVersionOneSql },
   { version: 2, name: "reservation-target-selections", sql: schemaVersionTwoSql },
   { version: 3, name: "model-selection-metadata-and-favorites", sql: schemaVersionThreeSql },
   { version: 4, name: "independent-assistant-configuration", sql: schemaVersionFourSql },
   { version: 5, name: "assistant-operator-instructions", sql: schemaVersionFiveSql },
-  { version: 6, name: "durable-users-roles-and-teams", sql: schemaVersionSixSql }
+  { version: 6, name: "durable-users-roles-and-teams", sql: schemaVersionSixSql },
+  { version: 7, name: "shared-team-profiles", sql: schemaVersionSevenSql }
 ] as const;
 
 const expectedColumns: Record<string, Record<string, { type: string; nullable: boolean }>> = {
@@ -421,7 +429,7 @@ const expectedColumns: Record<string, Record<string, { type: string; nullable: b
     keepalive_minutes: optional("int4"), ended_at: optional("timestamptz"), status: required("text"), failure_message: optional("text"), synthetic: required("bool")
   },
   reservation_profiles: {
-    id: required("text"), user_id: required("text"), username: required("text"), name: required("text"), description: optional("text"), selections: required("jsonb"),
+    id: required("text"), user_id: required("text"), username: required("text"), team_id: optional("text"), name: required("text"), description: optional("text"), selections: required("jsonb"),
     default_duration_minutes: optional("int4"), default_keepalive_minutes: optional("int4"), created_at: required("timestamptz"), updated_at: required("timestamptz")
   },
   api_keys: {
@@ -593,6 +601,7 @@ export async function validatePostgresSchema(queryable: pg.Pool | pg.PoolClient)
   requireConstraint("reservations", "owner foreign key", (value) => value.includes("foreign key (user_id)") && value.includes("users") && value.includes("on delete restrict"));
   requireConstraint("reservations", "real reservation owner check", (value) => value.includes("check") && value.includes("synthetic") && value.includes("user_id"));
   requireConstraint("reservation_profiles", "owner foreign key", (value) => value.includes("foreign key (user_id)") && value.includes("users") && value.includes("on delete restrict"));
+  requireConstraint("reservation_profiles", "team foreign key", (value) => value.includes("foreign key (team_id)") && value.includes("teams") && value.includes("on delete restrict"));
   requireConstraint("api_keys", "owner foreign key", (value) => value.includes("foreign key (user_id)") && value.includes("users") && value.includes("on delete cascade"));
   requireConstraint("model_favorites", "owner foreign key", (value) => value.includes("foreign key (user_id)") && value.includes("users") && value.includes("on delete cascade"));
 
@@ -616,6 +625,7 @@ async function validateExistingPostgresTablesForMigration(queryable: pg.PoolClie
     "assistant_config.additional_instructions",
     "reservations.user_id",
     "reservation_profiles.user_id",
+    "reservation_profiles.team_id",
     "api_keys.user_id",
     "model_favorites.user_id"
   ]);

@@ -206,8 +206,9 @@ providers, persisted targets, target provisioning jobs, target model discovery
 results, model capability/deployment metadata, user model favorites, target
 activations, reservation cost allocation records, and the singleton Assistant
 configuration across NeurOn restarts. Durable users own real reservations,
-profiles, API keys, and favorites by ID; provider usernames remain identity
-attributes rather than ownership keys.
+personal profiles, API keys, and favorites by ID and remain the creator/audit
+owner when an optional team ID shares a profile; provider usernames remain
+identity attributes rather than ownership keys.
 Target status and startup estimates remain in memory because they are
 observational and rebuilt by reconciliation.
 
@@ -223,6 +224,8 @@ routes, the reconciler, LiteLLM traffic polling, startup discovery/provider
 sync, and HassleOff status calls for storage verification. Account, invitation,
 role, team, external-user-link, and authentication administration remains
 available because those operations do not invoke providers or reconciliation.
+Personal and team profile editing also remains available; starting or changing a
+reservation from a profile stays blocked.
 `STORAGE_OPERATION_LOCK_PATH` defaults to `data/neuron-storage.lock`; the
 application and migration command use the same exclusive lock.
 

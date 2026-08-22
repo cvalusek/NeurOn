@@ -9,6 +9,7 @@ interface ReservationProfileRow {
   id: string;
   user_id: string;
   username: string;
+  team_id: string | null;
   name: string;
   description: string | null;
   selections: string;
@@ -34,10 +35,10 @@ export class SqliteReservationProfileRepository implements ReservationProfileRep
     const profile = { ...input, id: input.id ?? nanoid(12), createdAt: input.createdAt ?? now, updatedAt: input.updatedAt ?? now };
     this.db.prepare(
       `insert into reservation_profiles (
-        id, user_id, username, name, description, selections, default_duration_minutes,
+        id, user_id, username, team_id, name, description, selections, default_duration_minutes,
         default_keepalive_minutes, created_at, updated_at
       ) values (
-        @id, @userId, @username, @name, @description, @selections, @defaultDurationMinutes,
+        @id, @userId, @username, @teamId, @name, @description, @selections, @defaultDurationMinutes,
         @defaultKeepaliveMinutes, @createdAt, @updatedAt
       )`
     ).run(toSqlParams(profile));
@@ -64,6 +65,7 @@ export class SqliteReservationProfileRepository implements ReservationProfileRep
       `update reservation_profiles set
         user_id = @userId,
         username = @username,
+        team_id = @teamId,
         name = @name,
         description = @description,
         selections = @selections,
@@ -74,6 +76,10 @@ export class SqliteReservationProfileRepository implements ReservationProfileRep
       where id = @id`
     ).run(toSqlParams({ ...input, id }));
     return cloneProfile({ ...input, id });
+  }
+
+  async delete(id: string): Promise<boolean> {
+    return this.db.prepare("delete from reservation_profiles where id = ?").run(id).changes > 0;
   }
 
   async deleteForUser(id: string, userId: string): Promise<boolean> {
@@ -91,6 +97,7 @@ export class SqliteReservationProfileRepository implements ReservationProfileRep
         id text primary key,
         user_id text,
         username text not null,
+        team_id text,
         name text not null,
         description text,
         selections text not null,
@@ -105,6 +112,8 @@ export class SqliteReservationProfileRepository implements ReservationProfileRep
     `);
     const columns = this.db.prepare("pragma table_info(reservation_profiles)").all() as Array<{ name: string }>;
     if (!columns.some((column) => column.name === "user_id")) this.db.exec("alter table reservation_profiles add column user_id text");
+    if (!columns.some((column) => column.name === "team_id")) this.db.exec("alter table reservation_profiles add column team_id text");
+    this.db.exec("create index if not exists idx_reservation_profiles_team on reservation_profiles(team_id, name)");
   }
 }
 
@@ -113,6 +122,7 @@ function toSqlParams(profile: ReservationProfile) {
     id: profile.id,
     userId: profile.userId,
     username: profile.username,
+    teamId: profile.teamId ?? null,
     name: profile.name,
     description: profile.description ?? null,
     selections: JSON.stringify(profile.selections),
@@ -128,6 +138,7 @@ function fromRow(row: ReservationProfileRow): ReservationProfile {
     id: row.id,
     userId: row.user_id,
     username: row.username,
+    teamId: row.team_id ?? undefined,
     name: row.name,
     description: row.description ?? undefined,
     selections: JSON.parse(row.selections) as ReservationProfileSelection[],

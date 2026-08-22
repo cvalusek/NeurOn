@@ -60,7 +60,7 @@ export interface BuildAppOptions {
 export async function buildApp(config: AppConfig, models: ModelDefinition[], options: BuildAppOptions = {}) {
   const app = Fastify({ logger: true });
   const reservationRepository = await createReservationRepository(config.storage);
-  const identityService = new IdentityService(reservationRepository.identities);
+  const identityService = new IdentityService(reservationRepository.identities, reservationRepository.reservationProfiles);
   await identityService.initialize(config.adminUsers);
   for (const account of options.developmentLocalAccounts ?? []) {
     let user = await reservationRepository.identities.getUserByUsername(account.username);
@@ -369,10 +369,12 @@ function mutationSafeInMaintenance(url: string): boolean {
   const path = url.split("?", 1)[0] ?? url;
   if (path === "/login" || path === "/logout" || path.startsWith("/auth/") || path.startsWith("/register")) return true;
   return [
+    "/reservation-profiles",
     "/admin/users",
     "/admin/roles",
     "/admin/teams",
     "/admin/auth",
+    "/api/reservation-profiles",
     "/api/admin/users",
     "/api/admin/roles",
     "/api/admin/teams",

@@ -856,6 +856,7 @@ function reservationProfileJson(profile: ReservationProfile) {
     id: profile.id,
     userId: profile.userId,
     username: profile.username,
+    teamId: profile.teamId,
     name: profile.name,
     description: profile.description,
     selections: profile.selections,
@@ -925,6 +926,7 @@ const reservationProfileSchema = {
     id: { type: "string" },
     userId: { type: "string" },
     username: { type: "string" },
+    teamId: { type: "string" },
     name: { type: "string" },
     description: { type: "string" },
     selections: { type: "array", items: reservationProfileSelectionSchema },
@@ -941,6 +943,7 @@ const reservationProfileCreateSchema = {
   properties: {
     name: { type: "string" },
     description: { type: "string" },
+    teamId: { type: "string" },
     selections: { type: "array", items: reservationProfileSelectionSchema },
     defaultDurationMinutes: { type: "number" },
     defaultKeepaliveMinutes: { type: "number" }
@@ -951,6 +954,7 @@ const reservationProfileCreateSchema = {
 const reservationProfileBodySchema = z.object({
   name: z.string(),
   description: z.string().optional(),
+  teamId: z.string().optional(),
   selections: z.array(z.object({ targetId: z.string(), modelIds: z.array(z.string()).default([]) })),
   defaultDurationMinutes: z.number().optional(),
   defaultKeepaliveMinutes: z.number().optional()

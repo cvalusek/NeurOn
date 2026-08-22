@@ -74,7 +74,7 @@ describePostgres("SQLite to PostgreSQL migration", () => {
         status: "failed", synthetic: true, keepaliveMinutes: undefined, failureMessage: "terminal failure",
         targetSelections: [{ targetId: "target-migrate", modelIds: ["model-migrate"] }]
       });
-      expect(await migrated.reservationProfiles.get("profile-migrate")).toMatchObject({ description: undefined, defaultDurationMinutes: undefined });
+      expect(await migrated.reservationProfiles.get("profile-migrate")).toMatchObject({ teamId: "team-child", description: undefined, defaultDurationMinutes: undefined });
       expect(await migrated.apiKeys.get("key-migrate")).toMatchObject({ keyHash: "opaque-hash-value", lastUsedAt: undefined });
       expect(await migrated.authMethods.get("github-migrate")).toMatchObject({ config: { github: { clientSecret: "auth-secret-value" } } });
       expect(await migrated.capacityProviders.get("provider-migrate")).toMatchObject({ config: { privatePayload: { token: "provider-secret-value" } } });
@@ -278,7 +278,7 @@ async function createPopulatedSqlite(): Promise<{ sqlitePath: string; reservatio
   await handle.identities.createInvitation({ id: "invite-fixture", tokenHash: "opaque-invitation-hash", userId: "usr-clint", intendedUsername: "clint", initialRoleId: "role_member", expiresAt: new Date("2027-01-01T00:00:00Z"), maxUses: 1, createdAt });
   await handle.identities.saveExternalUserLink({ integration: "litellm", externalSubject: "litellm-clint", userId: "usr-clint", source: "rule", createdAt, lastSeenAt: endedAt });
   await handle.reservationProfiles.create({
-    id: "profile-migrate", userId: "usr-clint", username: "clint", name: "Migration profile", selections: [{ targetId: "target-migrate", modelIds: ["model-migrate"] }], createdAt, updatedAt: endedAt
+    id: "profile-migrate", userId: "usr-clint", username: "clint", teamId: "team-child", name: "Migration profile", selections: [{ targetId: "target-migrate", modelIds: ["model-migrate"] }], createdAt, updatedAt: endedAt
   });
   const reservation = await handle.repository.create({
     id: "reservation-migrate", userId: "usr-clint", username: "clint", apiKeyName: "migration-key", profileId: "profile-migrate", profileName: "Migration profile",

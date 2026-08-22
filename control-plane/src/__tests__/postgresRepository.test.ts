@@ -11,16 +11,18 @@ describePostgres("PostgreSQL schema and repositories", () => {
     try {
       await migratePostgresSchema(database.pool);
       await migratePostgresSchema(database.pool);
-      expect(await readPostgresSchemaState(database.pool)).toEqual({ currentVersion: POSTGRES_SCHEMA_VERSION, appliedVersions: [1, 2, 3, 4, 5, 6] });
+      expect(await readPostgresSchemaState(database.pool)).toEqual({ currentVersion: POSTGRES_SCHEMA_VERSION, appliedVersions: [1, 2, 3, 4, 5, 6, 7] });
 
       const first = await createReservationRepository({ driver: "postgres", connectionString: database.connectionString, maxConnections: 3 });
       const createdAt = new Date("2026-07-01T12:30:00-05:00");
       const endedAt = new Date("2026-07-01T13:00:00-05:00");
       await first.identities.createUser({ id: "usr-clint", username: "clint", status: "active", createdAt, updatedAt: createdAt });
+      const profileTeam = await first.identities.createTeam({ id: "team-profile", name: "Profile team", createdAt, updatedAt: createdAt });
       const profile = await first.reservationProfiles.create({
         id: "profile-1",
         userId: "usr-clint",
         username: "clint",
+        teamId: profileTeam.id,
         name: "Production profile",
         selections: [{ targetId: "target-1", modelIds: ["model-1"] }],
         createdAt,
@@ -117,7 +119,7 @@ describePostgres("PostgreSQL schema and repositories", () => {
 
       const second = await createReservationRepository({ driver: "postgres", connectionString: database.connectionString, maxConnections: 3 });
       expect(await second.repository.get(reservation.id)).toMatchObject({ id: reservation.id, status: "done", synthetic: true, profileId: profile.id, targetSelections: [{ targetId: "target-1", modelIds: ["model-1"] }] });
-      expect(await second.reservationProfiles.get(profile.id)).toMatchObject({ id: profile.id, description: undefined });
+      expect(await second.reservationProfiles.get(profile.id)).toMatchObject({ id: profile.id, teamId: profileTeam.id, description: undefined });
       expect(await second.apiKeys.get("key-1")).toMatchObject({ keyHash: "sha256-test-hash", lastUsedAt: endedAt });
       expect(await second.authMethods.get("github-1")).toMatchObject({ config: { github: { clientSecret: "opaque-secret" } } });
       expect(await second.capacityProviders.get("provider-1")).toMatchObject({ credentialId: "credential-1", provisioning: { enabled: true } });
@@ -162,6 +164,25 @@ describePostgres("PostgreSQL schema and repositories", () => {
         where table_schema = current_schema() and table_name = 'capacity_providers'
       `);
       expect(providerColumns.rows.map((row) => row.column_name)).toContain("provisioning_enabled");
+    } finally {
+      await database.cleanup();
+    }
+  });
+
+  it("upgrades schema v6 personal profiles to optional team sharing without changing them", async () => {
+    const database = await createPostgresTestSchema();
+    try {
+      const handle = await createReservationRepository({ driver: "postgres", connectionString: database.connectionString, maxConnections: 3 });
+      const user = await handle.identities.createUser({ id: "usr-v6", username: "legacy", status: "active" });
+      await handle.reservationProfiles.create({ id: "profile-v6", userId: user.id, username: user.username, name: "Personal", selections: [] });
+      await handle.close();
+      await database.pool.query("alter table reservation_profiles drop column team_id");
+      await database.pool.query("delete from neuron_schema_migrations where version = 7");
+
+      expect(await migratePostgresSchema(database.pool)).toEqual({ currentVersion: POSTGRES_SCHEMA_VERSION, appliedVersions: [1, 2, 3, 4, 5, 6, 7] });
+      const upgraded = await createReservationRepository({ driver: "postgres", connectionString: database.connectionString, maxConnections: 3 });
+      expect(await upgraded.reservationProfiles.get("profile-v6")).toMatchObject({ userId: user.id, teamId: undefined, name: "Personal" });
+      await upgraded.close();
     } finally {
       await database.cleanup();
     }
@@ -246,11 +267,12 @@ describePostgres("PostgreSQL schema and repositories", () => {
         alter table model_favorites drop constraint if exists model_favorites_user_fk;
         alter table reservations drop column user_id;
         alter table reservation_profiles drop column user_id;
+        alter table reservation_profiles drop column team_id;
         alter table api_keys drop column user_id;
         alter table model_favorites drop column user_id;
         drop table identity_audit_events, external_user_links, registration_invitations, team_memberships,
           team_hierarchy, teams, user_role_assignments, roles, local_credentials, user_identities, users cascade;
-        delete from neuron_schema_migrations where version = 6;
+        delete from neuron_schema_migrations where version in (6, 7);
 
         insert into reservation_profiles (id,username,name,selections,created_at,updated_at)
           values ('legacy-profile','Clint','Legacy','[{"targetId":"target-1","modelIds":["model-1"]}]','2026-08-01T12:00:00Z','2026-08-01T12:00:00Z');
@@ -313,7 +335,7 @@ describePostgres("PostgreSQL schema and repositories", () => {
 
       const state = await migratePostgresSchema(database.pool);
 
-      expect(state).toEqual({ currentVersion: POSTGRES_SCHEMA_VERSION, appliedVersions: [1, 2, 3, 4, 5, 6] });
+      expect(state).toEqual({ currentVersion: POSTGRES_SCHEMA_VERSION, appliedVersions: [1, 2, 3, 4, 5, 6, 7] });
       const assistant = await database.pool.query<{ target_id: string; model_id: string; additional_instructions: string | null }>(`
         select target_id, model_id, additional_instructions
         from assistant_config

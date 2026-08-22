@@ -12,6 +12,7 @@ It is intentionally small:
 - OpenAPI-compatible REST endpoints, Swagger UI, and MCP
 - durable reservation and API-key storage with memory, SQLite, or Postgres
   options
+- personal and team-shared reservation profiles with nested-team access
 - provider adapters for Docker containers, Docker Compose, AWS EC2, and AWS ECS/ASG
 - LiteLLM request-log polling for traffic-based keepalive
 
@@ -134,7 +135,7 @@ Environment variables:
 | `SQLITE_PATH` | `data/neuron.db` | SQLite database path when `STORAGE_DRIVER=sqlite` |
 | `DATABASE_URL` | unset | Postgres connection string when `STORAGE_DRIVER=postgres` |
 | `POSTGRES_POOL_MAX` | `10` | Maximum connections in the shared Postgres application pool |
-| `CONTROL_PLANE_MAINTENANCE_MODE` | `false` | Disable mutations and lifecycle/provider background work for storage maintenance |
+| `CONTROL_PLANE_MAINTENANCE_MODE` | `false` | Disable capacity mutations and lifecycle/provider background work for storage maintenance |
 | `STORAGE_OPERATION_LOCK_PATH` | `data/neuron-storage.lock` | Exclusive application/migration storage lock |
 | `CAPACITY_TARGETS_JSON` | unset | JSON array of targets |
 | `CAPACITY_TARGET_KEYS` | unset | Comma-separated target keys for env-expanded config |

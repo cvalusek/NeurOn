@@ -7,6 +7,7 @@ interface ReservationProfileRow {
   id: string;
   user_id: string;
   username: string;
+  team_id: string | null;
   name: string;
   description: string | null;
   selections: ReservationProfileSelection[] | string;
@@ -28,9 +29,9 @@ export class PostgresReservationProfileRepository implements ReservationProfileR
     const profile = { ...input, id: input.id ?? nanoid(12), createdAt: input.createdAt ?? now, updatedAt: input.updatedAt ?? now };
     await this.pool.query(
       `insert into reservation_profiles (
-        id, user_id, username, name, description, selections, default_duration_minutes,
+        id, user_id, username, team_id, name, description, selections, default_duration_minutes,
         default_keepalive_minutes, created_at, updated_at
-      ) values ($1, $2, $3, $4, $5, $6::jsonb, $7, $8, $9, $10)`,
+      ) values ($1, $2, $3, $4, $5, $6, $7::jsonb, $8, $9, $10, $11)`,
       toSqlValues(profile)
     );
     return cloneProfile(profile);
@@ -56,17 +57,23 @@ export class PostgresReservationProfileRepository implements ReservationProfileR
       `update reservation_profiles set
         user_id = $2,
         username = $3,
-        name = $4,
-        description = $5,
-        selections = $6::jsonb,
-        default_duration_minutes = $7,
-        default_keepalive_minutes = $8,
-        created_at = $9,
-        updated_at = $10
+        team_id = $4,
+        name = $5,
+        description = $6,
+        selections = $7::jsonb,
+        default_duration_minutes = $8,
+        default_keepalive_minutes = $9,
+        created_at = $10,
+        updated_at = $11
       where id = $1`,
       toSqlValues({ ...input, id })
     );
     return cloneProfile({ ...input, id });
+  }
+
+  async delete(id: string): Promise<boolean> {
+    const result = await this.pool.query("delete from reservation_profiles where id = $1", [id]);
+    return (result.rowCount ?? 0) > 0;
   }
 
   async deleteForUser(id: string, userId: string): Promise<boolean> {
@@ -81,6 +88,7 @@ function toSqlValues(profile: ReservationProfile): unknown[] {
     profile.id,
     profile.userId,
     profile.username,
+    profile.teamId ?? null,
     profile.name,
     profile.description ?? null,
     JSON.stringify(profile.selections),
@@ -97,6 +105,7 @@ function fromRow(row: ReservationProfileRow): ReservationProfile {
     id: row.id,
     userId: row.user_id,
     username: row.username,
+    teamId: row.team_id ?? undefined,
     name: row.name,
     description: row.description ?? undefined,
     selections,

@@ -60,6 +60,8 @@ owners from legacy usernames without changing profile, reservation, API-key,
 favorite, or activation IDs. It assigns Member—not Owner—to backfilled users.
 Create or recover the first Owner while NeurOn is stopped, then confirm that
 login before normal reconciliation. See [Identity and Access](identity-access.md).
+Schema version 7 adds the optional profile team assignment. Existing profiles
+remain personal because the new column is nullable; no profile data is rewritten.
 
 Target startup estimates and target status remain in memory. They are
 observational state and are rebuilt by reconciliation; they are not used for
@@ -121,10 +123,13 @@ backup, disposable dry-run, one-writer cutover, verification, and rollback. Do
 not change `STORAGE_DRIVER` on a live application or run SQLite and PostgreSQL
 application writers concurrently.
 
-`CONTROL_PLANE_MAINTENANCE_MODE=true` is the safe cutover boundary: state
-mutations, reconciliation, traffic polling, startup discovery/provider sync,
-and HassleOff status calls are disabled while read-only verification remains
-available. `/healthz` reports the active storage driver and maintenance state.
+`CONTROL_PLANE_MAINTENANCE_MODE=true` is the safe cutover boundary:
+capacity-affecting mutations, reconciliation, traffic polling, startup
+discovery/provider sync, and HassleOff status calls are disabled while
+read-only verification remains available. Identity administration and
+reservation-profile editing remain available because neither invokes a
+provider or creates demand. `/healthz` reports the active storage driver and
+maintenance state.
 
 ## Polling Defaults
 

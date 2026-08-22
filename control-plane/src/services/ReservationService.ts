@@ -24,7 +24,7 @@ export class ReservationService {
     if (this.identities && !this.identities.hasPermission(user, "reservations.create")) throw new Error("Reservation permission is required");
     const finishMutation = this.beginDemandMutation();
     try {
-      const storedProfile = input.profileId ? await this.getOwnedProfile(input.profileId, user) : undefined;
+      const storedProfile = input.profileId ? await this.getAccessibleProfile(input.profileId, user) : undefined;
       const profile = storedProfile ? {
         ...storedProfile,
         selections: normalizeReservationProfileSelections(this.catalog, storedProfile.selections)
@@ -142,10 +142,13 @@ export class ReservationService {
     }));
   }
 
-  private async getOwnedProfile(profileId: string, user: AuthenticatedUser): Promise<ReservationProfile> {
+  private async getAccessibleProfile(profileId: string, user: AuthenticatedUser): Promise<ReservationProfile> {
     if (!this.profiles) throw new Error("Reservation profiles are not configured");
     const profile = await this.profiles.get(profileId);
-    if (!profile || profile.userId !== user.id) throw new Error("Reservation profile not found");
+    const accessible = profile && (profile.teamId
+      ? Boolean(this.identities && await this.identities.canUseTeamProfile(user, profile.teamId))
+      : profile.userId === user.id);
+    if (!profile || !accessible) throw new Error("Reservation profile not found");
     return profile;
   }
 

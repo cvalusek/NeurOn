@@ -683,7 +683,7 @@ export function teamAdminPage(
       const role = roleById.get(membership.roleId);
       return `<div class="reservation-card compact"><div><strong>${escapeHtml(account?.displayName ?? account?.username ?? membership.userId)}</strong><div class="target-status-meta"><span class="pill">${escapeHtml(role?.name ?? membership.roleId)}</span><span class="pill">${escapeHtml(membership.source)}</span></div></div>${membership.source === "manual" ? `<form method="post" action="/admin/teams/${escapeHtml(team.id)}/members/${escapeHtml(membership.userId)}/remove"><input type="hidden" name="source" value="manual"><button class="secondary" type="submit">Remove</button></form>` : `<span class="muted">Managed at sign-in</span>`}</div>`;
     }).join("");
-    return `<details class="drilldown"><summary><div><strong>${escapeHtml(team.name)}</strong><div class="muted">${team.parentTeamId ? `Child of ${escapeHtml(teamById.get(team.parentTeamId)?.name ?? team.parentTeamId)} · ` : ""}${memberships.length} direct member${memberships.length === 1 ? "" : "s"}</div></div><span class="badge active">team</span></summary><div class="drilldown-body" data-tabs><div class="tabbar"><button type="button" data-tab="members" aria-selected="true">Members</button><button type="button" data-tab="edit" aria-selected="false">Edit</button><button type="button" data-tab="delete" aria-selected="false">Delete</button></div><section class="tab-panel" data-tab-panel="members">${team.description ? `<p>${escapeHtml(team.description)}</p>` : ""}<div class="reservation-list">${memberRows || `<p class="muted">No direct members.</p>`}</div><form method="post" action="/admin/teams/${escapeHtml(team.id)}/members"><div class="field-grid"><p><label>User<br><select name="userId" required><option value="">Choose a user</option>${userOptions}</select></label></p><p><label>Team role<br><select name="roleId" required>${roleOptions}</select></label></p></div><button type="submit">Add member</button></form></section><section class="tab-panel" data-tab-panel="edit" hidden><form method="post" action="/admin/teams/${escapeHtml(team.id)}/update"><p><label>Name<br><input name="name" value="${escapeHtml(team.name)}" required></label></p><p><label>Description<br><textarea name="description">${escapeHtml(team.description ?? "")}</textarea></label></p><p><label>Parent team<br><select name="parentTeamId">${parentOptions(team.parentTeamId, team.id)}</select></label></p><button type="submit">Save team</button></form></section><section class="tab-panel" data-tab-panel="delete" hidden><form method="post" action="/admin/teams/${escapeHtml(team.id)}/delete"><p class="status">Deleting a team removes its direct membership assignments and hierarchy links.</p><p><label>Type <code>${escapeHtml(team.name)}</code><br><input name="confirmName" required></label></p><button class="danger" type="submit">Delete team</button></form></section></div></details>`;
+    return `<details class="drilldown"><summary><div><strong>${escapeHtml(team.name)}</strong><div class="muted">${team.parentTeamId ? `Child of ${escapeHtml(teamById.get(team.parentTeamId)?.name ?? team.parentTeamId)} · ` : ""}${memberships.length} direct member${memberships.length === 1 ? "" : "s"}</div></div><span class="badge active">team</span></summary><div class="drilldown-body" data-tabs><div class="tabbar"><button type="button" data-tab="members" aria-selected="true">Members</button><button type="button" data-tab="edit" aria-selected="false">Edit</button><button type="button" data-tab="delete" aria-selected="false">Delete</button></div><section class="tab-panel" data-tab-panel="members">${team.description ? `<p>${escapeHtml(team.description)}</p>` : ""}<div class="reservation-list">${memberRows || `<p class="muted">No direct members.</p>`}</div><form method="post" action="/admin/teams/${escapeHtml(team.id)}/members"><div class="field-grid"><p><label>User<br><select name="userId" required><option value="">Choose a user</option>${userOptions}</select></label></p><p><label>Team role<br><select name="roleId" required>${roleOptions}</select></label></p></div><button type="submit">Add member</button></form></section><section class="tab-panel" data-tab-panel="edit" hidden><form method="post" action="/admin/teams/${escapeHtml(team.id)}/update"><p><label>Name<br><input name="name" value="${escapeHtml(team.name)}" required></label></p><p><label>Description<br><textarea name="description">${escapeHtml(team.description ?? "")}</textarea></label></p><p><label>Parent team<br><select name="parentTeamId">${parentOptions(team.parentTeamId, team.id)}</select></label></p><button type="submit">Save team</button></form></section><section class="tab-panel" data-tab-panel="delete" hidden><form method="post" action="/admin/teams/${escapeHtml(team.id)}/delete"><p class="status">Move or delete shared profiles first. Deleting a team removes its direct memberships and hierarchy links.</p><p><label>Type <code>${escapeHtml(team.name)}</code><br><input name="confirmName" required></label></p><button class="danger" type="submit">Delete team</button></form></section></div></details>`;
   }).join("");
   return layout("Teams", user, `<section class="panel"><div class="target-status-head"><h1>Teams</h1><button type="button" data-open-modal="create-team-modal">Create team</button></div>${error ? `<p class="status">${escapeHtml(error)}</p>` : ""}<div class="summary-list">${teamRows || `<p class="muted">No teams configured yet.</p>`}</div></section>
   <div id="create-team-modal" class="modal" hidden><div class="modal-dialog"><div class="target-status-head"><h2>Create team</h2><button class="secondary" type="button" data-close-modal>Close</button></div><form method="post" action="/admin/teams"><p><label>Name<br><input name="name" required></label></p><p><label>Description<br><textarea name="description"></textarea></label></p><p><label>Parent team<br><select name="parentTeamId">${parentOptions(undefined)}</select></label></p><div class="actions"><button type="submit">Create team</button></div></form></div></div>
@@ -721,7 +721,7 @@ export function welcomePage(user: AuthenticatedUser, hasProfiles: boolean, helpM
   </section>`);
 }
 
-export function startPage(user: AuthenticatedUser, targets: Array<{ target: CapacityTarget; models: ModelDefinition[] }>, profiles: ReservationProfile[] = [], error = "", costEstimates: Record<string, { hourlyUsd: number }> = {}, statusPollSeconds = 5, selectionDeployments: ModelDeploymentSelectionView[] = []): string {
+export function startPage(user: AuthenticatedUser, targets: Array<{ target: CapacityTarget; models: ModelDefinition[] }>, profiles: ReservationProfile[] = [], error = "", costEstimates: Record<string, { hourlyUsd: number }> = {}, statusPollSeconds = 5, selectionDeployments: ModelDeploymentSelectionView[] = [], assignableTeams: Team[] = []): string {
   const initialTargetId = targets[0]?.target.id ?? "";
   return layout("NeurOn", user, `<div class="home-grid"><div><section class="panel">
     <h2>Your reservations</h2>
@@ -758,7 +758,7 @@ export function startPage(user: AuthenticatedUser, targets: Array<{ target: Capa
   </section>
   </aside></div>
   ${profileReviewModal(profiles, targets)}
-  ${profileCreateModal(targets, initialTargetId, "/", selectionDeployments, costEstimates)}
+  ${profileCreateModal(user, targets, initialTargetId, "/", selectionDeployments, costEstimates, assignableTeams)}
   <script type="module">
     const modelLookup = ${safeJson(modelLookupForTargets(targets))};
     const reservationRoutingLookup = ${safeJson(reservationRoutingLookupForTargets(targets))};
@@ -1286,11 +1286,15 @@ export function profilesPage(
   targets: Array<{ target: CapacityTarget; models: ModelDefinition[] }>,
   options: { openCreate?: boolean; onboarding?: boolean; error?: string } = {},
   selectionDeployments: ModelDeploymentSelectionView[] = [],
-  selectionCosts: Record<string, { hourlyUsd: number }> = {}
+  selectionCosts: Record<string, { hourlyUsd: number }> = {},
+  profileTeams: Team[] = [],
+  manageableProfileIds: string[] = []
 ): string {
   const initialTargetId = targets[0]?.target.id ?? "";
+  const teamById = new Map(profileTeams.map((team) => [team.id, team]));
+  const manageable = new Set(manageableProfileIds);
   const rows = profiles.length
-    ? profiles.map((profile) => profileListCard(profile, targets)).join("")
+    ? profiles.map((profile) => profileListCard(profile, targets, teamById.get(profile.teamId ?? ""), manageable.has(profile.id))).join("")
     : `<p class="muted">No reservation profiles yet.</p>`;
   return layout("NeurOn Profiles", user, `<section class="panel">
     ${options.onboarding ? `<p class="pill">Getting started</p><h1>Create your first profile</h1><p class="muted">A profile connects the servers and models you use together. NeurOn will select the only model automatically on single-model targets.</p>` : ""}
@@ -1298,7 +1302,7 @@ export function profilesPage(
     <div class="target-status-head"><h1>Profiles</h1><a class="button" href="/profiles/new">New profile</a></div>
     <div class="summary-list">${rows}</div>
   </section>
-  ${profileCreateModal(targets, initialTargetId, options.onboarding ? "/" : "/profiles", selectionDeployments, selectionCosts)}
+  ${profileCreateModal(user, targets, initialTargetId, options.onboarding ? "/" : "/profiles", selectionDeployments, selectionCosts)}
   <script type="module">
     const form = document.querySelector('#profile-form');
     const targetInputs = [...form.querySelectorAll('[data-profile-target]')];
@@ -1367,14 +1371,14 @@ export function profileEditorPage(
   targets: Array<{ target: CapacityTarget; models: ModelDefinition[] }>,
   deployments: ModelDeploymentSelectionView[],
   costs: Record<string, { hourlyUsd: number }>,
-  options: { profile?: ReservationProfile; onboarding?: boolean; error?: string } = {}
+  options: { profile?: ReservationProfile; onboarding?: boolean; error?: string; teams?: Team[] } = {}
 ): string {
   const initialTargetId = options.profile?.selections[0]?.targetId ?? targets[0]?.target.id ?? "";
   const heading = options.profile ? `Edit ${options.profile.name}` : "New reservation profile";
-  return layout(heading, user, `${options.onboarding ? `<section class="panel"><p class="pill">Getting started</p><h1>Create your first profile</h1><p class="muted">Choose the target and model combinations used by this workflow. Nothing starts until you make a reservation.</p></section>` : ""}${options.error ? `<p class="status">${escapeHtml(options.error)}</p>` : ""}${profileCreateModal(targets, initialTargetId, options.onboarding ? "/" : "/profiles", deployments, costs, options.profile, true)}`);
+  return layout(heading, user, `${options.onboarding ? `<section class="panel"><p class="pill">Getting started</p><h1>Create your first profile</h1><p class="muted">Choose the target and model combinations used by this workflow. Nothing starts until you make a reservation.</p></section>` : ""}${options.error ? `<p class="status">${escapeHtml(options.error)}</p>` : ""}${profileCreateModal(user, targets, initialTargetId, options.onboarding ? "/" : "/profiles", deployments, costs, options.teams ?? [], options.profile, true)}`);
 }
 
-function profileListCard(profile: ReservationProfile, targets: Array<{ target: CapacityTarget; models: ModelDefinition[] }>): string {
+function profileListCard(profile: ReservationProfile, targets: Array<{ target: CapacityTarget; models: ModelDefinition[] }>, team: Team | undefined, manageable: boolean): string {
   const targetLookup = targetLookupForTargets(targets);
   const modelLookup = modelLookupForTargets(targets);
   const defaults = [profile.defaultDurationMinutes ? `${profile.defaultDurationMinutes} min duration` : "", profile.defaultKeepaliveMinutes ? `${profile.defaultKeepaliveMinutes} min keepalive` : ""].filter(Boolean).join(" | ");
@@ -1383,7 +1387,9 @@ function profileListCard(profile: ReservationProfile, targets: Array<{ target: C
     const modelSummary = aliases.length ? aliases.map((alias) => `<span class="copy-chip">${escapeHtml(alias)}</span>`).join("") : `<span class="pill">All models</span>`;
     return `<div class="target-status-card"><div class="target-status-head"><strong>${escapeHtml(targetLookup[selection.targetId]?.displayName ?? selection.targetId)}</strong><span class="muted"><code>${escapeHtml(selection.targetId)}</code></span></div><div class="chip-row">${modelSummary}</div></div>`;
   }).join("");
-  return `<details class="drilldown"><summary><div><strong>${escapeHtml(profile.name)}</strong>${profile.description ? `<div class="muted">${escapeHtml(profile.description)}</div>` : ""}<div class="target-status-meta">${defaults ? `<span class="pill">${escapeHtml(defaults)}</span>` : ""}<span class="muted">${profile.selections.length} target selection${profile.selections.length === 1 ? "" : "s"}</span></div></div><div class="inline-actions"><a class="button secondary" href="/profiles/${escapeHtml(profile.id)}/edit">Edit</a><form method="post" action="/reservation-profiles/${escapeHtml(profile.id)}/delete"><button class="danger" type="submit">Delete</button></form></div></summary><div class="drilldown-body">${selections}</div></details>`;
+  const scope = profile.teamId ? `<span class="pill">Team: ${escapeHtml(team?.name ?? profile.teamId)}</span>` : `<span class="pill">Personal</span>`;
+  const actions = manageable ? `<div class="inline-actions"><a class="button secondary" href="/profiles/${escapeHtml(profile.id)}/edit">Edit</a><form method="post" action="/reservation-profiles/${escapeHtml(profile.id)}/delete"><button class="danger" type="submit">Delete</button></form></div>` : "";
+  return `<details class="drilldown"><summary><div><strong>${escapeHtml(profile.name)}</strong>${profile.description ? `<div class="muted">${escapeHtml(profile.description)}</div>` : ""}<div class="target-status-meta">${scope}${defaults ? `<span class="pill">${escapeHtml(defaults)}</span>` : ""}<span class="muted">${profile.selections.length} target selection${profile.selections.length === 1 ? "" : "s"}</span></div></div>${actions}</summary><div class="drilldown-body">${selections}</div></details>`;
 }
 
 export function reservationHistoryPage(user: AuthenticatedUser): string {
@@ -2955,11 +2961,13 @@ function profileDefaultControls(durationMinutes = 2, keepaliveMinutes = 2): stri
 }
 
 function profileCreateModal(
+  user: AuthenticatedUser,
   targets: Array<{ target: CapacityTarget; models: ModelDefinition[] }>,
   initialTargetId: string,
   returnTo = "/",
   deployments: ModelDeploymentSelectionView[] = [],
   costs: Record<string, { hourlyUsd: number }> = {},
+  teams: Team[] = [],
   profile?: ReservationProfile,
   standalone = false
 ): string {
@@ -2969,9 +2977,11 @@ function profileCreateModal(
   const keepaliveMinutes = profile?.defaultKeepaliveMinutes ?? 2;
   const rootClass = standalone ? "profile-builder-page" : "modal";
   const dialogClass = standalone ? "panel profile-builder-dialog" : "modal-dialog profile-builder-dialog";
+  const personalAllowed = !profile || profile.userId === user.id;
+  const sharingOptions = `${personalAllowed ? `<option value="" ${profile?.teamId ? "" : "selected"}>Only me</option>` : ""}${teams.map((team) => `<option value="${escapeHtml(team.id)}" ${profile?.teamId === team.id ? "selected" : ""}>Team: ${escapeHtml(team.name)}</option>`).join("")}`;
   return `<div id="profile-modal" class="${rootClass}"${standalone ? "" : " hidden"}>
     <div class="${dialogClass}">
-      <div class="target-status-head"><h1>${profile ? "Edit" : "New"} reservation profile</h1>${standalone ? `<a href="/profiles">Back to profiles</a>` : `<button class="secondary" type="button" data-close-modal>Close</button>`}</div>
+      <div class="target-status-head"><h1>${profile ? "Edit" : "New"} reservation profile</h1>${standalone ? `<a class="button secondary" href="/profiles">← Back to profiles</a>` : `<button class="secondary" type="button" data-close-modal>Close</button>`}</div>
       <form id="profile-form" method="post" action="${profile ? `/reservation-profiles/${escapeHtml(profile.id)}` : "/reservation-profiles"}">
         <input type="hidden" name="returnTo" value="${escapeHtml(returnTo)}">
         <input id="profile-duration-minutes" type="hidden" name="defaultDurationMinutes" value="${durationMinutes}">
@@ -2981,6 +2991,7 @@ function profileCreateModal(
             <div class="field-grid">
               <p><label>Name<br><input name="name" type="text" placeholder="Daily coding" value="${escapeHtml(profile?.name ?? "")}" required></label></p>
               <p><label>Description<br><input name="description" type="text" placeholder="Target and models for this workflow" value="${escapeHtml(profile?.description ?? "")}"></label></p>
+              <p><label>Who can use this profile${helpTip("Personal profiles are available only to you. Team profiles are shared with eligible members of that team and its descendants.")}<br><select name="teamId">${sharingOptions}</select></label>${teams.length ? `<br><span class="muted">Team owners and managers can maintain shared profiles.</span>` : `<br><span class="muted">Join or manage a team to share profiles.</span>`}</p>
             </div>
             ${profileDefaultControls(durationMinutes, keepaliveMinutes)}
             ${profileSelectionGuide(deployments)}

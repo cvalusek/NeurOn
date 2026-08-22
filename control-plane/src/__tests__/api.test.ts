@@ -227,6 +227,12 @@ describe("maintenance mode", () => {
     const auth = { authorization: `Basic ${Buffer.from("actual:local-test-secret").toString("base64")}` };
     const health = await app.inject({ method: "GET", url: "/healthz" });
     const mutation = await app.inject({ method: "POST", url: "/api/reservations", headers: auth, payload: { modelIds: ["m1"] } });
+    const profile = await app.inject({
+      method: "POST",
+      url: "/api/reservation-profiles",
+      headers: auth,
+      payload: { name: "Maintenance profile", selections: [{ targetId: "t1", modelIds: ["m1"] }] }
+    });
     const team = await app.inject({ method: "POST", url: "/api/admin/teams", headers: auth, payload: { name: "Maintenance administrators" } });
     const users = await identityService.listUsers();
     const source = users.find((user) => user.username === "other")!;
@@ -239,10 +245,11 @@ describe("maintenance mode", () => {
 
     expect(health.json()).toEqual({ ok: true, storageDriver: "memory", maintenanceMode: true });
     expect(mutation.statusCode).toBe(503);
+    expect(profile.statusCode).toBe(201);
     expect(team.statusCode).toBe(201);
     expect(merge.statusCode).toBe(200);
-    expect(home.statusCode).toBe(302);
-    expect(home.headers.location).toBe("/welcome");
+    expect(home.statusCode).toBe(200);
+    expect(home.body).toContain("Maintenance profile");
     expect(hassleOff.statusCode).toBe(200);
     expect(fetchMock).not.toHaveBeenCalled();
   });
@@ -521,6 +528,41 @@ describe("API authentication context", () => {
     });
   });
 
+  it("shares team profiles with members and presents the assignment on the dedicated editor", async () => {
+    process.env.USE_FAKE_PROVIDER = "true";
+    const { app, identityService } = await buildApp({ ...config, adminUsers: ["actual"] }, models);
+    const ownerAuth = { authorization: `Basic ${Buffer.from("actual:local-test-secret").toString("base64")}` };
+    const memberAuth = { authorization: `Basic ${Buffer.from("other:local-test-secret").toString("base64")}` };
+    try {
+      const users = await identityService.listUsers();
+      const owner = (await identityService.authenticatedUser(users.find((user) => user.username === "actual")!.id))!;
+      const member = users.find((user) => user.username === "other")!;
+      const team = await identityService.createTeam(owner, { name: "Platform" });
+      await identityService.setTeamMembership(owner, { teamId: team.id, userId: member.id, roleId: "role_team_member", source: "manual" });
+
+      const editor = await app.inject({ method: "GET", url: "/profiles/new", headers: ownerAuth });
+      expect(editor.statusCode).toBe(200);
+      expect(editor.body).toContain('class="button secondary" href="/profiles">← Back to profiles</a>');
+      expect(editor.body).toContain("Who can use this profile");
+      expect(editor.body).toContain(`value="${team.id}"`);
+      expect(editor.body).toContain("Team: Platform");
+
+      const created = await app.inject({ method: "POST", url: "/api/reservation-profiles", headers: ownerAuth, payload: { teamId: team.id, name: "Shared coding", selections: [{ targetId: "t1", modelIds: ["m1"] }] } });
+      expect(created.statusCode).toBe(201);
+      expect(created.json()).toMatchObject({ teamId: team.id, name: "Shared coding" });
+      const memberProfiles = await app.inject({ method: "GET", url: "/api/reservation-profiles", headers: memberAuth });
+      expect(memberProfiles.json().reservationProfiles).toMatchObject([{ id: created.json().id, teamId: team.id }]);
+      const memberPage = await app.inject({ method: "GET", url: "/profiles", headers: memberAuth });
+      expect(memberPage.body).toContain("Team: Platform");
+      expect(memberPage.body).not.toContain(`/profiles/${created.json().id}/edit`);
+      const reservation = await app.inject({ method: "POST", url: "/api/reservations", headers: memberAuth, payload: { profileId: created.json().id, durationMinutes: 5 } });
+      expect(reservation.statusCode).toBe(201);
+      expect(reservation.json()).toMatchObject({ profileId: created.json().id, username: "other" });
+    } finally {
+      await app.close();
+    }
+  });
+
   it("requires model choices when a selected target exposes multiple models", async () => {
     process.env.USE_FAKE_PROVIDER = "true";
     const targetWithChoices = { id: "t1", displayName: "T1", provider: "aws-ecs", modelIds: ["m1", "m2"] };
@@ -576,6 +618,9 @@ describe("API authentication context", () => {
     expect(page.body).toContain(`/profiles/${created.json().id}/edit`);
     expect(newPage.statusCode).toBe(200);
     expect(newPage.body).toContain("New reservation profile");
+    expect(newPage.body).toContain('class="button secondary" href="/profiles">← Back to profiles</a>');
+    expect(newPage.body).toContain("Who can use this profile");
+    expect(newPage.body).toContain("Only me");
     expect(newPage.body).toContain('name="returnTo" value="/profiles"');
     expect(onboardingPage.body).toContain('name="returnTo" value="/"');
     expect(editPage.statusCode).toBe(200);

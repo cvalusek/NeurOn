@@ -105,12 +105,14 @@ serializes final-Owner disable/removal checks so concurrent administrator
 requests cannot leave the installation without an enabled Owner.
 
 Teams are durable and may be nested. NeurOn stores both the parent relationship
-and a rebuilt closure index, so membership in a child satisfies an audience
-granted to its ancestor. Team roles currently classify membership and preserve
-the intended future delegated-administration boundary; global `teams.manage`
-still authorizes team administration in this release. Approvals, service
-accounts, shared team profiles, and delegated team administration remain
-deliberately deferred.
+and a rebuilt closure index, so membership in a child satisfies an audience or
+shared profile granted to its ancestor. Team Member may use inherited shared
+profiles. Team Owner and Team Manager may create, edit, move, and delete shared
+profiles in their managed hierarchy; global `teams.manage` authorizes shared
+profile management for every team. The profile keeps its durable creator user
+ID for audit and duplicate-account merges while its optional team ID controls
+sharing. Approvals, service accounts, and general delegated team administration
+remain deliberately deferred.
 
 ## Target visibility
 
@@ -126,8 +128,23 @@ subject is credited to a real user only when that user may use the target;
 otherwise any valid warm-target traffic signal remains synthetic.
 
 Providers remain installation-global. Provider concurrency and quota policy,
-private provisioned targets, shared profiles, approvals, and service accounts
-are future work.
+private provisioned targets, approvals, and service accounts are future work.
+
+## Shared team profiles
+
+The New/Edit Profile page has a **Who can use this profile** selector. `Only me`
+keeps it personal. A team option appears when the current user has
+`team.profiles.manage` for that team (including managed descendants) or global
+team administration. Eligible members see the shared profile on Home, Profiles,
+Client setup, and the REST API and may start their own reservation from it.
+Use-only members do not receive Edit or Delete controls.
+
+A shared profile accepts only targets available to the whole assigned team: a
+global target, or a team target whose audience team is the assigned team or one
+of its ancestors. User-only targets are rejected. Current access is checked
+again whenever a reservation starts, so later membership or target-audience
+changes take effect immediately. A team with shared profiles cannot be deleted
+until those profiles are moved or removed.
 
 ## Duplicate-account merge API
 

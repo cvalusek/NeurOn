@@ -30,6 +30,7 @@ export interface ReservationProfileRepository {
   listForUser(userId: string): Promise<ReservationProfile[]>;
   list(): Promise<ReservationProfile[]>;
   update(id: string, input: ReservationProfile): Promise<ReservationProfile>;
+  delete(id: string): Promise<boolean>;
   deleteForUser(id: string, userId: string): Promise<boolean>;
 }
 

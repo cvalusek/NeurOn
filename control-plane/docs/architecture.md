@@ -60,16 +60,22 @@ is applied by UI, REST, MCP, reservation creation, and traffic attribution.
 
 ### ReservationProfile
 
-A reservation profile is a user-owned saved launch shape. It records one or more
-target selections, each with the model IDs the user expects to use on that
-target. The UI can combine several target/model selections in one profile and
-automatically selects the only model on single-model targets.
+A reservation profile is a saved launch shape with a durable user creator/audit
+owner. It is personal by default, or it may carry one durable team ID that
+shares it with eligible members of that team and its descendants. Team
+owners/managers can maintain profiles in their managed hierarchy; installation
+administrators can manage every team profile. It records one or more target
+selections, each with the model IDs the user expects to use on that target. The
+UI can combine several target/model selections in one profile and automatically
+selects the only model on single-model targets.
 
 Profiles are not runtime provider presets. They do not tune inference images,
 download models, or infer a production catalog. They only store user reservation
 intent. `ReservationService` snapshots the target-specific selections onto the
 reservation while retaining aggregate `modelIds` and `targetIds` for compatible
-clients and legacy records.
+clients and legacy records. A team profile can contain only global targets or
+team targets whose audience contains the profile team; personal/user-only
+targets cannot accidentally be shared with a broader team.
 
 ### TargetActivation
 
@@ -169,8 +175,8 @@ into AWS, Docker, LiteLLM, or a concrete repository from unrelated code.
 - `ReservationService`: validates user input, canonicalizes model IDs, creates,
   extends, and ends reservations. It can also expand a user-owned reservation
   profile into a normal reservation request.
-- `ReservationProfileService`: validates and stores user-owned reservation
-  profiles.
+- `ReservationProfileService`: validates and stores personal and team-shared
+  reservation profiles, including team management and whole-team target access.
 - `CostEstimationService`: records target activations and accumulates estimated
   per-reservation cost allocations from reconciler state.
 - `ApiKeyService`: generates personal API keys, stores only hashed key

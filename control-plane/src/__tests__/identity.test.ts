@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import Database from "better-sqlite3";
 import { afterEach, describe, expect, it } from "vitest";
-import type { AuthenticatedUser, CapacityTarget } from "../domain/types.js";
+import type { AuthenticatedUser, CapacityTarget, ModelDefinition } from "../domain/types.js";
 import { SqliteApiKeyRepository } from "../repository/SqliteApiKeyRepository.js";
 import { SqliteModelFavoriteRepository } from "../repository/SqliteModelFavoriteRepository.js";
 import { SqliteIdentityRepository } from "../repository/SqliteIdentityRepository.js";
@@ -12,6 +12,9 @@ import { SqliteReservationRepository } from "../repository/SqliteReservationRepo
 import { createReservationRepository } from "../repository/createReservationRepository.js";
 import { IdentityService } from "../services/IdentityService.js";
 import { AuthMethodService } from "../services/AuthMethodService.js";
+import { ModelCatalog } from "../services/ModelCatalog.js";
+import { ReservationProfileService } from "../services/ReservationProfileService.js";
+import { ReservationService } from "../services/ReservationService.js";
 
 const temporaryDirectories: string[] = [];
 
@@ -94,6 +97,43 @@ describe("durable user identity", () => {
       claims: { groups: [] }
     }, [rule]);
     expect(await identities.canAccessTarget(member, parentTarget, "use")).toBe(false);
+    await handle.close();
+  });
+
+  it("shares team profiles through nested membership while keeping management scoped", async () => {
+    const handle = await createReservationRepository({ driver: "memory" });
+    const identities = new IdentityService(handle.identities, handle.reservationProfiles);
+    const owner = await createOwner(handle.identities, identities);
+    const parent = await identities.createTeam(owner, { name: "Engineering" });
+    const child = await identities.createTeam(owner, { name: "Platform", parentTeamId: parent.id });
+    const managerAccount = await handle.identities.createUser({ id: "usr_manager", username: "manager", status: "active" });
+    const memberAccount = await handle.identities.createUser({ id: "usr_member", username: "member", status: "active" });
+    const outsiderAccount = await handle.identities.createUser({ id: "usr_outsider", username: "outsider", status: "active" });
+    for (const account of [managerAccount, memberAccount, outsiderAccount]) await handle.identities.assignGlobalRole(account.id, "role_member");
+    await identities.setTeamMembership(owner, { teamId: parent.id, userId: managerAccount.id, roleId: "role_team_manager", source: "manual" });
+    await identities.setTeamMembership(owner, { teamId: child.id, userId: memberAccount.id, roleId: "role_team_member", source: "manual" });
+    const manager = (await identities.authenticatedUser(managerAccount.id))!;
+    const member = (await identities.authenticatedUser(memberAccount.id))!;
+    const outsider = (await identities.authenticatedUser(outsiderAccount.id))!;
+    const teamTarget: CapacityTarget = { id: "team-target", displayName: "Team target", provider: "fake", modelIds: ["team-model"], audience: { scope: "teams", teamIds: [parent.id] } };
+    const privateTarget: CapacityTarget = { id: "private-target", displayName: "Private target", provider: "fake", modelIds: ["private-model"], audience: { scope: "users", userIds: [manager.id] } };
+    const models: ModelDefinition[] = [
+      { id: "team-model", displayName: "Team model", aliases: [], targetIds: [teamTarget.id] },
+      { id: "private-model", displayName: "Private model", aliases: [], targetIds: [privateTarget.id] }
+    ];
+    const catalog = new ModelCatalog(models, [teamTarget, privateTarget]);
+    const profiles = new ReservationProfileService(handle.reservationProfiles, catalog, identities);
+    const reservations = new ReservationService(handle.repository, catalog, handle.reservationProfiles, undefined, undefined, identities);
+
+    expect(await profiles.listAssignableTeams(manager)).toEqual(expect.arrayContaining([expect.objectContaining({ id: parent.id }), expect.objectContaining({ id: child.id })]));
+    const profile = await profiles.createForUser(manager, { teamId: child.id, name: "Platform coding", selections: [{ targetId: teamTarget.id, modelIds: ["team-model"] }] });
+    expect(await profiles.listForUser(member)).toMatchObject([{ id: profile.id, teamId: child.id }]);
+    expect(await profiles.listForUser(outsider)).toEqual([]);
+    await expect(reservations.createForUser(member, { profileId: profile.id, durationMinutes: 5 })).resolves.toMatchObject({ profileId: profile.id, userId: member.id });
+    await expect(reservations.createForUser(outsider, { profileId: profile.id, durationMinutes: 5 })).rejects.toThrow("Reservation profile not found");
+    await expect(profiles.updateForUser(profile.id, member, { teamId: child.id, name: "Changed", selections: profile.selections })).rejects.toThrow("Reservation profile not found");
+    await expect(profiles.createForUser(manager, { teamId: child.id, name: "Invalid sharing", selections: [{ targetId: privateTarget.id, modelIds: ["private-model"] }] })).rejects.toThrow("whole team");
+    await expect(identities.deleteTeam(owner, child.id)).rejects.toThrow("shared profiles");
     await handle.close();
   });
 
