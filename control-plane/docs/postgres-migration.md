@@ -153,7 +153,8 @@ docker compose -f docker-compose.yml -f docker-compose.postgres.yml run --rm neu
 
 Start NeurOn with PostgreSQL in maintenance mode. Maintenance mode disables the
 reconciler, traffic poller, startup discovery/provider synchronization,
-HassleOff status calls, and all state-changing HTTP/MCP routes:
+HassleOff status calls, and capacity-affecting HTTP/MCP routes. Identity
+administration remains available for validating and repairing account links:
 
 ```powershell
 docker compose -f docker-compose.yml -f docker-compose.postgres.yml -f docker-compose.maintenance.yml up -d neuron

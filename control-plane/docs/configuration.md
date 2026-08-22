@@ -218,11 +218,13 @@ SQLite rows. Follow the explicit [SQLite to PostgreSQL migration](postgres-migra
 procedure, which retains a consistent rollback backup and enforces one
 production database writer.
 
-`CONTROL_PLANE_MAINTENANCE_MODE=true` disables state-changing HTTP/MCP routes,
-the reconciler, LiteLLM traffic polling, startup discovery/provider sync, and
-HassleOff status calls for storage verification. `STORAGE_OPERATION_LOCK_PATH`
-defaults to `data/neuron-storage.lock`; the application and migration command
-use the same exclusive lock.
+`CONTROL_PLANE_MAINTENANCE_MODE=true` disables capacity-affecting HTTP/MCP
+routes, the reconciler, LiteLLM traffic polling, startup discovery/provider
+sync, and HassleOff status calls for storage verification. Account, invitation,
+role, team, external-user-link, and authentication administration remains
+available because those operations do not invoke providers or reconciliation.
+`STORAGE_OPERATION_LOCK_PATH` defaults to `data/neuron-storage.lock`; the
+application and migration command use the same exclusive lock.
 
 HassleOff continues to own its separate SQLite database regardless of the
 NeurOn control-plane storage driver.

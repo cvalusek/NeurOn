@@ -56,7 +56,7 @@ docker compose up -d neuron
 ```
 
 The default NeurOn command does not start HassleOff. The status and synthetic
-test are at **Admin > HassleOff safety**. See [docs/hassleoff.md](docs/hassleoff.md)
+test are at **Admin > HassleOff**. See [docs/hassleoff.md](docs/hassleoff.md)
 for the exact safe enablement order.
 
 For an isolated fake-only dead-man safety stack:

@@ -250,16 +250,16 @@ export async function buildApp(config: AppConfig, models: ModelDefinition[], opt
   });
 
   app.addHook("preHandler", async (request, reply) => {
-    const mutationAllowedInMaintenance = request.url === "/login" || request.url === "/logout" || request.url.startsWith("/auth/") || request.url.startsWith("/register");
+    const mutationAllowedInMaintenance = mutationSafeInMaintenance(request.url);
     if (
       config.maintenanceMode &&
       !["GET", "HEAD", "OPTIONS"].includes(request.method) &&
       !mutationAllowedInMaintenance
     ) {
       if (request.url.startsWith("/api/") || request.url === "/mcp") {
-        return reply.code(503).send({ error: "NeurOn is in maintenance mode; state changes are disabled" });
+        return reply.code(503).send({ error: "NeurOn is in maintenance mode; capacity-affecting changes are disabled" });
       }
-      return reply.code(503).type("text/html").send("NeurOn is in maintenance mode; state changes are disabled");
+      return reply.code(503).type("text/html").send("NeurOn is in maintenance mode; capacity-affecting changes are disabled");
     }
     if (request.url === "/healthz" || request.url === "/login" || request.url === "/logout" || request.url.startsWith("/auth/") || request.url.startsWith("/register") || request.url === "/openapi.json" || request.url.startsWith("/docs")) return;
     const user = await authProvider.authenticate({ headers: request.headers, cookies: request.cookies });
@@ -363,6 +363,21 @@ export async function buildApp(config: AppConfig, models: ModelDefinition[], opt
   };
 
   return { app, reconciler, trafficPoller, bootstrapRuntimeModels, runtimeModelDiscovery, targetOperations, updateChecker, shutdownCoordinator, identityService, authProvider };
+}
+
+function mutationSafeInMaintenance(url: string): boolean {
+  const path = url.split("?", 1)[0] ?? url;
+  if (path === "/login" || path === "/logout" || path.startsWith("/auth/") || path.startsWith("/register")) return true;
+  return [
+    "/admin/users",
+    "/admin/roles",
+    "/admin/teams",
+    "/admin/auth",
+    "/api/admin/users",
+    "/api/admin/roles",
+    "/api/admin/teams",
+    "/api/admin/external-users"
+  ].some((prefix) => path === prefix || path.startsWith(`${prefix}/`));
 }
 
 function adminPermissionFor(method: string, url: string): string | undefined {

@@ -22,7 +22,7 @@ import { CostEstimationService } from "../services/CostEstimationService.js";
 import { TargetService } from "../services/TargetService.js";
 import { TargetProvisioningService } from "../services/TargetProvisioningService.js";
 import type { HassleOffSafetyView } from "../ui/html.js";
-import { activationPage, adminAuthPage, apiKeysPage, assistantConfigPage, clientSetupPage, hassleOffSafetyPage, loginPage, modelMetadataPage, profileEditorPage, profilesPage, providerAdminPage, registrationPage, reservationHistoryPage, reservationPage, startPage, targetAdminPage, updatesPage, usagePage, userAdminPage, welcomePage } from "../ui/html.js";
+import { activationPage, adminAuthPage, apiKeysPage, assistantConfigPage, clientSetupPage, hassleOffSafetyPage, loginPage, modelMetadataPage, profileEditorPage, profilesPage, providerAdminPage, registrationPage, reservationHistoryPage, reservationPage, startPage, targetAdminPage, teamAdminPage, updatesPage, usagePage, userAdminPage, welcomePage } from "../ui/html.js";
 import { requireUser } from "../utils/http.js";
 import type { HassleOffClient } from "../safety/HassleOffClient.js";
 
@@ -358,11 +358,13 @@ export function registerUiRoutes(
     return reply.redirect("/");
   });
   app.get("/admin", async (_request, reply) => reply.redirect("/admin/auth"));
-  const renderUserAdmin = async (request: Parameters<typeof requireUser>[0], error = "", registrationUrl = "", mergePreview?: Awaited<ReturnType<IdentityService["previewMerge"]>>) => replyUserAdmin(request, error, registrationUrl, mergePreview);
-  const replyUserAdmin = async (request: Parameters<typeof requireUser>[0], error = "", registrationUrl = "", mergePreview?: Awaited<ReturnType<IdentityService["previewMerge"]>>) => userAdminPage(
-    requireUser(request), await identityService.listUsers(), await identityService.listRoles(), await identityService.listTeams(), await identityService.listInvitations(), { error, registrationUrl, mergePreview }
+  const renderUserAdmin = async (request: Parameters<typeof requireUser>[0], notice: { error?: string; registrationUrl?: string; mergePreview?: Awaited<ReturnType<IdentityService["previewMerge"]>>; activeTab?: "accounts" | "invitations" | "merge" } = {}) => userAdminPage(
+    requireUser(request), await identityService.listUsers(), await identityService.listRoles(), await identityService.listInvitations(), notice
   );
-  app.get("/admin/users", async (request, reply) => reply.type("text/html").send(await renderUserAdmin(request)));
+  app.get("/admin/users", async (request, reply) => {
+    const { tab } = z.object({ tab: z.enum(["accounts", "invitations", "merge"]).optional() }).parse(request.query);
+    return reply.type("text/html").send(await renderUserAdmin(request, { activeTab: tab }));
+  });
   app.post("/admin/users/invitations", async (request, reply) => {
     try {
       const body = z.object({ userId: z.string().optional(), intendedUsername: z.string().optional(), initialRoleId: z.string().optional(), expiresInMinutes: z.coerce.number().int().min(5).max(43_200).default(1_440) }).parse(request.body);
@@ -370,20 +372,51 @@ export function registerUiRoutes(
         userId: body.userId || undefined, intendedUsername: body.intendedUsername || undefined, initialRoleId: body.initialRoleId || undefined, expiresInMinutes: body.expiresInMinutes, maxUses: 1
       });
       const registrationUrl = `${absoluteUrl(request, "/register", config.publicBaseUrl)}#token=${encodeURIComponent(created.token)}`;
-      return reply.type("text/html").send(await renderUserAdmin(request, "", registrationUrl));
-    } catch (error) { return reply.code(400).type("text/html").send(await renderUserAdmin(request, error instanceof Error ? error.message : "Could not create invitation")); }
+      return reply.type("text/html").send(await renderUserAdmin(request, { registrationUrl, activeTab: "invitations" }));
+    } catch (error) { return reply.code(400).type("text/html").send(await renderUserAdmin(request, { error: error instanceof Error ? error.message : "Could not create invitation", activeTab: "invitations" })); }
+  });
+  app.post("/admin/users/invitations/:id/revoke", async (request, reply) => {
+    try { const { id } = z.object({ id: z.string() }).parse(request.params); await identityService.revokeInvitation(requireUser(request), id); return reply.redirect("/admin/users?tab=invitations"); }
+    catch (error) { return reply.code(400).type("text/html").send(await renderUserAdmin(request, { error: error instanceof Error ? error.message : "Could not revoke invitation", activeTab: "invitations" })); }
   });
   app.post("/admin/users/:id/status", async (request, reply) => {
     try { const {id}=z.object({id:z.string()}).parse(request.params); const {status}=z.object({status:z.enum(["active","disabled"])}).parse(request.body); await identityService.setUserStatus(requireUser(request),id,status); return reply.redirect("/admin/users"); }
-    catch(error){return reply.code(400).type("text/html").send(await renderUserAdmin(request,error instanceof Error?error.message:"Could not update user"));}
+    catch(error){return reply.code(400).type("text/html").send(await renderUserAdmin(request,{error:error instanceof Error?error.message:"Could not update user",activeTab:"accounts"}));}
   });
   app.post("/admin/users/:id/roles", async (request, reply) => {
     try { const {id}=z.object({id:z.string()}).parse(request.params); const {roleId}=z.object({roleId:z.string()}).parse(request.body); await identityService.assignRole(requireUser(request),id,roleId); return reply.redirect("/admin/users"); }
-    catch(error){return reply.code(400).type("text/html").send(await renderUserAdmin(request,error instanceof Error?error.message:"Could not assign role"));}
+    catch(error){return reply.code(400).type("text/html").send(await renderUserAdmin(request,{error:error instanceof Error?error.message:"Could not assign role",activeTab:"accounts"}));}
   });
   app.post("/admin/users/merge", async (request, reply) => {
-    try { const body=z.object({sourceUserId:z.string(),targetUserId:z.string(),confirm:z.string().optional()}).parse(request.body); if(body.confirm==="MERGE"){await identityService.mergeUsers(requireUser(request),body.sourceUserId,body.targetUserId);return reply.redirect("/admin/users");} const preview=await identityService.previewMerge(requireUser(request),body.sourceUserId,body.targetUserId); return reply.type("text/html").send(await renderUserAdmin(request,"","",preview)); }
-    catch(error){return reply.code(400).type("text/html").send(await renderUserAdmin(request,error instanceof Error?error.message:"Could not merge users"));}
+    try { const body=z.object({sourceUserId:z.string(),targetUserId:z.string(),confirm:z.string().optional()}).parse(request.body); if(body.confirm==="MERGE"){await identityService.mergeUsers(requireUser(request),body.sourceUserId,body.targetUserId);return reply.redirect("/admin/users");} const preview=await identityService.previewMerge(requireUser(request),body.sourceUserId,body.targetUserId); return reply.type("text/html").send(await renderUserAdmin(request,{mergePreview:preview,activeTab:"merge"})); }
+    catch(error){return reply.code(400).type("text/html").send(await renderUserAdmin(request,{error:error instanceof Error?error.message:"Could not merge users",activeTab:"merge"}));}
+  });
+  const renderTeamAdmin = async (request: Parameters<typeof requireUser>[0], error = "") => {
+    const teams = await identityService.listTeams();
+    const memberships = await Promise.all(teams.map(async (team) => [team.id, await identityService.listTeamMemberships(team.id)] as const));
+    return teamAdminPage(requireUser(request), teams, await identityService.listUsers(), await identityService.listRoles("team"), Object.fromEntries(memberships), error);
+  };
+  const teamForm = z.object({ name: z.string().trim().min(1), description: z.string().optional(), parentTeamId: z.string().optional() });
+  app.get("/admin/teams", async (request, reply) => reply.type("text/html").send(await renderTeamAdmin(request)));
+  app.post("/admin/teams", async (request, reply) => {
+    try { const body = teamForm.parse(request.body); await identityService.createTeam(requireUser(request), { name: body.name, description: body.description?.trim() || undefined, parentTeamId: body.parentTeamId || undefined }); return reply.redirect("/admin/teams"); }
+    catch (error) { return reply.code(400).type("text/html").send(await renderTeamAdmin(request, error instanceof Error ? error.message : "Could not create team")); }
+  });
+  app.post("/admin/teams/:id/update", async (request, reply) => {
+    try { const { id } = z.object({ id: z.string() }).parse(request.params); const body = teamForm.parse(request.body); await identityService.updateTeam(requireUser(request), id, { name: body.name, description: body.description?.trim() || undefined, parentTeamId: body.parentTeamId || undefined }); return reply.redirect("/admin/teams"); }
+    catch (error) { return reply.code(400).type("text/html").send(await renderTeamAdmin(request, error instanceof Error ? error.message : "Could not update team")); }
+  });
+  app.post("/admin/teams/:id/delete", async (request, reply) => {
+    try { const { id } = z.object({ id: z.string() }).parse(request.params); const { confirmName } = z.object({ confirmName: z.string() }).parse(request.body); const team = (await identityService.listTeams()).find((candidate) => candidate.id === id); if (!team) throw new Error("Team not found"); if (confirmName !== team.name) throw new Error(`Type ${team.name} to delete this team`); await identityService.deleteTeam(requireUser(request), id); return reply.redirect("/admin/teams"); }
+    catch (error) { return reply.code(400).type("text/html").send(await renderTeamAdmin(request, error instanceof Error ? error.message : "Could not delete team")); }
+  });
+  app.post("/admin/teams/:id/members", async (request, reply) => {
+    try { const { id } = z.object({ id: z.string() }).parse(request.params); const body = z.object({ userId: z.string(), roleId: z.string() }).parse(request.body); await identityService.setTeamMembership(requireUser(request), { teamId: id, userId: body.userId, roleId: body.roleId, source: "manual" }); return reply.redirect("/admin/teams"); }
+    catch (error) { return reply.code(400).type("text/html").send(await renderTeamAdmin(request, error instanceof Error ? error.message : "Could not add team member")); }
+  });
+  app.post("/admin/teams/:id/members/:userId/remove", async (request, reply) => {
+    try { const { id, userId } = z.object({ id: z.string(), userId: z.string() }).parse(request.params); await identityService.removeTeamMembership(requireUser(request), id, userId, "manual"); return reply.redirect("/admin/teams"); }
+    catch (error) { return reply.code(400).type("text/html").send(await renderTeamAdmin(request, error instanceof Error ? error.message : "Could not remove team member")); }
   });
   app.get("/admin/reservations", async (request, reply) => reply.type("text/html").send(reservationHistoryPage(requireUser(request))));
   app.get("/admin/activations", async (request, reply) => reply.type("text/html").send(activationPage(requireUser(request))));
@@ -498,17 +531,19 @@ export function registerUiRoutes(
     }
   });
   app.get("/admin/auth", async (request, reply) => {
-    const query = z.object({ error: z.string().optional() }).parse(request.query);
-    return reply.type("text/html").send(adminAuthPage(requireUser(request), await authMethodService.list(), query.error));
+    const query = z.object({ error: z.string().optional(), tab: z.enum(["methods", "oidc", "github"]).optional() }).parse(request.query);
+    return reply.type("text/html").send(adminAuthPage(requireUser(request), await authMethodService.list(), query.error, query.tab));
   });
   app.post("/admin/auth", async (request, reply) => {
+    let tab: "oidc" | "github" = "github";
     try {
       const body = authMethodFormSchema.parse(request.body ?? {});
+      tab = body.type === "oidc" ? "oidc" : "github";
       await authMethodService.create(authMethodFromForm(body));
       return reply.redirect("/admin/auth");
     } catch (error) {
       const message = error instanceof Error ? error.message : "Could not create auth method";
-      return reply.redirect(`/admin/auth?error=${encodeURIComponent(message)}`);
+      return reply.redirect(`/admin/auth?tab=${tab}&error=${encodeURIComponent(message)}`);
     }
   });
   app.post("/admin/auth/:id/update", async (request, reply) => {

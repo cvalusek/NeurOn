@@ -309,7 +309,7 @@ Use this enablement order:
    docker compose up -d neuron
    ```
 
-5. Sign in to `http://localhost:8090`, open **Admin > HassleOff safety**, and
+5. Sign in to `http://localhost:8090`, open **Admin > HassleOff**, and
    confirm configured, reachable, ready, and armed all show `yes`. Select the
    synthetic confirmation checkbox and choose **Run fail-safe test**. Confirm
    that **Last successful fail-safe test** shows the new time.

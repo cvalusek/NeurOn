@@ -1,4 +1,4 @@
-import type { ApiKey, AppConfig, AssistantConfig, AuthMethod, AuthenticatedUser, CapacityTarget, ModelDefinition, ModelSelectionCatalogConfig, RegistrationInvitation, Reservation, ReservationProfile, Role, RuntimeProfile, TargetStatus, Team, UserAccount, UserIdentity, UserMergePreview } from "../domain/types.js";
+import type { ApiKey, AppConfig, AssistantConfig, AuthMethod, AuthenticatedUser, CapacityTarget, ModelDefinition, ModelSelectionCatalogConfig, RegistrationInvitation, Reservation, ReservationProfile, Role, RuntimeProfile, TargetStatus, Team, TeamMembership, UserAccount, UserIdentity, UserMergePreview } from "../domain/types.js";
 import { DEFAULT_AWS_EC2_INSTANCE_NAME_PATTERN } from "../capacity/AwsEc2CapacityProvider.js";
 import type { AuthMethodView } from "../services/AuthMethodService.js";
 import type { ProviderView } from "../services/ProviderService.js";
@@ -247,8 +247,8 @@ export function layout(title: string, user: AuthenticatedUser | undefined, body:
     .drilldown > summary { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 12px; align-items: center; padding: 13px 14px; cursor: pointer; }
     .drilldown-body { border-top: 1px solid #e2e7e1; padding: 14px; }
     .tabbar { display: flex; gap: 8px; flex-wrap: wrap; border-bottom: 1px solid #d8ddd7; margin-bottom: 12px; }
-    .tabbar button { background: transparent; color: #334155; border-radius: 0; border-bottom: 2px solid transparent; }
-    .tabbar button[aria-selected="true"] { color: #0f766e; border-bottom-color: #0f766e; }
+    .tabbar button, .tabbar a { background: transparent; color: #334155; border-radius: 0; border-bottom: 2px solid transparent; text-decoration: none; padding: 9px 13px; font-weight: 650; }
+    .tabbar button[aria-selected="true"], .tabbar a[aria-selected="true"] { color: #0f766e; border-bottom-color: #0f766e; }
     .tab-panel[hidden], .modal[hidden] { display: none; }
     .modal { position: fixed; inset: 0; background: rgba(23, 32, 42, 0.45); display: grid; place-items: center; padding: 20px; z-index: 30; }
     .modal-dialog { width: min(720px, 100%); max-height: calc(100vh - 40px); overflow: auto; background: white; border-radius: 8px; border: 1px solid #d8ddd7; padding: 18px; box-shadow: 0 16px 48px rgba(23, 32, 42, 0.22); }
@@ -534,9 +534,10 @@ function adminNavigation(user: AuthenticatedUser | undefined): string {
   const link = (href: string, label: string) => `<a href="${href}">${label}</a>`;
   return [
     section("Admin", [
-      can("users.manage") ? link("/admin/users", "Users and teams") : "",
+      can("users.manage") || can("users.merge") ? link("/admin/users", "Accounts") : "",
+      can("teams.manage") ? link("/admin/teams", "Teams") : "",
       can("auth.manage") ? link("/admin/auth", "Authentication") : "",
-      can("system.manage") ? link("/admin/hassleoff", "HassleOff safety") : "",
+      can("system.manage") ? link("/admin/hassleoff", "HassleOff") : "",
       can("system.manage") ? link("/admin/updates", "Updates") : ""
     ].filter(Boolean), true),
     section("Configuration", [
@@ -604,12 +605,13 @@ export function userAdminPage(
   user: AuthenticatedUser,
   users: Array<UserAccount & { roles: Role[]; identities: UserIdentity[] }>,
   roles: Role[],
-  teams: Team[],
   invitations: RegistrationInvitation[],
-  notice: { error?: string; registrationUrl?: string; mergePreview?: UserMergePreview } = {}
+  notice: { error?: string; registrationUrl?: string; mergePreview?: UserMergePreview; activeTab?: "accounts" | "invitations" | "merge" } = {}
 ): string {
   const globalRoles = roles.filter((role) => role.scope === "global");
   const assignableGlobalRoles = user.permissions.includes("*") ? globalRoles : globalRoles.filter((role) => !role.permissions.includes("*"));
+  const mayMerge = user.permissions.includes("*") || user.permissions.includes("users.merge");
+  const activeTab = notice.activeTab === "merge" && !mayMerge ? "accounts" : notice.activeTab ?? (notice.registrationUrl ? "invitations" : notice.mergePreview ? "merge" : "accounts");
   const userRows = users.map((account) => `<details class="drilldown"><summary><div><strong>${escapeHtml(account.displayName ?? account.username)}</strong><div class="muted"><code>${escapeHtml(account.username)}</code> · ${escapeHtml(account.id)}</div></div><span class="badge ${account.status === "active" ? "active" : "failed"}">${escapeHtml(account.status)}</span></summary><div class="drilldown-body">
     <p><strong>Roles:</strong> ${account.roles.map((role) => `<span class="pill">${escapeHtml(role.name)}</span>`).join(" ") || `<span class="muted">None</span>`}</p>
     <p><strong>Sign-in methods:</strong> ${account.identities.map((identity) => `<span class="pill">${escapeHtml(identity.providerType)} · ${escapeHtml(identity.providerId)}</span>`).join(" ") || `<span class="muted">Not claimed</span>`}</p>
@@ -619,29 +621,82 @@ export function userAdminPage(
       <form method="post" action="/admin/users/invitations"><input type="hidden" name="userId" value="${escapeHtml(account.id)}"><input type="hidden" name="expiresInMinutes" value="1440"><button class="secondary" type="submit">Create claim/reset link</button></form>
     </div>
   </div></details>`).join("");
-  const activeInvitations = invitations.filter((invitation) => !invitation.revokedAt && invitation.expiresAt > new Date() && invitation.useCount < invitation.maxUses);
-  return layout("Users and teams", user, `<section class="panel">
-    <h1>Users and teams</h1>
-    <p class="muted">NeurOn users own durable profiles, reservations, favorites, and API keys. Local, GitHub, and OIDC sign-in methods attach to the same account.</p>
+  const now = new Date();
+  const activeInvitations = invitations.filter((invitation) => !invitation.revokedAt && invitation.expiresAt > now && invitation.useCount < invitation.maxUses);
+  const invitationRows = invitations.map((invitation) => {
+    const state = invitation.revokedAt ? "revoked" : invitation.useCount >= invitation.maxUses ? "used" : invitation.expiresAt <= now ? "expired" : "active";
+    const role = globalRoles.find((candidate) => candidate.id === invitation.initialRoleId);
+    return `<div class="target-status-card"><div class="target-status-head"><div><strong>${escapeHtml(invitation.intendedUsername ?? "Any username")}</strong><div class="muted">Created ${escapeHtml(formatDate(invitation.createdAt))} · expires ${escapeHtml(formatDate(invitation.expiresAt))}</div></div><span class="badge ${state === "active" ? "active" : state === "expired" || state === "revoked" ? "failed" : "done"}">${state}</span></div><div class="target-status-meta"><span class="pill">${escapeHtml(role?.name ?? invitation.initialRoleId ?? "Member")}</span><span class="muted">${invitation.useCount}/${invitation.maxUses} uses</span></div>${state === "active" ? `<form method="post" action="/admin/users/invitations/${escapeHtml(invitation.id)}/revoke"><button class="secondary" type="submit">Revoke</button></form>` : ""}</div>`;
+  }).join("");
+  const tab = (id: "accounts" | "invitations" | "merge", label: string) => `<a href="/admin/users?tab=${id}" role="tab" aria-selected="${activeTab === id}">${escapeHtml(label)}</a>`;
+  return layout("Accounts", user, `<section class="panel">
+    <div class="target-status-head"><h1>Accounts</h1><button type="button" data-open-modal="invite-user-modal">Invite user</button></div>
     ${notice.error ? `<p class="status">${escapeHtml(notice.error)}</p>` : ""}
-    ${notice.registrationUrl ? `<div class="secret-box"><code>${escapeHtml(notice.registrationUrl)}</code><button type="button" data-copy-registration>Copy registration link</button></div><script>document.querySelector('[data-copy-registration]').addEventListener('click',async event=>{await navigator.clipboard.writeText(${JSON.stringify(notice.registrationUrl)});event.currentTarget.textContent='Copied';});</script>` : ""}
+    <div class="tabbar" role="tablist">${tab("accounts", `Accounts (${users.length})`)}${tab("invitations", `Invitations (${activeInvitations.length})`)}${mayMerge ? tab("merge", "Merge users") : ""}</div>
+    <section class="tab-panel" role="tabpanel" ${activeTab === "accounts" ? "" : "hidden"}><div class="summary-list">${userRows || `<p class="muted">No users yet.</p>`}</div></section>
+    <section class="tab-panel" role="tabpanel" ${activeTab === "invitations" ? "" : "hidden"}>${notice.registrationUrl ? `<div class="secret-box"><code>${escapeHtml(notice.registrationUrl)}</code><button type="button" data-copy-registration>Copy registration link</button></div>` : ""}<div class="summary-list" style="margin-top: 12px;">${invitationRows || `<p class="muted">No invitations yet.</p>`}</div></section>
+    ${mayMerge ? `<section class="tab-panel" role="tabpanel" ${activeTab === "merge" ? "" : "hidden"}>${mergeUsersPanel(users, notice.mergePreview)}</section>` : ""}
   </section>
-  <section class="panel"><h2>Invite a user</h2><form method="post" action="/admin/users/invitations"><div class="field-grid">
+  <div id="invite-user-modal" class="modal" hidden><div class="modal-dialog"><div class="target-status-head"><h2>Invite user</h2><button class="secondary" type="button" data-close-modal>Close</button></div><form method="post" action="/admin/users/invitations"><div class="field-grid">
     <p><label>Username (optional)<br><input name="intendedUsername" placeholder="alice"></label></p>
     <p><label>Initial role<br><select name="initialRoleId"><option value="role_member">Member</option>${assignableGlobalRoles.filter((role) => role.id !== "role_member").map((role) => `<option value="${escapeHtml(role.id)}">${escapeHtml(role.name)}</option>`).join("")}</select></label></p>
     <p><label>Expires after<br><select name="expiresInMinutes"><option value="60">1 hour</option><option value="1440" selected>1 day</option><option value="10080">7 days</option></select></label></p>
-  </div><button type="submit">Create registration link</button></form><p class="muted">${activeInvitations.length} active invitation${activeInvitations.length === 1 ? "" : "s"}. Tokens are never shown again.</p></section>
-  <section class="panel"><h2>Accounts</h2><div class="summary-list">${userRows || `<p class="muted">No users yet.</p>`}</div></section>
-  ${user.permissions.includes("*") || user.permissions.includes("users.merge") ? mergeUsersPanel(users, notice.mergePreview) : ""}
-  <section class="panel"><h2>Teams</h2><p>${teams.length ? teams.map((team) => `<span class="pill">${escapeHtml(team.name)}</span>`).join(" ") : `<span class="muted">No teams configured yet.</span>`}</p><p class="muted">Team hierarchy and OIDC-managed membership are durable. Team administration is also available through the admin API.</p></section>`);
+  </div><div class="actions"><button type="submit">Create registration link</button></div></form></div></div>
+  <script>
+    document.addEventListener('click', (event) => {
+      const opener = event.target.closest('[data-open-modal]');
+      if (opener) document.getElementById(opener.dataset.openModal).hidden = false;
+      if (event.target.closest('[data-close-modal]')) event.target.closest('.modal').hidden = true;
+      if (event.target.classList?.contains('modal')) event.target.hidden = true;
+    });
+    const copyRegistration = document.querySelector('[data-copy-registration]');
+    copyRegistration?.addEventListener('click', async event => { await navigator.clipboard.writeText(${JSON.stringify(notice.registrationUrl ?? "")}); event.currentTarget.textContent = 'Copied'; });
+  </script>`);
 }
 
 function userSelect(name: string, users: UserAccount[]): string { return `<select name="${name}" required><option value="">Choose a user</option>${users.filter((user) => !user.mergedIntoUserId).map((user) => `<option value="${escapeHtml(user.id)}">${escapeHtml(user.username)} · ${escapeHtml(user.id)}</option>`).join("")}</select>`; }
 
 function mergeUsersPanel(users: UserAccount[], preview?: UserMergePreview): string {
-  if (!preview) return `<section class="panel"><h2>Merge duplicate accounts</h2><p class="status">Merging moves durable ownership and sign-in methods to the destination account and disables the source. It cannot be automatically reversed.</p><form method="post" action="/admin/users/merge"><div class="field-grid"><p><label>Source user<br>${userSelect("sourceUserId", users)}</label></p><p><label>Destination user<br>${userSelect("targetUserId", users)}</label></p></div><button class="secondary" type="submit">Preview merge</button></form></section>`;
+  if (!preview) return `<h2>Merge duplicate accounts</h2><p class="status">Merging moves durable ownership and sign-in methods to the destination account and disables the source. It cannot be automatically reversed.</p><form method="post" action="/admin/users/merge"><div class="field-grid"><p><label>Source user<br>${userSelect("sourceUserId", users)}</label></p><p><label>Destination user<br>${userSelect("targetUserId", users)}</label></p></div><button class="secondary" type="submit">Preview merge</button></form>`;
   const counts = Object.entries(preview.counts).map(([name, count]) => `<span class="pill">${escapeHtml(name)}: ${count}</span>`).join(" ");
-  return `<section class="panel"><h2>Confirm account merge</h2><p>Move all listed data from <strong>${escapeHtml(preview.sourceUser.username)}</strong> to <strong>${escapeHtml(preview.targetUser.username)}</strong>, then disable the source account.</p><p>${counts}</p><form method="post" action="/admin/users/merge"><input type="hidden" name="sourceUserId" value="${escapeHtml(preview.sourceUser.id)}"><input type="hidden" name="targetUserId" value="${escapeHtml(preview.targetUser.id)}"><p><label>Type <code>MERGE</code><br><input name="confirm" autocomplete="off" required></label></p><div class="actions"><button class="danger" type="submit">Merge accounts</button><a href="/admin/users">Cancel</a></div></form></section>`;
+  return `<h2>Confirm account merge</h2><p>Move all listed data from <strong>${escapeHtml(preview.sourceUser.username)}</strong> to <strong>${escapeHtml(preview.targetUser.username)}</strong>, then disable the source account.</p><p>${counts}</p><form method="post" action="/admin/users/merge"><input type="hidden" name="sourceUserId" value="${escapeHtml(preview.sourceUser.id)}"><input type="hidden" name="targetUserId" value="${escapeHtml(preview.targetUser.id)}"><p><label>Type <code>MERGE</code><br><input name="confirm" autocomplete="off" required></label></p><div class="actions"><button class="danger" type="submit">Merge accounts</button><a href="/admin/users?tab=merge">Cancel</a></div></form>`;
+}
+
+export function teamAdminPage(
+  user: AuthenticatedUser,
+  teams: Team[],
+  users: UserAccount[],
+  teamRoles: Role[],
+  membershipsByTeam: Record<string, TeamMembership[]>,
+  error = ""
+): string {
+  const userById = new Map(users.map((account) => [account.id, account]));
+  const roleById = new Map(teamRoles.map((role) => [role.id, role]));
+  const teamById = new Map(teams.map((team) => [team.id, team]));
+  const userOptions = users.filter((account) => account.status === "active" && !account.mergedIntoUserId).map((account) => `<option value="${escapeHtml(account.id)}">${escapeHtml(account.displayName ?? account.username)} · ${escapeHtml(account.username)}</option>`).join("");
+  const roleOptions = teamRoles.map((role) => `<option value="${escapeHtml(role.id)}">${escapeHtml(role.name)}</option>`).join("");
+  const parentOptions = (selected: string | undefined, excludedId?: string) => `<option value="">No parent</option>${teams.filter((candidate) => candidate.id !== excludedId).map((candidate) => `<option value="${escapeHtml(candidate.id)}" ${candidate.id === selected ? "selected" : ""}>${escapeHtml(candidate.name)}</option>`).join("")}`;
+  const teamRows = teams.map((team) => {
+    const memberships = membershipsByTeam[team.id] ?? [];
+    const memberRows = memberships.map((membership) => {
+      const account = userById.get(membership.userId);
+      const role = roleById.get(membership.roleId);
+      return `<div class="reservation-card compact"><div><strong>${escapeHtml(account?.displayName ?? account?.username ?? membership.userId)}</strong><div class="target-status-meta"><span class="pill">${escapeHtml(role?.name ?? membership.roleId)}</span><span class="pill">${escapeHtml(membership.source)}</span></div></div>${membership.source === "manual" ? `<form method="post" action="/admin/teams/${escapeHtml(team.id)}/members/${escapeHtml(membership.userId)}/remove"><input type="hidden" name="source" value="manual"><button class="secondary" type="submit">Remove</button></form>` : `<span class="muted">Managed at sign-in</span>`}</div>`;
+    }).join("");
+    return `<details class="drilldown"><summary><div><strong>${escapeHtml(team.name)}</strong><div class="muted">${team.parentTeamId ? `Child of ${escapeHtml(teamById.get(team.parentTeamId)?.name ?? team.parentTeamId)} · ` : ""}${memberships.length} direct member${memberships.length === 1 ? "" : "s"}</div></div><span class="badge active">team</span></summary><div class="drilldown-body" data-tabs><div class="tabbar"><button type="button" data-tab="members" aria-selected="true">Members</button><button type="button" data-tab="edit" aria-selected="false">Edit</button><button type="button" data-tab="delete" aria-selected="false">Delete</button></div><section class="tab-panel" data-tab-panel="members">${team.description ? `<p>${escapeHtml(team.description)}</p>` : ""}<div class="reservation-list">${memberRows || `<p class="muted">No direct members.</p>`}</div><form method="post" action="/admin/teams/${escapeHtml(team.id)}/members"><div class="field-grid"><p><label>User<br><select name="userId" required><option value="">Choose a user</option>${userOptions}</select></label></p><p><label>Team role<br><select name="roleId" required>${roleOptions}</select></label></p></div><button type="submit">Add member</button></form></section><section class="tab-panel" data-tab-panel="edit" hidden><form method="post" action="/admin/teams/${escapeHtml(team.id)}/update"><p><label>Name<br><input name="name" value="${escapeHtml(team.name)}" required></label></p><p><label>Description<br><textarea name="description">${escapeHtml(team.description ?? "")}</textarea></label></p><p><label>Parent team<br><select name="parentTeamId">${parentOptions(team.parentTeamId, team.id)}</select></label></p><button type="submit">Save team</button></form></section><section class="tab-panel" data-tab-panel="delete" hidden><form method="post" action="/admin/teams/${escapeHtml(team.id)}/delete"><p class="status">Deleting a team removes its direct membership assignments and hierarchy links.</p><p><label>Type <code>${escapeHtml(team.name)}</code><br><input name="confirmName" required></label></p><button class="danger" type="submit">Delete team</button></form></section></div></details>`;
+  }).join("");
+  return layout("Teams", user, `<section class="panel"><div class="target-status-head"><h1>Teams</h1><button type="button" data-open-modal="create-team-modal">Create team</button></div>${error ? `<p class="status">${escapeHtml(error)}</p>` : ""}<div class="summary-list">${teamRows || `<p class="muted">No teams configured yet.</p>`}</div></section>
+  <div id="create-team-modal" class="modal" hidden><div class="modal-dialog"><div class="target-status-head"><h2>Create team</h2><button class="secondary" type="button" data-close-modal>Close</button></div><form method="post" action="/admin/teams"><p><label>Name<br><input name="name" required></label></p><p><label>Description<br><textarea name="description"></textarea></label></p><p><label>Parent team<br><select name="parentTeamId">${parentOptions(undefined)}</select></label></p><div class="actions"><button type="submit">Create team</button></div></form></div></div>
+  <script>
+    document.addEventListener('click', (event) => {
+      const tab = event.target.closest('[data-tab]');
+      if (tab) { const root = tab.closest('[data-tabs]'); root.querySelectorAll('[data-tab]').forEach(candidate => candidate.setAttribute('aria-selected', String(candidate === tab))); root.querySelectorAll('[data-tab-panel]').forEach(panel => { panel.hidden = panel.dataset.tabPanel !== tab.dataset.tab; }); }
+      const opener = event.target.closest('[data-open-modal]');
+      if (opener) document.getElementById(opener.dataset.openModal).hidden = false;
+      if (event.target.closest('[data-close-modal]')) event.target.closest('.modal').hidden = true;
+      if (event.target.classList?.contains('modal')) event.target.hidden = true;
+    });
+  </script>`);
 }
 
 export function welcomePage(user: AuthenticatedUser, hasProfiles: boolean, helpMode: boolean): string {
@@ -1603,12 +1658,15 @@ function shortRevision(revision: string | undefined): string {
   return revision ? revision.slice(0, 12) : "unknown";
 }
 
-export function adminAuthPage(user: AuthenticatedUser, methods: AuthMethodView[], error = ""): string {
+export function adminAuthPage(user: AuthenticatedUser, methods: AuthMethodView[], error = "", activeTab: "methods" | "oidc" | "github" = "methods"): string {
   const rows = methods.length ? methods.map(authMethodRow).join("") : `<p class="muted">No additional authentication methods configured.</p>`;
-  return layout("NeurOn Auth", user, `<section class="panel">
+  const tab = (id: "methods" | "oidc" | "github", label: string) => `<a href="/admin/auth?tab=${id}" role="tab" aria-selected="${activeTab === id}">${escapeHtml(label)}</a>`;
+  return layout("Authentication", user, `<section class="panel">
     <h1>Authentication</h1>
     ${error ? `<p class="status">${escapeHtml(error)}</p>` : ""}
-    <h2>Add OIDC provider</h2>
+    <div class="tabbar" role="tablist">${tab("methods", `Methods (${methods.length})`)}${tab("oidc", "Add OIDC")}${tab("github", "Add GitHub")}</div>
+    <section class="tab-panel" role="tabpanel" ${activeTab === "methods" ? "" : "hidden"}><div class="summary-list">${rows}</div></section>
+    <section class="tab-panel" role="tabpanel" ${activeTab === "oidc" ? "" : "hidden"}><h2>Add OIDC provider</h2>
     <p class="muted">Works with Okta and other OpenID Connect providers. Register <code>/auth/oidc/callback</code> beneath this NeurOn deployment's public URL.</p>
     ${oidcAuthForm("/admin/auth", {
       id: "okta",
@@ -1625,9 +1683,8 @@ export function adminAuthPage(user: AuthenticatedUser, methods: AuthMethodView[]
       allowedGroups: "",
       teamMembershipRulesJson: ""
     }, "Add OIDC provider")}
-  </section>
-  <section class="panel">
-    <h2>Add GitHub provider</h2>
+    </section>
+    <section class="tab-panel" role="tabpanel" ${activeTab === "github" ? "" : "hidden"}><h2>Add GitHub provider</h2>
     <form method="post" action="/admin/auth">
       <input name="type" type="hidden" value="github">
       <div class="field-grid">
@@ -1645,10 +1702,7 @@ export function adminAuthPage(user: AuthenticatedUser, methods: AuthMethodView[]
       </div>
       <div class="actions"><button type="submit">Add GitHub auth</button></div>
     </form>
-  </section>
-  <section class="panel">
-    <h2>Methods</h2>
-    <div class="summary-list">${rows}</div>
+    </section>
   </section>
   <script type="module">
     const updateSecretFields = (form) => {
@@ -2167,8 +2221,8 @@ export function hassleOffSafetyPage(user: AuthenticatedUser, view: HassleOffSafe
         </div>
       </section>`).join("")
     : `<p class="muted">No NeurOn capacity targets are configured.</p>`;
-  return layout("HassleOff safety", user, `<section class="panel">
-    <h1>HassleOff safety</h1>
+  return layout("HassleOff", user, `<section class="panel">
+    <h1>HassleOff</h1>
     <p class="muted">Controller-token requests are made by NeurOn on the server. The token is never sent to this page.</p>
     <div class="target-status-meta">${servicePills}</div>
     ${view.baseUrl ? `<p><strong>Controller URL:</strong> <code>${escapeHtml(view.baseUrl)}</code></p>` : `<p><strong>Controller URL:</strong> <span class="muted">Not configured</span></p>`}

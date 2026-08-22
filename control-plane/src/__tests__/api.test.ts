@@ -207,11 +207,11 @@ describe("model selection guidance", () => {
 });
 
 describe("maintenance mode", () => {
-  it("reports the active storage driver, blocks mutations, and avoids HassleOff status calls", async () => {
+  it("blocks capacity mutations, permits identity repairs, and avoids HassleOff status calls", async () => {
     process.env.USE_FAKE_PROVIDER = "true";
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
-    const { app } = await buildApp({
+    const { app, identityService } = await buildApp({
       ...config,
       maintenanceMode: true,
       adminUsers: ["actual"],
@@ -227,6 +227,11 @@ describe("maintenance mode", () => {
     const auth = { authorization: `Basic ${Buffer.from("actual:local-test-secret").toString("base64")}` };
     const health = await app.inject({ method: "GET", url: "/healthz" });
     const mutation = await app.inject({ method: "POST", url: "/api/reservations", headers: auth, payload: { modelIds: ["m1"] } });
+    const team = await app.inject({ method: "POST", url: "/api/admin/teams", headers: auth, payload: { name: "Maintenance administrators" } });
+    const users = await identityService.listUsers();
+    const source = users.find((user) => user.username === "other")!;
+    const target = users.find((user) => user.username === "actual")!;
+    const merge = await app.inject({ method: "POST", url: "/api/admin/users/merge", headers: auth, payload: { sourceUserId: source.id, targetUserId: target.id, confirm: "MERGE" } });
     const home = await app.inject({ method: "GET", url: "/", headers: auth });
     const hassleOff = await app.inject({ method: "GET", url: "/admin/hassleoff", headers: auth });
     await app.close();
@@ -234,6 +239,8 @@ describe("maintenance mode", () => {
 
     expect(health.json()).toEqual({ ok: true, storageDriver: "memory", maintenanceMode: true });
     expect(mutation.statusCode).toBe(503);
+    expect(team.statusCode).toBe(201);
+    expect(merge.statusCode).toBe(200);
     expect(home.statusCode).toBe(302);
     expect(home.headers.location).toBe("/welcome");
     expect(hassleOff.statusCode).toBe(200);
@@ -383,6 +390,43 @@ describe("API authentication context", () => {
       const targetProfiles = await app.inject({ method: "GET", url: "/api/reservation-profiles", headers: targetAuth });
       expect(targetProfiles.statusCode).toBe(200);
       expect(targetProfiles.json().reservationProfiles).toMatchObject([{ name: "Preserved profile", userId: targetUser.id }]);
+    } finally {
+      await app.close();
+    }
+  });
+
+  it("organizes accounts, invitations, authentication, and teams into focused admin screens", async () => {
+    process.env.USE_FAKE_PROVIDER = "true";
+    const { app } = await buildApp({ ...config, adminUsers: ["actual"] }, models);
+    const auth = { authorization: `Basic ${Buffer.from("actual:local-test-secret").toString("base64")}` };
+    try {
+      const accounts = await app.inject({ method: "GET", url: "/admin/users", headers: auth });
+      expect(accounts.statusCode).toBe(200);
+      expect(accounts.body).toContain("<h1>Accounts</h1>");
+      expect(accounts.body).toContain("Invite user");
+      expect(accounts.body).toContain("Invitations (");
+      expect(accounts.body).toContain("Merge users");
+      expect(accounts.body).toContain('href="/admin/teams">Teams</a>');
+      expect(accounts.body).toContain('href="/admin/hassleoff">HassleOff</a>');
+      expect(accounts.body).not.toContain("Users and teams");
+
+      const invitation = await app.inject({ method: "POST", url: "/admin/users/invitations", headers: { ...auth, "content-type": "application/x-www-form-urlencoded" }, payload: new URLSearchParams({ intendedUsername: "invitee", initialRoleId: "role_member", expiresInMinutes: "60" }).toString() });
+      expect(invitation.statusCode).toBe(200);
+      expect(invitation.body).toContain('href="/admin/users?tab=invitations" role="tab" aria-selected="true"');
+      expect(invitation.body).toContain("Copy registration link");
+
+      const createdTeam = await app.inject({ method: "POST", url: "/admin/teams", headers: { ...auth, "content-type": "application/x-www-form-urlencoded" }, payload: new URLSearchParams({ name: "Platform", description: "Platform users" }).toString() });
+      expect(createdTeam.statusCode).toBe(302);
+      const teams = await app.inject({ method: "GET", url: "/admin/teams", headers: auth });
+      expect(teams.statusCode).toBe(200);
+      expect(teams.body).toContain("<h1>Teams</h1>");
+      expect(teams.body).toContain("Platform users");
+      expect(teams.body).toContain("Create team");
+
+      const authentication = await app.inject({ method: "GET", url: "/admin/auth", headers: auth });
+      expect(authentication.body).toContain('href="/admin/auth?tab=methods"');
+      expect(authentication.body).toContain('href="/admin/auth?tab=oidc"');
+      expect(authentication.body).toContain('href="/admin/auth?tab=github"');
     } finally {
       await app.close();
     }
@@ -1310,7 +1354,7 @@ describe("HassleOff admin safety UI", () => {
     try {
       const page = await app.inject({ method: "GET", url: "/admin/hassleoff", headers: auth });
       expect(page.statusCode).toBe(200);
-      expect(page.body).toContain("HassleOff safety");
+      expect(page.body).toContain("<h1>HassleOff</h1>");
       expect(page.body).toContain("Last successful fail-safe test");
       expect(page.body).toContain("audit #76");
       expect(page.body).toContain(">Run fail-safe test</button>");

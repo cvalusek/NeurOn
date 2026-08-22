@@ -79,6 +79,14 @@ entire desired membership set first and replaces only that provider's OIDC-manag
 memberships in one database transaction. Manual memberships are untouched.
 Disabling or deleting an OIDC method clears memberships managed by that method.
 
+The administration UI separates **Accounts**, **Teams**, and
+**Authentication**. Accounts provides focused tabs for the account list,
+invitations, and duplicate-user merges; invitation creation opens from the
+account-list action. Authentication separates existing methods from the OIDC
+and GitHub creation forms. Teams has its own hierarchy and membership screen.
+These identity operations remain available in maintenance mode while every
+capacity-affecting mutation and lifecycle loop stays paused.
+
 ## Roles and teams
 
 Global roles supply permissions. Built-in roles are immutable and include:
