@@ -81,6 +81,33 @@ describe("shutdown coordinator", () => {
     await expect(harness.reservationService.extend(reservation.id, admin, 5)).rejects.toThrow("draining for restart");
     harness.coordinator.stop();
   });
+
+  it("uses the safe drain for maintenance and prepares state before shutdown", async () => {
+    vi.useFakeTimers();
+    const harness = createHarness();
+    const prepare = vi.fn(async () => undefined);
+
+    harness.coordinator.scheduleMaintenanceWhenSafe(admin.username, prepare);
+    await vi.advanceTimersByTimeAsync(1_000);
+
+    expect(prepare).toHaveBeenCalledOnce();
+    expect(prepare.mock.invocationCallOrder[0]).toBeLessThan(harness.requestShutdown.mock.invocationCallOrder[0]);
+    expect(harness.requestShutdown).toHaveBeenCalledWith("enter-maintenance");
+    expect(await harness.coordinator.status()).toMatchObject({ purpose: "enter-maintenance", mode: "shutting-down" });
+  });
+
+  it("restarts immediately when leaving maintenance after preparing normal mode", async () => {
+    vi.useFakeTimers();
+    const harness = createHarness();
+    const prepare = vi.fn(async () => undefined);
+
+    harness.coordinator.resumeNormalOperation(admin.username, prepare);
+    await vi.advanceTimersByTimeAsync(600);
+
+    expect(prepare).toHaveBeenCalledOnce();
+    expect(harness.requestShutdown).toHaveBeenCalledWith("resume-normal-operation");
+    expect(await harness.coordinator.status()).toMatchObject({ purpose: "resume-normal", mode: "shutting-down" });
+  });
 });
 
 function createHarness() {

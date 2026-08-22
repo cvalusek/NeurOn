@@ -192,11 +192,14 @@ export interface ReservationProfileSelection {
   modelIds: string[];
 }
 
+export type ReservationProfileSharing = "personal" | "everyone" | "team";
+
 export interface ReservationProfile {
   id: string;
   userId: string;
   username: string;
-  /** Optional sharing scope. The durable user remains the creator/audit owner. */
+  /** The durable user remains the creator/audit owner for every sharing scope. */
+  sharingScope: ReservationProfileSharing;
   teamId?: string;
   name: string;
   description?: string;
@@ -644,6 +647,15 @@ export interface AppConfig {
   updates?: UpdateCheckConfig;
   hassleOff?: HassleOffClientConfig;
   maintenanceMode?: boolean;
+  maintenanceControl?: {
+    statePath: string;
+    configuredMode: boolean;
+    forced: boolean;
+    overrideMode?: boolean;
+    updatedAt?: string;
+    updatedBy?: string;
+    stateError?: string;
+  };
   storageOperationLockPath?: string;
 }
 

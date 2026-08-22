@@ -119,6 +119,10 @@ describe("model selection guidance", () => {
       expect(assistantPage.body).toContain("Keepalive");
       expect(assistantPage.body).toContain("Additional system guidance");
       expect(assistantPage.body).toContain("Use our internal team terminology.");
+      expect(assistantPage.body).toContain('data-assistant-timeout="90"');
+      expect(assistantPage.body).toContain("Warm-model response timeout");
+      expect(assistantPage.body).toContain("data-assistant-config-toast");
+      expect(assistantPage.body).not.toContain("data-assistant-config-status");
       expect(modelPage.body).toContain("Confirm save profile");
       expect(modelPage.body).toContain("Confirm start reservation");
 
@@ -133,6 +137,7 @@ describe("model selection guidance", () => {
     process.env.USE_FAKE_PROVIDER = "true";
     const { app } = await buildApp({
       ...config,
+      litellmApiBaseUrl: "https://litellm.example.test/v1",
       capacityTargets: [{
         ...config.capacityTargets[0],
         aliasPriority: 10,
@@ -252,6 +257,47 @@ describe("maintenance mode", () => {
     expect(home.body).toContain("Maintenance profile");
     expect(hassleOff.statusCode).toBe(200);
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("lets a system administrator request a coherent return to normal operation", async () => {
+    process.env.USE_FAKE_PROVIDER = "true";
+    const requestShutdown = vi.fn(async () => undefined);
+    const { app } = await buildApp({
+      ...config,
+      maintenanceMode: true,
+      adminUsers: ["actual"]
+    }, models, { requestShutdown });
+    const auth = { authorization: `Basic ${Buffer.from("actual:local-test-secret").toString("base64")}` };
+    try {
+      const page = await app.inject({ method: "GET", url: "/admin/updates", headers: auth });
+      expect(page.statusCode).toBe(200);
+      expect(page.body).toContain("Resume normal operation");
+
+      const rejected = await app.inject({
+        method: "POST",
+        url: "/admin/updates/maintenance/resume",
+        headers: { ...auth, "content-type": "application/x-www-form-urlencoded" },
+        payload: new URLSearchParams({ confirm: "no" }).toString()
+      });
+      expect(rejected.headers.location).toContain("Type%20RESUME%20to%20confirm");
+
+      const resumed = await app.inject({
+        method: "POST",
+        url: "/admin/updates/maintenance/resume",
+        headers: { ...auth, "content-type": "application/x-www-form-urlencoded" },
+        payload: new URLSearchParams({ confirm: "RESUME" }).toString()
+      });
+      expect(resumed.statusCode).toBe(302);
+      await new Promise((resolve) => setTimeout(resolve, 600));
+      expect(requestShutdown).toHaveBeenCalledWith("resume-normal-operation");
+      const status = await app.inject({ method: "GET", url: "/api/admin/update-status", headers: auth });
+      expect(status.json()).toMatchObject({
+        maintenance: { effectiveMode: true, overrideMode: false, restartRequired: true },
+        shutdown: { purpose: "resume-normal", mode: "shutting-down" }
+      });
+    } finally {
+      await app.close();
+    }
   });
 });
 
@@ -421,6 +467,8 @@ describe("API authentication context", () => {
       expect(invitation.statusCode).toBe(200);
       expect(invitation.body).toContain('href="/admin/users?tab=invitations" role="tab" aria-selected="true"');
       expect(invitation.body).toContain("Copy registration link");
+      expect(invitation.body).toContain("data-registration-url");
+      expect(invitation.body).toContain("Copy was blocked. The link is selected");
 
       const createdTeam = await app.inject({ method: "POST", url: "/admin/teams", headers: { ...auth, "content-type": "application/x-www-form-urlencoded" }, payload: new URLSearchParams({ name: "Platform", description: "Platform users" }).toString() });
       expect(createdTeam.statusCode).toBe(302);
@@ -429,6 +477,7 @@ describe("API authentication context", () => {
       expect(teams.body).toContain("<h1>Teams</h1>");
       expect(teams.body).toContain("Platform users");
       expect(teams.body).toContain("Create team");
+      expect(teams.body).toContain('class="subsection-divider"><h3>Add member</h3>');
 
       const authentication = await app.inject({ method: "GET", url: "/admin/auth", headers: auth });
       expect(authentication.body).toContain('href="/admin/auth?tab=methods"');
@@ -543,8 +592,10 @@ describe("API authentication context", () => {
       const editor = await app.inject({ method: "GET", url: "/profiles/new", headers: ownerAuth });
       expect(editor.statusCode).toBe(200);
       expect(editor.body).toContain('class="button secondary" href="/profiles">← Back to profiles</a>');
-      expect(editor.body).toContain("Who can use this profile");
-      expect(editor.body).toContain(`value="${team.id}"`);
+      expect(editor.body).toContain('class="profile-audience"');
+      expect(editor.body).toContain("Audience");
+      expect(editor.body).toContain("Everyone");
+      expect(editor.body).toContain(`value="team:${team.id}"`);
       expect(editor.body).toContain("Team: Platform");
 
       const created = await app.inject({ method: "POST", url: "/api/reservation-profiles", headers: ownerAuth, payload: { teamId: team.id, name: "Shared coding", selections: [{ targetId: "t1", modelIds: ["m1"] }] } });
@@ -555,6 +606,14 @@ describe("API authentication context", () => {
       const memberPage = await app.inject({ method: "GET", url: "/profiles", headers: memberAuth });
       expect(memberPage.body).toContain("Team: Platform");
       expect(memberPage.body).not.toContain(`/profiles/${created.json().id}/edit`);
+      const memberEditor = await app.inject({ method: "GET", url: "/profiles/new", headers: memberAuth });
+      expect(memberEditor.body).toContain(`value="team:${team.id}"`);
+      const memberShared = await app.inject({ method: "POST", url: "/api/reservation-profiles", headers: memberAuth, payload: { sharingScope: "team", teamId: team.id, name: "Member shared", selections: [{ targetId: "t1", modelIds: ["m1"] }] } });
+      expect(memberShared.statusCode).toBe(201);
+      expect(memberShared.json()).toMatchObject({ userId: member.id, sharingScope: "team", teamId: team.id });
+      const everyone = await app.inject({ method: "POST", url: "/api/reservation-profiles", headers: ownerAuth, payload: { sharingScope: "everyone", name: "For everyone", selections: [{ targetId: "t1", modelIds: ["m1"] }] } });
+      expect(everyone.statusCode).toBe(201);
+      expect((await app.inject({ method: "GET", url: "/api/reservation-profiles", headers: memberAuth })).json().reservationProfiles).toEqual(expect.arrayContaining([expect.objectContaining({ id: everyone.json().id, sharingScope: "everyone" })]));
       const reservation = await app.inject({ method: "POST", url: "/api/reservations", headers: memberAuth, payload: { profileId: created.json().id, durationMinutes: 5 } });
       expect(reservation.statusCode).toBe(201);
       expect(reservation.json()).toMatchObject({ profileId: created.json().id, username: "other" });
@@ -619,8 +678,12 @@ describe("API authentication context", () => {
     expect(newPage.statusCode).toBe(200);
     expect(newPage.body).toContain("New reservation profile");
     expect(newPage.body).toContain('class="button secondary" href="/profiles">← Back to profiles</a>');
-    expect(newPage.body).toContain("Who can use this profile");
+    expect(newPage.body).toContain('class="profile-audience"');
+    expect(newPage.body).toContain("Audience");
+    expect(newPage.body).toContain("Everyone");
     expect(newPage.body).toContain("Only me");
+    expect(newPage.body).toContain('class="profile-save-bar"');
+    expect(newPage.body).toContain('id="profile-save-review-modal"');
     expect(newPage.body).toContain('name="returnTo" value="/profiles"');
     expect(onboardingPage.body).toContain('name="returnTo" value="/"');
     expect(editPage.statusCode).toBe(200);
@@ -647,6 +710,7 @@ describe("API authentication context", () => {
       headers: auth,
       payload: {
         name: "Profiles page profile",
+        profileAudience: "everyone",
         targetId: "t1",
         modelIds: "m1",
         defaultDurationMinutes: 15,
@@ -660,6 +724,7 @@ describe("API authentication context", () => {
     expect(response.statusCode).toBe(302);
     expect(response.headers.location).toBe("/profiles");
     expect(page.body).toContain("Profiles page profile");
+    expect(page.body).toContain("Everyone");
   });
 
   it("keeps direct reservation creation working without a reservation profile", async () => {
@@ -667,6 +732,7 @@ describe("API authentication context", () => {
     const routingModels: ModelDefinition[] = [{ ...models[0], aliases: ["fast"], backendModelIds: ["llama-m1"] }];
     const { app } = await buildApp({
       ...config,
+      litellmApiBaseUrl: "https://litellm.example.test/v1",
       capacityTargets: [{
         ...config.capacityTargets[0],
         apiUrl: "https://runtime.example.test/models/v1?ignored=1",
@@ -702,7 +768,11 @@ describe("API authentication context", () => {
     expect(page.body).toContain("setInterval(updateReservationTime, 1000)");
     expect(page.body).toContain("String(seconds).padStart(2, '0')");
     expect(page.body).toContain("Connect to your models");
-    expect(page.body).toContain("LiteLLM");
+    expect(page.body).toContain("LiteLLM gateway");
+    expect(page.body).toContain("Direct model host");
+    expect(page.body).toContain("Open LiteLLM playground");
+    expect(page.body).toContain("https://litellm.example.test/ui/");
+    expect(page.body).toContain("Client configuration");
     expect(page.body).toContain("fast");
     expect(page.body).toContain("t1/fast");
     expect(page.body).toContain("llama-m1");

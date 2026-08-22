@@ -10,7 +10,7 @@ NeurOn supports one control-plane database owner at a time. Never run SQLite
 and PostgreSQL application writers concurrently. HassleOff owns a separate
 SQLite database; this procedure does not read, stop, migrate, or restart it.
 
-PostgreSQL schema version 7 is managed by the transactional
+PostgreSQL schema version 8 is managed by the transactional
 `neuron_schema_migrations` ledger. The application uses one bounded shared pool
 for all repositories. The explicit transfer command records a completed source
 identity in `neuron_data_migrations`; an exact rerun verifies and exits as a
@@ -28,14 +28,16 @@ membership automation, invitations, LiteLLM subject links, audit events, stable
 ownership foreign keys, and target audiences. Legacy usernames are backfilled
 without changing owned record IDs; every backfilled user receives Member and
 is never implicitly promoted to Owner. Version 7 adds an optional team foreign
-key to reservation profiles; all existing profiles remain personal.
+key to reservation profiles. Version 8 adds the explicit `personal`, `everyone`,
+or `team` scope, backfills assigned profiles as team-shared, and leaves every
+other existing profile personal.
 
 The explicit SQLite transfer contract is source schema version 4. It includes
 all identity entities and ownership links when present, accepts legacy
 pre-identity databases for safe backfill, validates target-selection JSON, and
 includes every transferred value in privacy-safe semantic fingerprints. The
 startup validator permits only columns owned by known migrations, so an older
-supported PostgreSQL deployment upgrades through version 7 automatically
+supported PostgreSQL deployment upgrades through version 8 automatically
 without operator SQL.
 
 ## Durable scope
@@ -43,7 +45,7 @@ without operator SQL.
 The command transfers:
 
 1. reservations and reservation profiles, including stable owner IDs, optional
-   team sharing, and target-specific selection snapshots;
+   personal/everyone/team sharing, and target-specific selection snapshots;
 2. hashed API keys and all local/GitHub/OIDC authentication methods;
 3. provider definitions, target definitions and audiences, provisioning jobs,
    and target model-discovery records;
@@ -158,7 +160,7 @@ HassleOff status calls, and capacity-affecting HTTP/MCP routes. Identity
 administration remains available for validating and repairing account links:
 
 ```powershell
-docker compose -f docker-compose.yml -f docker-compose.postgres.yml -f docker-compose.maintenance.yml up -d neuron
+docker compose -f docker-compose.yml -f docker-compose.postgres.yml -f docker-compose.maintenance-forced.yml up -d neuron
 ```
 
 `GET /healthz` must report `ok: true`, `storageDriver: postgres`, and
@@ -166,8 +168,8 @@ docker compose -f docker-compose.yml -f docker-compose.postgres.yml -f docker-co
 output, restart NeurOn once with the same three files, and verify the same
 records again. This proves PostgreSQL persistence without contacting capacity.
 
-Remove the maintenance overlay only during an explicitly approved return to
-normal provider reconciliation. The normal PostgreSQL command is:
+Remove the forced-maintenance overlay only during an explicitly approved return
+to normal provider reconciliation. The normal PostgreSQL command is:
 
 ```powershell
 docker compose -f docker-compose.yml -f docker-compose.postgres.yml up -d neuron
@@ -182,7 +184,7 @@ start SQLite in maintenance mode. In PowerShell:
 ```powershell
 docker compose -f docker-compose.yml -f docker-compose.postgres.yml stop neuron
 $env:SQLITE_ROLLBACK_PATH="/app/data/backups/neuron-sqlite-rollback-<timestamp>.db"
-docker compose -f docker-compose.yml -f docker-compose.maintenance.yml -f docker-compose.sqlite-rollback.yml up -d neuron
+docker compose -f docker-compose.yml -f docker-compose.maintenance-forced.yml -f docker-compose.sqlite-rollback.yml up -d neuron
 ```
 
 Verify `/healthz` reports `storageDriver: sqlite` and compare read-only counts.

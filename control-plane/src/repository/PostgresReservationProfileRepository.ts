@@ -1,12 +1,13 @@
 import { nanoid } from "nanoid";
 import pg from "pg";
 import type { ReservationProfileRepository } from "../domain/interfaces.js";
-import type { ReservationProfile, ReservationProfileSelection } from "../domain/types.js";
+import type { ReservationProfile, ReservationProfileSelection, ReservationProfileSharing } from "../domain/types.js";
 
 interface ReservationProfileRow {
   id: string;
   user_id: string;
   username: string;
+  sharing_scope: ReservationProfileSharing;
   team_id: string | null;
   name: string;
   description: string | null;
@@ -24,14 +25,14 @@ export class PostgresReservationProfileRepository implements ReservationProfileR
     this.pool = pool;
   }
 
-  async create(input: Omit<ReservationProfile, "id" | "createdAt" | "updatedAt"> & { id?: string; createdAt?: Date; updatedAt?: Date }): Promise<ReservationProfile> {
+  async create(input: Omit<ReservationProfile, "id" | "createdAt" | "updatedAt" | "sharingScope"> & { sharingScope?: ReservationProfile["sharingScope"]; id?: string; createdAt?: Date; updatedAt?: Date }): Promise<ReservationProfile> {
     const now = new Date();
-    const profile = { ...input, id: input.id ?? nanoid(12), createdAt: input.createdAt ?? now, updatedAt: input.updatedAt ?? now };
+    const profile: ReservationProfile = { ...input, sharingScope: input.sharingScope ?? (input.teamId ? "team" : "personal"), id: input.id ?? nanoid(12), createdAt: input.createdAt ?? now, updatedAt: input.updatedAt ?? now };
     await this.pool.query(
       `insert into reservation_profiles (
-        id, user_id, username, team_id, name, description, selections, default_duration_minutes,
+        id, user_id, username, sharing_scope, team_id, name, description, selections, default_duration_minutes,
         default_keepalive_minutes, created_at, updated_at
-      ) values ($1, $2, $3, $4, $5, $6, $7::jsonb, $8, $9, $10, $11)`,
+      ) values ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9, $10, $11, $12)`,
       toSqlValues(profile)
     );
     return cloneProfile(profile);
@@ -57,14 +58,15 @@ export class PostgresReservationProfileRepository implements ReservationProfileR
       `update reservation_profiles set
         user_id = $2,
         username = $3,
-        team_id = $4,
-        name = $5,
-        description = $6,
-        selections = $7::jsonb,
-        default_duration_minutes = $8,
-        default_keepalive_minutes = $9,
-        created_at = $10,
-        updated_at = $11
+        sharing_scope = $4,
+        team_id = $5,
+        name = $6,
+        description = $7,
+        selections = $8::jsonb,
+        default_duration_minutes = $9,
+        default_keepalive_minutes = $10,
+        created_at = $11,
+        updated_at = $12
       where id = $1`,
       toSqlValues({ ...input, id })
     );
@@ -88,6 +90,7 @@ function toSqlValues(profile: ReservationProfile): unknown[] {
     profile.id,
     profile.userId,
     profile.username,
+    profile.sharingScope,
     profile.teamId ?? null,
     profile.name,
     profile.description ?? null,
@@ -105,6 +108,7 @@ function fromRow(row: ReservationProfileRow): ReservationProfile {
     id: row.id,
     userId: row.user_id,
     username: row.username,
+    sharingScope: row.sharing_scope,
     teamId: row.team_id ?? undefined,
     name: row.name,
     description: row.description ?? undefined,

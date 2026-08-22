@@ -5,9 +5,9 @@ import type { ReservationProfile } from "../domain/types.js";
 export class InMemoryReservationProfileRepository implements ReservationProfileRepository {
   private readonly profiles = new Map<string, ReservationProfile>();
 
-  async create(input: Omit<ReservationProfile, "id" | "createdAt" | "updatedAt"> & { id?: string; createdAt?: Date; updatedAt?: Date }): Promise<ReservationProfile> {
+  async create(input: Omit<ReservationProfile, "id" | "createdAt" | "updatedAt" | "sharingScope"> & { sharingScope?: ReservationProfile["sharingScope"]; id?: string; createdAt?: Date; updatedAt?: Date }): Promise<ReservationProfile> {
     const now = new Date();
-    const profile = { ...input, id: input.id ?? nanoid(12), createdAt: input.createdAt ?? now, updatedAt: input.updatedAt ?? now };
+    const profile: ReservationProfile = { ...input, sharingScope: input.sharingScope ?? (input.teamId ? "team" : "personal"), id: input.id ?? nanoid(12), createdAt: input.createdAt ?? now, updatedAt: input.updatedAt ?? now };
     this.profiles.set(profile.id, cloneProfile(profile));
     return cloneProfile(profile);
   }

@@ -47,6 +47,7 @@ import { TargetService } from "./services/TargetService.js";
 import { TrafficKeepaliveService } from "./services/TrafficKeepaliveService.js";
 import { TrafficPoller } from "./services/TrafficPoller.js";
 import { ShutdownCoordinator } from "./services/ShutdownCoordinator.js";
+import { MaintenanceControl } from "./services/MaintenanceControl.js";
 import { UpdateChecker } from "./services/UpdateChecker.js";
 import { HassleOffCapacityProvider } from "./safety/HassleOffCapacityProvider.js";
 import { HassleOffClient } from "./safety/HassleOffClient.js";
@@ -55,10 +56,13 @@ export interface BuildAppOptions {
   requestShutdown?: (reason: string) => void | Promise<void>;
   /** Programmatic test/documentation fixture only. Production bootstrapping uses the explicit users command. */
   developmentLocalAccounts?: Array<{ username: string; password: string; owner?: boolean }>;
+  maintenanceControl?: MaintenanceControl;
 }
 
 export async function buildApp(config: AppConfig, models: ModelDefinition[], options: BuildAppOptions = {}) {
   const app = Fastify({ logger: true });
+  const maintenanceControl = options.maintenanceControl
+    ?? (config.maintenanceControl ? MaintenanceControl.fromConfig(config) : MaintenanceControl.transient(Boolean(config.maintenanceMode)));
   const reservationRepository = await createReservationRepository(config.storage);
   const identityService = new IdentityService(reservationRepository.identities, reservationRepository.reservationProfiles);
   await identityService.initialize(config.adminUsers);
@@ -328,7 +332,8 @@ export async function buildApp(config: AppConfig, models: ModelDefinition[], opt
     profileAdvisor,
     modelFavorites,
     usageAnalytics,
-    identityService
+    identityService,
+    maintenanceControl
   );
 
   const bootstrapRuntimeModels = async (): Promise<StartupRuntimeModelDiscoveryOutcome[]> => {
@@ -362,7 +367,7 @@ export async function buildApp(config: AppConfig, models: ModelDefinition[], opt
     return outcomes;
   };
 
-  return { app, reconciler, trafficPoller, bootstrapRuntimeModels, runtimeModelDiscovery, targetOperations, updateChecker, shutdownCoordinator, identityService, authProvider };
+  return { app, reconciler, trafficPoller, bootstrapRuntimeModels, runtimeModelDiscovery, targetOperations, updateChecker, shutdownCoordinator, identityService, authProvider, maintenanceControl };
 }
 
 function mutationSafeInMaintenance(url: string): boolean {
@@ -374,6 +379,8 @@ function mutationSafeInMaintenance(url: string): boolean {
     "/admin/roles",
     "/admin/teams",
     "/admin/auth",
+    "/admin/updates/check",
+    "/admin/updates/maintenance",
     "/api/reservation-profiles",
     "/api/admin/users",
     "/api/admin/roles",

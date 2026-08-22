@@ -3,12 +3,13 @@ import { mkdirSync } from "node:fs";
 import path from "node:path";
 import { nanoid } from "nanoid";
 import type { ReservationProfileRepository } from "../domain/interfaces.js";
-import type { ReservationProfile, ReservationProfileSelection } from "../domain/types.js";
+import type { ReservationProfile, ReservationProfileSelection, ReservationProfileSharing } from "../domain/types.js";
 
 interface ReservationProfileRow {
   id: string;
   user_id: string;
   username: string;
+  sharing_scope: ReservationProfileSharing;
   team_id: string | null;
   name: string;
   description: string | null;
@@ -30,15 +31,15 @@ export class SqliteReservationProfileRepository implements ReservationProfileRep
     this.migrate();
   }
 
-  async create(input: Omit<ReservationProfile, "id" | "createdAt" | "updatedAt"> & { id?: string; createdAt?: Date; updatedAt?: Date }): Promise<ReservationProfile> {
+  async create(input: Omit<ReservationProfile, "id" | "createdAt" | "updatedAt" | "sharingScope"> & { sharingScope?: ReservationProfile["sharingScope"]; id?: string; createdAt?: Date; updatedAt?: Date }): Promise<ReservationProfile> {
     const now = new Date();
-    const profile = { ...input, id: input.id ?? nanoid(12), createdAt: input.createdAt ?? now, updatedAt: input.updatedAt ?? now };
+    const profile: ReservationProfile = { ...input, sharingScope: input.sharingScope ?? (input.teamId ? "team" : "personal"), id: input.id ?? nanoid(12), createdAt: input.createdAt ?? now, updatedAt: input.updatedAt ?? now };
     this.db.prepare(
       `insert into reservation_profiles (
-        id, user_id, username, team_id, name, description, selections, default_duration_minutes,
+        id, user_id, username, sharing_scope, team_id, name, description, selections, default_duration_minutes,
         default_keepalive_minutes, created_at, updated_at
       ) values (
-        @id, @userId, @username, @teamId, @name, @description, @selections, @defaultDurationMinutes,
+        @id, @userId, @username, @sharingScope, @teamId, @name, @description, @selections, @defaultDurationMinutes,
         @defaultKeepaliveMinutes, @createdAt, @updatedAt
       )`
     ).run(toSqlParams(profile));
@@ -65,6 +66,7 @@ export class SqliteReservationProfileRepository implements ReservationProfileRep
       `update reservation_profiles set
         user_id = @userId,
         username = @username,
+        sharing_scope = @sharingScope,
         team_id = @teamId,
         name = @name,
         description = @description,
@@ -97,6 +99,7 @@ export class SqliteReservationProfileRepository implements ReservationProfileRep
         id text primary key,
         user_id text,
         username text not null,
+        sharing_scope text not null default 'personal' check (sharing_scope in ('personal','everyone','team')),
         team_id text,
         name text not null,
         description text,
@@ -113,6 +116,8 @@ export class SqliteReservationProfileRepository implements ReservationProfileRep
     const columns = this.db.prepare("pragma table_info(reservation_profiles)").all() as Array<{ name: string }>;
     if (!columns.some((column) => column.name === "user_id")) this.db.exec("alter table reservation_profiles add column user_id text");
     if (!columns.some((column) => column.name === "team_id")) this.db.exec("alter table reservation_profiles add column team_id text");
+    if (!columns.some((column) => column.name === "sharing_scope")) this.db.exec("alter table reservation_profiles add column sharing_scope text not null default 'personal'");
+    this.db.exec("update reservation_profiles set sharing_scope='team' where team_id is not null and sharing_scope='personal'");
     this.db.exec("create index if not exists idx_reservation_profiles_team on reservation_profiles(team_id, name)");
   }
 }
@@ -122,6 +127,7 @@ function toSqlParams(profile: ReservationProfile) {
     id: profile.id,
     userId: profile.userId,
     username: profile.username,
+    sharingScope: profile.sharingScope,
     teamId: profile.teamId ?? null,
     name: profile.name,
     description: profile.description ?? null,
@@ -138,6 +144,7 @@ function fromRow(row: ReservationProfileRow): ReservationProfile {
     id: row.id,
     userId: row.user_id,
     username: row.username,
+    sharingScope: row.sharing_scope,
     teamId: row.team_id ?? undefined,
     name: row.name,
     description: row.description ?? undefined,

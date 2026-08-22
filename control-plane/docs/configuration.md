@@ -138,6 +138,8 @@ RUNTIME_PROFILES_JSON=[{"id":"prefer-nightly","name":"PreFer Nightly","type":"do
 - `DATABASE_URL`
 - `POSTGRES_POOL_MAX`
 - `CONTROL_PLANE_MAINTENANCE_MODE`
+- `CONTROL_PLANE_FORCE_MAINTENANCE_MODE`
+- `CONTROL_PLANE_MAINTENANCE_STATE_PATH`
 - `STORAGE_OPERATION_LOCK_PATH`
 - `AWS_REGION`
 - `LITELLM_API_BASE_URL`
@@ -195,7 +197,7 @@ Use Postgres when the control plane should use external database storage:
 
 ```env
 STORAGE_DRIVER=postgres
-DATABASE_URL=postgres://neuron:secret@postgres:5432/neuron
+DATABASE_URL=<PostgreSQL connection URL generated for this deployment>
 POSTGRES_POOL_MAX=10
 ```
 
@@ -206,9 +208,9 @@ providers, persisted targets, target provisioning jobs, target model discovery
 results, model capability/deployment metadata, user model favorites, target
 activations, reservation cost allocation records, and the singleton Assistant
 configuration across NeurOn restarts. Durable users own real reservations,
-personal profiles, API keys, and favorites by ID and remain the creator/audit
-owner when an optional team ID shares a profile; provider usernames remain
-identity attributes rather than ownership keys.
+profiles, API keys, and favorites by ID and remain the creator/audit owner when
+an `everyone` scope or optional team ID shares a profile; provider usernames
+remain identity attributes rather than ownership keys.
 Target status and startup estimates remain in memory because they are
 observational and rebuilt by reconciliation.
 
@@ -219,13 +221,28 @@ SQLite rows. Follow the explicit [SQLite to PostgreSQL migration](postgres-migra
 procedure, which retains a consistent rollback backup and enforces one
 production database writer.
 
-`CONTROL_PLANE_MAINTENANCE_MODE=true` disables capacity-affecting HTTP/MCP
-routes, the reconciler, LiteLLM traffic polling, startup discovery/provider
-sync, and HassleOff status calls for storage verification. Account, invitation,
-role, team, external-user-link, and authentication administration remains
-available because those operations do not invoke providers or reconciliation.
-Personal and team profile editing also remains available; starting or changing a
-reservation from a profile stays blocked.
+Maintenance disables capacity-affecting HTTP/MCP routes, the reconciler,
+LiteLLM traffic polling, startup discovery/provider sync, and HassleOff status
+calls. Account, invitation, role, team, external-user-link, authentication, and
+profile administration remain available because those operations do not invoke
+providers or reconciliation; starting or changing a reservation remains
+blocked.
+
+`CONTROL_PLANE_MAINTENANCE_MODE=true` is the initial/default choice when there
+is no stored administrator choice. System administrators can enter maintenance
+through the safe drain, or leave it, from **Admin > Updates**. The requested
+choice is stored atomically in `CONTROL_PLANE_MAINTENANCE_STATE_PATH` (by
+default `neuron-maintenance.json` next to the storage-operation lock), then
+takes effect through a coherent application restart. This small operational
+record is independent of the selected SQLite/PostgreSQL application database so
+it remains available during a storage cutover.
+
+Set `CONTROL_PLANE_FORCE_MAINTENANCE_MODE=true` for a protected storage
+operation that application administrators must not be able to dismiss. A
+forced gate takes precedence over both the default and stored choice. An
+invalid maintenance-control file fails closed in maintenance and can be
+repaired by an administrator through the Updates screen unless the deployment
+gate is forced.
 `STORAGE_OPERATION_LOCK_PATH` defaults to `data/neuron-storage.lock`; the
 application and migration command use the same exclusive lock.
 

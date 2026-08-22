@@ -15,6 +15,7 @@ import type { ModelFavoriteService } from "../services/ModelFavoriteService.js";
 import type { UsageAnalyticsService } from "../services/UsageAnalyticsService.js";
 import type { ProfileAdvisorService } from "../services/ProfileAdvisorService.js";
 import type { IdentityService } from "../services/IdentityService.js";
+import type { MaintenanceControl } from "../services/MaintenanceControl.js";
 import { ProviderService } from "../services/ProviderService.js";
 import { ReservationService } from "../services/ReservationService.js";
 import { ReservationProfileService } from "../services/ReservationProfileService.js";
@@ -48,7 +49,8 @@ export function registerUiRoutes(
   profileAdvisor: ProfileAdvisorService,
   modelFavorites: ModelFavoriteService,
   usageAnalytics: UsageAnalyticsService,
-  identityService: IdentityService
+  identityService: IdentityService,
+  maintenanceControl: MaintenanceControl
 ) {
   const localLoginAttempts = new Map<string, { failures: number; resetAt: number }>();
   const recordLocalLoginFailure = (attemptKey: string, now: number) => {
@@ -201,7 +203,7 @@ export function registerUiRoutes(
     if (profiles.length === 0 && (await reservationService.listActiveOwned(user)).length === 0) return reply.redirect("/welcome");
     const targets = (await visibleTargetsFor(user)).map((target) => ({ target, models: catalog.listModelsForTarget(target.id) }));
     const costEstimates = await startCostEstimates(targets.map(({ target }) => target), costEstimation);
-    return reply.type("text/html").send(startPage(user, targets, profiles, query.error, costEstimates, config.adminStatusPollSeconds, await selectionDeploymentsForUser(user, costEstimates), await reservationProfileService.listAssignableTeams(user)));
+    return reply.type("text/html").send(startPage(user, targets, profiles, query.error, costEstimates, config.adminStatusPollSeconds, await selectionDeploymentsForUser(user, costEstimates), await reservationProfileService.listAssignableTeams(user), config.litellmApiBaseUrl));
   });
   app.get("/welcome", async (request, reply) => {
     const user = requireUser(request);
@@ -289,7 +291,9 @@ export function registerUiRoutes(
         .object({
           name: z.string().min(1),
           description: z.string().optional(),
+          sharingScope: z.enum(["personal", "everyone", "team"]).optional(),
           teamId: z.string().optional(),
+          profileAudience: z.string().optional(),
           modelIds: z.union([z.string(), z.array(z.string())]).optional(),
           targetId: z.string().optional(),
           selectionTargetIds: z.union([z.string(), z.array(z.string())]).optional(),
@@ -300,10 +304,11 @@ export function registerUiRoutes(
         })
         .parse(request.body);
       const selections = profileSelectionsFromForm(raw);
+      const sharing = profileSharingFromForm(raw);
       await reservationProfileService.createForUser(requireUser(request), {
         name: raw.name,
         description: raw.description,
-        teamId: raw.teamId || undefined,
+        ...sharing,
         selections,
         defaultDurationMinutes: raw.defaultDurationMinutes,
         defaultKeepaliveMinutes: raw.defaultKeepaliveMinutes
@@ -319,7 +324,7 @@ export function registerUiRoutes(
     const { id } = z.object({ id: z.string() }).parse(request.params);
     try {
       const raw = z.object({
-        name: z.string().min(1), description: z.string().optional(), teamId: z.string().optional(),
+        name: z.string().min(1), description: z.string().optional(), sharingScope: z.enum(["personal", "everyone", "team"]).optional(), teamId: z.string().optional(), profileAudience: z.string().optional(),
         modelIds: z.union([z.string(), z.array(z.string())]).optional(), targetId: z.string().optional(),
         selectionTargetIds: z.union([z.string(), z.array(z.string())]).optional(),
         selectionModels: z.union([z.string(), z.array(z.string())]).optional(),
@@ -327,7 +332,7 @@ export function registerUiRoutes(
         defaultDurationMinutes: z.coerce.number().optional(), defaultKeepaliveMinutes: z.coerce.number().optional()
       }).parse(request.body);
       await reservationProfileService.updateForUser(id, requireUser(request), {
-        name: raw.name, description: raw.description, teamId: raw.teamId || undefined, selections: profileSelectionsFromForm(raw),
+        name: raw.name, description: raw.description, ...profileSharingFromForm(raw), selections: profileSelectionsFromForm(raw),
         defaultDurationMinutes: raw.defaultDurationMinutes, defaultKeepaliveMinutes: raw.defaultKeepaliveMinutes
       });
       return reply.redirect(raw.returnTo);
@@ -591,6 +596,7 @@ export function registerUiRoutes(
   app.get("/api/admin/update-status", async () => ({
     update: await updateChecker.check(),
     shutdown: await shutdownCoordinator.status(),
+    maintenance: maintenanceControl.status(),
     safety: updateSafetySummary(config, catalog)
   }));
   app.get("/admin/updates", async (request, reply) => {
@@ -599,6 +605,7 @@ export function registerUiRoutes(
       requireUser(request),
       await updateChecker.check(),
       await shutdownCoordinator.status(),
+      maintenanceControl.status(),
       updateSafetySummary(config, catalog),
       query.error,
       query.success
@@ -607,6 +614,34 @@ export function registerUiRoutes(
   app.post("/admin/updates/check", async (_request, reply) => {
     await updateChecker.check(true);
     return reply.redirect("/admin/updates");
+  });
+  app.post("/admin/updates/maintenance/enter", async (request, reply) => {
+    try {
+      const user = requireUser(request);
+      const { confirm } = z.object({ confirm: z.string() }).parse(request.body ?? {});
+      if (confirm !== "MAINTENANCE") throw new Error("Type MAINTENANCE to confirm");
+      if (maintenanceControl.status().effectiveMode) throw new Error("NeurOn is already in maintenance mode");
+      shutdownCoordinator.scheduleMaintenanceWhenSafe(user.username, async () => {
+        await maintenanceControl.requestMode(true, user.username);
+      });
+      return reply.redirect("/admin/updates?success=Maintenance%20mode%20scheduled%20through%20the%20safe%20drain");
+    } catch (error) {
+      return reply.redirect(`/admin/updates?error=${encodeURIComponent(error instanceof Error ? error.message : String(error))}`);
+    }
+  });
+  app.post("/admin/updates/maintenance/resume", async (request, reply) => {
+    try {
+      const user = requireUser(request);
+      const { confirm } = z.object({ confirm: z.string() }).parse(request.body ?? {});
+      if (confirm !== "RESUME") throw new Error("Type RESUME to confirm");
+      if (!maintenanceControl.status().effectiveMode) throw new Error("NeurOn is already in normal operation");
+      shutdownCoordinator.resumeNormalOperation(user.username, async () => {
+        await maintenanceControl.requestMode(false, user.username);
+      });
+      return reply.redirect("/admin/updates?success=Normal%20operation%20requested");
+    } catch (error) {
+      return reply.redirect(`/admin/updates?error=${encodeURIComponent(error instanceof Error ? error.message : String(error))}`);
+    }
   });
   app.post("/admin/updates/schedule", async (request, reply) => {
     try {
@@ -790,6 +825,16 @@ function profileSelectionsFromForm(raw: {
     modelsByTarget.set(parsed.targetId, [...(modelsByTarget.get(parsed.targetId) ?? []), parsed.modelId]);
   }
   return selectedTargets.map((targetId) => ({ targetId, modelIds: modelsByTarget.get(targetId) ?? [] }));
+}
+
+function profileSharingFromForm(raw: { profileAudience?: string; sharingScope?: "personal" | "everyone" | "team"; teamId?: string }): { sharingScope: "personal" | "everyone" | "team"; teamId?: string } {
+  if (!raw.profileAudience) {
+    const sharingScope = raw.sharingScope ?? (raw.teamId ? "team" : "personal");
+    return { sharingScope, ...(sharingScope === "team" && raw.teamId ? { teamId: raw.teamId } : {}) };
+  }
+  if (raw.profileAudience === "personal" || raw.profileAudience === "everyone") return { sharingScope: raw.profileAudience };
+  if (raw.profileAudience.startsWith("team:") && raw.profileAudience.length > 5) return { sharingScope: "team", teamId: raw.profileAudience.slice(5) };
+  throw new Error("Choose a valid profile audience");
 }
 
 function listFormValues(value: string | string[] | undefined): string[] {

@@ -2,6 +2,7 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { z } from "zod";
 import type { AppConfig, AuthMethod, CapacityProviderDefinition, CapacityTarget, ModelDefinition, NeuronProviderConfig, RuntimeProfile, StorageConfig } from "../domain/types.js";
+import { loadMaintenanceControl } from "../services/MaintenanceControl.js";
 
 const targetSchema = z.object({
   id: z.string().min(1),
@@ -237,8 +238,13 @@ const runtimeProfileSchema = z
   }));
 
 export async function loadConfig(): Promise<{ config: AppConfig; models: ModelDefinition[] }> {
-  const maintenanceMode = boolEnv("CONTROL_PLANE_MAINTENANCE_MODE") ?? false;
   const storage = loadStorageConfig();
+  const storageOperationLockPath = resolveStorageOperationLockPath(storage, env("STORAGE_OPERATION_LOCK_PATH"));
+  const configuredMaintenanceMode = boolEnv("CONTROL_PLANE_MAINTENANCE_MODE") ?? false;
+  const forcedMaintenanceMode = boolEnv("CONTROL_PLANE_FORCE_MAINTENANCE_MODE") ?? false;
+  const maintenanceStatePath = path.resolve(env("CONTROL_PLANE_MAINTENANCE_STATE_PATH") ?? path.join(path.dirname(storageOperationLockPath), "neuron-maintenance.json"));
+  const maintenanceControl = await loadMaintenanceControl(maintenanceStatePath, configuredMaintenanceMode, forcedMaintenanceMode);
+  const maintenanceMode = maintenanceControl.effectiveMode;
   const configuredProviders = await loadCapacityProviders();
   const runtimeProfiles = loadRuntimeProfiles();
   const capacityTargets = await loadCapacityTargets(configuredProviders, { syncNeuronTargets: !maintenanceMode });
@@ -313,7 +319,16 @@ export async function loadConfig(): Promise<{ config: AppConfig; models: ModelDe
       },
       hassleOff: loadHassleOffClientConfig(),
       maintenanceMode,
-      storageOperationLockPath: resolveStorageOperationLockPath(storage, env("STORAGE_OPERATION_LOCK_PATH"))
+      maintenanceControl: {
+        statePath: maintenanceStatePath,
+        configuredMode: configuredMaintenanceMode,
+        forced: forcedMaintenanceMode,
+        overrideMode: maintenanceControl.overrideMode,
+        updatedAt: maintenanceControl.updatedAt,
+        updatedBy: maintenanceControl.updatedBy,
+        stateError: maintenanceControl.stateError
+      },
+      storageOperationLockPath
     },
     models: Array.from(modelsById.values()).sort((a, b) => a.id.localeCompare(b.id))
   };

@@ -123,6 +123,9 @@ configuration or in the external runtime project.
 - Traffic keepalive must not resurrect failed targets by itself.
 - Startup estimates are observational and in-memory. Do not use them for
   scheduling decisions.
+- Administrator maintenance transitions must use the update scheduler's safe
+  drain and a coherent restart. Use the forced deployment gate for storage
+  operations that application administrators must not be able to dismiss.
 
 ## Testing
 

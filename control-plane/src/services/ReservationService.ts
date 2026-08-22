@@ -145,9 +145,10 @@ export class ReservationService {
   private async getAccessibleProfile(profileId: string, user: AuthenticatedUser): Promise<ReservationProfile> {
     if (!this.profiles) throw new Error("Reservation profiles are not configured");
     const profile = await this.profiles.get(profileId);
-    const accessible = profile && (profile.teamId
-      ? Boolean(this.identities && await this.identities.canUseTeamProfile(user, profile.teamId))
-      : profile.userId === user.id);
+    const accessible = profile && (profile.sharingScope === "everyone"
+      || (profile.sharingScope === "team" && profile.teamId
+        ? Boolean(this.identities && await this.identities.canUseTeamProfile(user, profile.teamId))
+        : profile.userId === user.id));
     if (!profile || !accessible) throw new Error("Reservation profile not found");
     return profile;
   }

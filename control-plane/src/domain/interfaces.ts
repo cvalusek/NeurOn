@@ -25,7 +25,7 @@ export interface ReservationRepository {
 }
 
 export interface ReservationProfileRepository {
-  create(input: Omit<ReservationProfile, "id" | "createdAt" | "updatedAt"> & { id?: string; createdAt?: Date; updatedAt?: Date }): Promise<ReservationProfile>;
+  create(input: Omit<ReservationProfile, "id" | "createdAt" | "updatedAt" | "sharingScope"> & { sharingScope?: ReservationProfile["sharingScope"]; id?: string; createdAt?: Date; updatedAt?: Date }): Promise<ReservationProfile>;
   get(id: string): Promise<ReservationProfile | undefined>;
   listForUser(userId: string): Promise<ReservationProfile[]>;
   list(): Promise<ReservationProfile[]>;

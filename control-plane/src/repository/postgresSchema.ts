@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import type pg from "pg";
 
-export const POSTGRES_SCHEMA_VERSION = 7;
+export const POSTGRES_SCHEMA_VERSION = 8;
 
 export const POSTGRES_DATA_TABLES = [
   "reservations",
@@ -412,6 +412,18 @@ const schemaVersionSevenSql = `
     where team_id is not null;
 `;
 
+const schemaVersionEightSql = `
+  alter table reservation_profiles
+    add column sharing_scope text not null default 'personal';
+  update reservation_profiles set sharing_scope = 'team' where team_id is not null;
+  alter table reservation_profiles
+    add constraint reservation_profiles_sharing_scope_check check (
+      sharing_scope in ('personal', 'everyone', 'team')
+      and ((sharing_scope = 'team' and team_id is not null)
+        or (sharing_scope <> 'team' and team_id is null))
+    );
+`;
+
 const migrations = [
   { version: 1, name: "initial-centralized-schema", sql: schemaVersionOneSql },
   { version: 2, name: "reservation-target-selections", sql: schemaVersionTwoSql },
@@ -419,7 +431,8 @@ const migrations = [
   { version: 4, name: "independent-assistant-configuration", sql: schemaVersionFourSql },
   { version: 5, name: "assistant-operator-instructions", sql: schemaVersionFiveSql },
   { version: 6, name: "durable-users-roles-and-teams", sql: schemaVersionSixSql },
-  { version: 7, name: "shared-team-profiles", sql: schemaVersionSevenSql }
+  { version: 7, name: "shared-team-profiles", sql: schemaVersionSevenSql },
+  { version: 8, name: "profile-sharing-scopes", sql: schemaVersionEightSql }
 ] as const;
 
 const expectedColumns: Record<string, Record<string, { type: string; nullable: boolean }>> = {
@@ -429,7 +442,7 @@ const expectedColumns: Record<string, Record<string, { type: string; nullable: b
     keepalive_minutes: optional("int4"), ended_at: optional("timestamptz"), status: required("text"), failure_message: optional("text"), synthetic: required("bool")
   },
   reservation_profiles: {
-    id: required("text"), user_id: required("text"), username: required("text"), team_id: optional("text"), name: required("text"), description: optional("text"), selections: required("jsonb"),
+    id: required("text"), user_id: required("text"), username: required("text"), sharing_scope: required("text"), team_id: optional("text"), name: required("text"), description: optional("text"), selections: required("jsonb"),
     default_duration_minutes: optional("int4"), default_keepalive_minutes: optional("int4"), created_at: required("timestamptz"), updated_at: required("timestamptz")
   },
   api_keys: {
@@ -602,6 +615,7 @@ export async function validatePostgresSchema(queryable: pg.Pool | pg.PoolClient)
   requireConstraint("reservations", "real reservation owner check", (value) => value.includes("check") && value.includes("synthetic") && value.includes("user_id"));
   requireConstraint("reservation_profiles", "owner foreign key", (value) => value.includes("foreign key (user_id)") && value.includes("users") && value.includes("on delete restrict"));
   requireConstraint("reservation_profiles", "team foreign key", (value) => value.includes("foreign key (team_id)") && value.includes("teams") && value.includes("on delete restrict"));
+  requireConstraint("reservation_profiles", "sharing scope check", (value) => value.includes("sharing_scope") && value.includes("everyone") && value.includes("team_id is not null"));
   requireConstraint("api_keys", "owner foreign key", (value) => value.includes("foreign key (user_id)") && value.includes("users") && value.includes("on delete cascade"));
   requireConstraint("model_favorites", "owner foreign key", (value) => value.includes("foreign key (user_id)") && value.includes("users") && value.includes("on delete cascade"));
 
@@ -625,6 +639,7 @@ async function validateExistingPostgresTablesForMigration(queryable: pg.PoolClie
     "assistant_config.additional_instructions",
     "reservations.user_id",
     "reservation_profiles.user_id",
+    "reservation_profiles.sharing_scope",
     "reservation_profiles.team_id",
     "api_keys.user_id",
     "model_favorites.user_id"

@@ -60,8 +60,11 @@ owners from legacy usernames without changing profile, reservation, API-key,
 favorite, or activation IDs. It assigns Member—not Owner—to backfilled users.
 Create or recover the first Owner while NeurOn is stopped, then confirm that
 login before normal reconciliation. See [Identity and Access](identity-access.md).
-Schema version 7 adds the optional profile team assignment. Existing profiles
-remain personal because the new column is nullable; no profile data is rewritten.
+Schema version 7 adds the optional profile team assignment. Schema version 8
+adds an explicit `personal`, `everyone`, or `team` sharing scope and backfills
+profiles with a team assignment to `team`; every other existing profile remains
+personal. The upgrade does not change profile IDs, owners, selections, or
+timing defaults.
 
 Target startup estimates and target status remain in memory. They are
 observational state and are rebuilt by reconciliation; they are not used for
@@ -71,7 +74,10 @@ part of a NeurOn control-plane database migration.
 ## Safe Update Restarts
 
 Published NeurOn images expose their source revision, and the admin UI reports
-when a newer successfully built `main` image is available. NeurOn does not
+when a newer successfully built `main` image is available. It compares Git
+ancestry as well as hash equality: a running revision that is newer than the
+latest successful build is reported as **CI catching up**, not as an update;
+diverged revisions are called out for review. NeurOn does not
 replace its own container. **Admin > Updates** safely exits the current process;
 an external supervisor must then start a replacement task that pulls the newer
 image.
@@ -118,18 +124,44 @@ The drain request is intentionally process-local. If NeurOn crashes before the
 safe conditions are met, the replacement process resumes normal persisted
 reservation reconciliation rather than inheriting an ambiguous shutdown order.
 
+## Administrator maintenance transitions
+
+**Admin > Updates** uses the same shutdown coordinator for application mode
+changes:
+
+- **Enter maintenance when safe** blocks new demand, waits for reservations and
+  discovery work to finish, stops and verifies targets through the normal
+  reconciler, persists maintenance mode, and then exits.
+- **Resume normal operation** persists normal mode and immediately exits so the
+  replacement process constructs provider, traffic, discovery, and reconciler
+  services consistently from startup.
+
+The local Compose service uses `restart: unless-stopped`, so these graceful
+application exits restart the container. An explicit `docker compose stop`
+still keeps it stopped. ECS and other deployments continue to rely on their own
+service supervisor.
+
+The administrator choice is stored in the ignored application data directory.
+`CONTROL_PLANE_MAINTENANCE_MODE` supplies a default only when no choice exists.
+For database migration, recovery, or another operation that must not be
+dismissible from the application, use
+`CONTROL_PLANE_FORCE_MAINTENANCE_MODE=true`; the Updates screen will explain
+that the deployment setting must be removed before normal operation can resume.
+
 Use the [SQLite to PostgreSQL migration](postgres-migration.md) procedure for a
 backup, disposable dry-run, one-writer cutover, verification, and rollback. Do
 not change `STORAGE_DRIVER` on a live application or run SQLite and PostgreSQL
 application writers concurrently.
 
-`CONTROL_PLANE_MAINTENANCE_MODE=true` is the safe cutover boundary:
+Forced maintenance is the safe cutover boundary:
 capacity-affecting mutations, reconciliation, traffic polling, startup
 discovery/provider sync, and HassleOff status calls are disabled while
 read-only verification remains available. Identity administration and
 reservation-profile editing remain available because neither invokes a
 provider or creates demand. `/healthz` reports the active storage driver and
-maintenance state.
+maintenance state. The repository's storage procedures use
+`docker-compose.maintenance-forced.yml` so a prior administrator choice cannot
+silently bypass that boundary.
 
 ## Polling Defaults
 

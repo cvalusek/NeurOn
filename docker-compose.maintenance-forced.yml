@@ -1,0 +1,5 @@
+services:
+  neuron:
+    environment:
+      CONTROL_PLANE_MAINTENANCE_MODE: "true"
+      CONTROL_PLANE_FORCE_MAINTENANCE_MODE: "true"

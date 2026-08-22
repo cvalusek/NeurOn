@@ -95,7 +95,7 @@ Global roles supply permissions. Built-in roles are immutable and include:
 - Administrator: users, roles, teams, authentication, targets, reports, and
   system administration without wildcard authority;
 - Operator: target, discovery, reservation, and report operations;
-- Member: visible-target use and personal profiles, reservations, keys,
+- Member: visible-target use and owned/shared profiles, reservations, keys,
   favorites, and reports; and
 - Viewer: visible-target and personal-report read access.
 
@@ -106,12 +106,13 @@ requests cannot leave the installation without an enabled Owner.
 
 Teams are durable and may be nested. NeurOn stores both the parent relationship
 and a rebuilt closure index, so membership in a child satisfies an audience or
-shared profile granted to its ancestor. Team Member may use inherited shared
-profiles. Team Owner and Team Manager may create, edit, move, and delete shared
-profiles in their managed hierarchy; global `teams.manage` authorizes shared
-profile management for every team. The profile keeps its durable creator user
-ID for audit and duplicate-account merges while its optional team ID controls
-sharing. Approvals, service accounts, and general delegated team administration
+shared profile granted to its ancestor. A Team Member may use inherited shared
+profiles and publish a profile they own to a team they can use. Team Owner and
+Team Manager may also edit, move, and delete team profiles in their managed
+hierarchy; global `teams.manage` authorizes shared profile management for every
+team. The profile keeps its durable creator user ID for audit and
+duplicate-account merges while its sharing scope and optional team ID control
+visibility. Approvals, service accounts, and general delegated team administration
 remain deliberately deferred.
 
 ## Target visibility
@@ -130,18 +131,21 @@ otherwise any valid warm-target traffic signal remains synthetic.
 Providers remain installation-global. Provider concurrency and quota policy,
 private provisioned targets, approvals, and service accounts are future work.
 
-## Shared team profiles
+## Profile audiences
 
-The New/Edit Profile page has a **Who can use this profile** selector. `Only me`
-keeps it personal. A team option appears when the current user has
-`team.profiles.manage` for that team (including managed descendants) or global
-team administration. Eligible members see the shared profile on Home, Profiles,
-Client setup, and the REST API and may start their own reservation from it.
-Use-only members do not receive Edit or Delete controls.
+The New/Edit Profile page gives **Audience** its own row. `Only me` keeps a
+profile personal. `Everyone` makes it available to every eligible NeurOn user.
+A team option appears for every team the creator may use, including an inherited
+ancestor, and shares the profile with members of that team and its descendants.
+Eligible users see shared profiles on Home, Profiles, Client setup, and the REST
+API and may start their own reservation from them. The creator retains normal
+ownership; team managers may additionally maintain team profiles in their
+managed hierarchy.
 
-A shared profile accepts only targets available to the whole assigned team: a
+A team profile accepts only targets available to the whole assigned team: a
 global target, or a team target whose audience team is the assigned team or one
-of its ancestors. User-only targets are rejected. Current access is checked
+of its ancestors. An everyone profile accepts only global targets. User-only
+targets are rejected for either broader scope. Current access is checked
 again whenever a reservation starts, so later membership or target-audience
 changes take effect immediately. A team with shared profiles cannot be deleted
 until those profiles are moved or removed.

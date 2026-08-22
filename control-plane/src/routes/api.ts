@@ -856,6 +856,7 @@ function reservationProfileJson(profile: ReservationProfile) {
     id: profile.id,
     userId: profile.userId,
     username: profile.username,
+    sharingScope: profile.sharingScope,
     teamId: profile.teamId,
     name: profile.name,
     description: profile.description,
@@ -926,6 +927,7 @@ const reservationProfileSchema = {
     id: { type: "string" },
     userId: { type: "string" },
     username: { type: "string" },
+    sharingScope: { type: "string", enum: ["personal", "everyone", "team"] },
     teamId: { type: "string" },
     name: { type: "string" },
     description: { type: "string" },
@@ -935,7 +937,7 @@ const reservationProfileSchema = {
     createdAt: { type: "string", format: "date-time" },
     updatedAt: { type: "string", format: "date-time" }
   },
-  required: ["id", "userId", "username", "name", "selections", "createdAt", "updatedAt"]
+  required: ["id", "userId", "username", "sharingScope", "name", "selections", "createdAt", "updatedAt"]
 } as const;
 
 const reservationProfileCreateSchema = {
@@ -943,6 +945,7 @@ const reservationProfileCreateSchema = {
   properties: {
     name: { type: "string" },
     description: { type: "string" },
+    sharingScope: { type: "string", enum: ["personal", "everyone", "team"] },
     teamId: { type: "string" },
     selections: { type: "array", items: reservationProfileSelectionSchema },
     defaultDurationMinutes: { type: "number" },
@@ -954,6 +957,7 @@ const reservationProfileCreateSchema = {
 const reservationProfileBodySchema = z.object({
   name: z.string(),
   description: z.string().optional(),
+  sharingScope: z.enum(["personal", "everyone", "team"]).optional(),
   teamId: z.string().optional(),
   selections: z.array(z.object({ targetId: z.string(), modelIds: z.array(z.string()).default([]) })),
   defaultDurationMinutes: z.number().optional(),

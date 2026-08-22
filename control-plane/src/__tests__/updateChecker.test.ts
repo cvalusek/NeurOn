@@ -115,4 +115,29 @@ describe("update checker", () => {
     expect((await checker.check()).updateAvailable).toBe(false);
     expect(fetcher).toHaveBeenCalledTimes(1);
   });
+
+  it("does not advertise an update or fetch reverse patch notes while CI is behind the running revision", async () => {
+    const fetcher = vi.fn(async (input: string | URL | Request) => String(input).includes("/compare/")
+      ? new Response(JSON.stringify({
+          status: "behind",
+          ahead_by: 0,
+          behind_by: 2,
+          html_url: "https://github.com/cvalusek/NeurOn/compare/running...built",
+          commits: [],
+          files: [{ filename: "control-plane/changes/old-change.md", status: "modified" }]
+        }), { status: 200 })
+      : new Response(JSON.stringify({ workflow_runs: [{ head_sha: "built-revision" }] }), { status: 200 }));
+    const checker = new UpdateChecker({
+      enabled: true,
+      repository: "cvalusek/NeurOn",
+      currentRevision: "running-revision",
+      checkIntervalSeconds: 900
+    }, fetcher as typeof fetch);
+
+    const status = await checker.check();
+
+    expect(status).toMatchObject({ updateAvailable: false, revisionState: "running_ahead", releaseNotes: undefined });
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    expect(fetcher.mock.calls.some(([input]) => String(input).includes("/contents/"))).toBe(false);
+  });
 });

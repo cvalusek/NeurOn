@@ -125,7 +125,9 @@ to the target's direct model host when it has a safe HTTP endpoint.
 Published builds expose their source revision. **Admin > Updates** compares the
 running revision with the latest successful `main` build and shows the release
 notes that will arrive with the restart. NeurOn coordinates a safe drain, but
-the deployment supervisor owns replacement of the process or container.
+the deployment supervisor owns replacement of the process or container. The
+same screen lets a system administrator enter maintenance through that safe
+drain or resume normal reconciliation with a coherent restart.
 
 Start with the [documentation index](control-plane/docs/index.md), then use:
 

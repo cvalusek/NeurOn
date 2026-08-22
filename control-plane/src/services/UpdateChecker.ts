@@ -6,6 +6,7 @@ export interface UpdateStatus {
   currentRevision?: string;
   latestRevision?: string;
   updateAvailable?: boolean;
+  revisionState?: "current" | "update_available" | "running_ahead" | "diverged" | "unknown";
   checkedAt?: string;
   error?: string;
   compareUrl?: string;
@@ -26,6 +27,9 @@ interface WorkflowRunsResponse {
 }
 
 interface CompareResponse {
+  status?: "ahead" | "behind" | "diverged" | "identical";
+  ahead_by?: number;
+  behind_by?: number;
   html_url?: string;
   commits?: Array<{ sha?: string; html_url?: string; commit?: { message?: string } }>;
   files?: Array<{ filename?: string; status?: string }>;
@@ -70,14 +74,20 @@ export class UpdateChecker {
       const body = await response.json() as WorkflowRunsResponse;
       const latestRevision = body.workflow_runs?.[0]?.head_sha;
       if (!latestRevision) throw new Error("No successful main image build was found");
-      const updateAvailable = status.currentRevision ? !sameRevision(status.currentRevision, latestRevision) : undefined;
+      let updateAvailable: boolean | undefined;
+      let revisionState: UpdateStatus["revisionState"] = status.currentRevision ? "unknown" : undefined;
       let releaseNotes: ReleaseNote[] | undefined;
       let releaseNotesError: string | undefined;
       let compareUrl: string | undefined;
-      if (updateAvailable && status.currentRevision) {
+      if (status.currentRevision && sameRevision(status.currentRevision, latestRevision)) {
+        updateAvailable = false;
+        revisionState = "current";
+      } else if (status.currentRevision) {
         try {
           const comparison = await this.fetchComparison(status.currentRevision, latestRevision);
-          releaseNotes = comparison.releaseNotes;
+          revisionState = comparison.revisionState;
+          updateAvailable = comparison.revisionState === "update_available";
+          releaseNotes = updateAvailable ? comparison.releaseNotes : undefined;
           compareUrl = comparison.compareUrl;
         } catch (error) {
           releaseNotesError = error instanceof Error ? error.message : String(error);
@@ -88,6 +98,7 @@ export class UpdateChecker {
         ...status,
         latestRevision,
         updateAvailable,
+        revisionState,
         checkedAt,
         compareUrl,
         releaseNotes,
@@ -98,13 +109,24 @@ export class UpdateChecker {
     }
   }
 
-  private async fetchComparison(currentRevision: string, latestRevision: string): Promise<{ compareUrl?: string; releaseNotes: ReleaseNote[] }> {
+  private async fetchComparison(currentRevision: string, latestRevision: string): Promise<{ compareUrl?: string; releaseNotes: ReleaseNote[]; revisionState: NonNullable<UpdateStatus["revisionState"]> }> {
     const response = await this.fetcher(
       `${this.repositoryApiUrl()}/compare/${encodeURIComponent(currentRevision)}...${encodeURIComponent(latestRevision)}`,
       { headers: this.githubHeaders(), signal: AbortSignal.timeout(10_000) }
     );
     if (!response.ok) throw new Error(`GitHub comparison returned HTTP ${response.status}`);
     const comparison = await response.json() as CompareResponse;
+    const relation = comparison.status ?? ((comparison.commits?.length ?? 0) > 0 ? "ahead" : "identical");
+    const revisionState = relation === "ahead"
+      ? "update_available"
+      : relation === "behind"
+        ? "running_ahead"
+        : relation === "identical"
+          ? "current"
+          : "diverged";
+    const compareUrl = safeGithubRepositoryUrl(comparison.html_url, this.config.repository)
+      ?? this.compareWebUrl(currentRevision, latestRevision);
+    if (revisionState !== "update_available") return { compareUrl, releaseNotes: [], revisionState };
     const fragments = (comparison.files ?? []).filter((file) =>
       file.status !== "removed" && /^control-plane\/changes\/[^/]+\.md$/u.test(file.filename ?? "")
     );
@@ -116,9 +138,7 @@ export class UpdateChecker {
       if (!noteResponse.ok) throw new Error(`GitHub release note returned HTTP ${noteResponse.status}`);
       return parseReleaseNote(await noteResponse.text());
     }))).filter((note): note is ReleaseNote => Boolean(note));
-    const compareUrl = safeGithubRepositoryUrl(comparison.html_url, this.config.repository)
-      ?? this.compareWebUrl(currentRevision, latestRevision);
-    if (curated.length > 0) return { compareUrl, releaseNotes: curated };
+    if (curated.length > 0) return { compareUrl, releaseNotes: curated, revisionState };
 
     const commits = (comparison.commits ?? []).map((commit) => ({
       title: firstLine(commit.commit?.message) || "Untitled change",
@@ -126,7 +146,7 @@ export class UpdateChecker {
       url: safeGithubRepositoryUrl(commit.html_url, this.config.repository),
       curated: false
     }));
-    return { compareUrl, releaseNotes: commits.slice(-30) };
+    return { compareUrl, releaseNotes: commits.slice(-30), revisionState };
   }
 
   private githubHeaders(accept = "application/vnd.github+json"): Record<string, string> {

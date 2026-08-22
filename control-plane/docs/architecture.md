@@ -61,10 +61,11 @@ is applied by UI, REST, MCP, reservation creation, and traffic attribution.
 ### ReservationProfile
 
 A reservation profile is a saved launch shape with a durable user creator/audit
-owner. It is personal by default, or it may carry one durable team ID that
-shares it with eligible members of that team and its descendants. Team
-owners/managers can maintain profiles in their managed hierarchy; installation
-administrators can manage every team profile. It records one or more target
+owner and an explicit `personal`, `everyone`, or `team` sharing scope. A team
+scope carries one durable team ID and shares with members of that team and its
+descendants. Members may publish their own profiles to a team they can use;
+team owners/managers can also maintain profiles in their managed hierarchy.
+An everyone profile is visible to every eligible NeurOn user. It records one or more target
 selections, each with the model IDs the user expects to use on that target. The
 UI can combine several target/model selections in one profile and automatically
 selects the only model on single-model targets.
@@ -75,7 +76,8 @@ intent. `ReservationService` snapshots the target-specific selections onto the
 reservation while retaining aggregate `modelIds` and `targetIds` for compatible
 clients and legacy records. A team profile can contain only global targets or
 team targets whose audience contains the profile team; personal/user-only
-targets cannot accidentally be shared with a broader team.
+targets cannot accidentally be shared with a broader team. An everyone profile
+accepts only globally visible targets.
 
 ### TargetActivation
 
@@ -175,8 +177,9 @@ into AWS, Docker, LiteLLM, or a concrete repository from unrelated code.
 - `ReservationService`: validates user input, canonicalizes model IDs, creates,
   extends, and ends reservations. It can also expand a user-owned reservation
   profile into a normal reservation request.
-- `ReservationProfileService`: validates and stores personal and team-shared
-  reservation profiles, including team management and whole-team target access.
+- `ReservationProfileService`: validates and stores personal, everyone, and
+  team-shared reservation profiles, including creator ownership and whole-audience
+  target access.
 - `CostEstimationService`: records target activations and accumulates estimated
   per-reservation cost allocations from reconciler state.
 - `ApiKeyService`: generates personal API keys, stores only hashed key

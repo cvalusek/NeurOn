@@ -5,6 +5,7 @@ import type { ProviderView } from "../services/ProviderService.js";
 import type { TargetView } from "../services/TargetService.js";
 import { litellmAliases, litellmRoutePrefixes } from "../litellm/modelRouting.js";
 import type { ShutdownStatus } from "../services/ShutdownCoordinator.js";
+import type { MaintenanceControlStatus } from "../services/MaintenanceControl.js";
 import { safeGithubRepositoryUrl, type UpdateStatus } from "../services/UpdateChecker.js";
 import type { ModelDeploymentSelectionView } from "../services/ModelSelectionService.js";
 import { directRuntimeHostUrl } from "../utils/runtimeUrl.js";
@@ -99,6 +100,7 @@ export function layout(title: string, user: AuthenticatedUser | undefined, body:
     .profile-card-title { display: flex; flex-wrap: wrap; gap: 8px; justify-content: space-between; align-items: center; }
     .quick-start { display: grid; gap: 14px; }
     .reserve-bar { position: sticky; bottom: 10px; z-index: 4; display: flex; gap: 12px; justify-content: space-between; align-items: center; border: 1px solid #86b8ad; border-radius: 8px; background: rgba(240, 250, 247, 0.97); padding: 12px; box-shadow: 0 8px 24px rgba(23, 32, 42, 0.14); }
+    .profile-save-bar { position: sticky; bottom: 10px; z-index: 4; display: flex; gap: 12px; justify-content: space-between; align-items: center; border: 1px solid #86b8ad; border-radius: 8px; background: rgba(240, 250, 247, 0.97); padding: 12px; box-shadow: 0 8px 24px rgba(23, 32, 42, 0.14); }
     .reserve-bar .start-cost { border: 0; background: transparent; padding: 0; margin: 0; }
     .keepalive-control { padding-bottom: 82px; }
     .compact-summary { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 8px; }
@@ -123,7 +125,11 @@ export function layout(title: string, user: AuthenticatedUser | undefined, body:
     .copy-row { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
     .reservation-routing { display: grid; gap: 8px; margin-top: 10px; }
     .reservation-route-group { border: 1px solid #dce5dd; border-radius: 8px; padding: 9px 10px; background: #f8faf8; }
-    .reservation-route-head, .reservation-route-model { display: flex; justify-content: space-between; gap: 10px; align-items: baseline; flex-wrap: wrap; }
+    .routing-blocks { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 8px; margin-top: 8px; }
+    .routing-block { border: 1px solid #dce5dd; border-radius: 7px; padding: 9px; background: white; }
+    .routing-block h4 { margin: 0 0 6px; font-size: 13px; }
+    .reservation-route-head { display: flex; justify-content: space-between; gap: 10px; align-items: baseline; flex-wrap: wrap; }
+    .reservation-route-model { display: grid; gap: 8px; }
     .reservation-route-model + .reservation-route-model { border-top: 1px solid #e2e7e1; margin-top: 8px; padding-top: 8px; }
     .route-label { color: #3f5142; font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; }
     .route-kind { color: #657266; font-size: 12px; margin-left: 3px; }
@@ -140,6 +146,9 @@ export function layout(title: string, user: AuthenticatedUser | undefined, body:
     .profile-target-selection:not(.selected) [data-profile-target-models] { opacity: 0.55; }
     .modal-dialog.profile-builder-dialog { width: min(1180px, 100%); }
     .profile-builder-layout { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; align-items: start; }
+    .profile-audience { max-width: 520px; }
+    .profile-review-grid { display: grid; gap: 10px; }
+    .profile-review-model { border: 1px solid #d8ddd7; border-radius: 8px; padding: 10px; background: #fbfcfb; }
     .profile-guide { border: 1px solid #c7d9d3; border-radius: 8px; background: #f5fbf9; padding: 14px; margin: 14px 0; }
     .profile-guide h3 { margin-top: 0; }
     .profile-guide-head { display: flex; justify-content: space-between; gap: 14px; align-items: start; flex-wrap: wrap; }
@@ -169,6 +178,7 @@ export function layout(title: string, user: AuthenticatedUser | undefined, body:
     .recommendation-card { display: grid; gap: 5px; text-align: left; border: 1px solid #86b8ad; background: white; color: #1f2933; }
     .recommendation-card strong { color: #0f766e; }
     .assistant-toggle { position: fixed; right: 18px; bottom: 18px; z-index: 25; border-radius: 999px; box-shadow: 0 8px 24px rgba(23, 32, 42, 0.24); }
+    body:has(.profile-save-bar) .assistant-toggle { bottom: 96px; }
     .assistant-drawer { position: fixed; right: 18px; bottom: 70px; z-index: 25; width: min(560px, calc(100vw - 36px)); height: min(760px, calc(100vh - 100px)); display: grid; grid-template-rows: auto minmax(280px, 1fr) auto auto; border: 1px solid #aab4ad; border-radius: 12px; background: white; box-shadow: 0 18px 54px rgba(23, 32, 42, 0.28); overflow: hidden; }
     .assistant-drawer[hidden] { display: none; }
     .assistant-head { display: flex; align-items: start; justify-content: space-between; gap: 12px; padding: 13px 14px; background: #17202a; color: white; }
@@ -205,6 +215,11 @@ export function layout(title: string, user: AuthenticatedUser | undefined, body:
     .usage-bar { min-width: 130px; height: 6px; margin-top: 5px; overflow: hidden; border-radius: 999px; background: #e7ebe6; }
     .usage-bar span { display: block; height: 100%; border-radius: inherit; background: #5a9488; }
     .usage-report-head { display: flex; gap: 12px; align-items: end; justify-content: space-between; flex-wrap: wrap; }
+    .subsection-divider { margin-top: 16px; padding-top: 16px; border-top: 1px solid #d8ddd7; }
+    .subsection-divider h3 { margin-top: 0; }
+    .toast { position: fixed; top: 18px; right: 18px; z-index: 60; max-width: min(420px, calc(100vw - 36px)); border: 1px solid #86b8ad; border-radius: 10px; padding: 12px 14px; background: #e7f5f2; color: #075f56; box-shadow: 0 12px 36px rgba(23,32,42,.22); font-weight: 750; }
+    .toast.error { border-color: #d99a96; background: #fff1f0; color: #7a2e2a; }
+    .toast[hidden] { display: none; }
     .option.does-not-match { border-style: dashed; opacity: 0.72; }
     .filter-status { margin-top: 8px; }
     .profile-target-toggle { display: flex; gap: 10px; align-items: start; cursor: pointer; }
@@ -240,6 +255,7 @@ export function layout(title: string, user: AuthenticatedUser | undefined, body:
     .actions { display: flex; justify-content: flex-end; margin-top: 16px; }
     .secret-box { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; padding: 12px; border: 1px solid #0f766e; border-radius: 6px; background: #f0faf7; }
     .secret-box code { flex: 1 1 360px; overflow-wrap: anywhere; font: 13px ui-monospace, SFMono-Regular, Menlo, monospace; }
+    .secret-box input { flex: 1 1 360px; min-width: 0; font: 13px ui-monospace, SFMono-Regular, Menlo, monospace; }
     .inline-actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
     pre { white-space: pre-wrap; overflow-wrap: anywhere; background: #f7f8f6; border: 1px solid #d8ddd7; border-radius: 6px; padding: 10px; font-size: 12px; }
     .summary-list { display: grid; gap: 10px; }
@@ -634,7 +650,7 @@ export function userAdminPage(
     ${notice.error ? `<p class="status">${escapeHtml(notice.error)}</p>` : ""}
     <div class="tabbar" role="tablist">${tab("accounts", `Accounts (${users.length})`)}${tab("invitations", `Invitations (${activeInvitations.length})`)}${mayMerge ? tab("merge", "Merge users") : ""}</div>
     <section class="tab-panel" role="tabpanel" ${activeTab === "accounts" ? "" : "hidden"}><div class="summary-list">${userRows || `<p class="muted">No users yet.</p>`}</div></section>
-    <section class="tab-panel" role="tabpanel" ${activeTab === "invitations" ? "" : "hidden"}>${notice.registrationUrl ? `<div class="secret-box"><code>${escapeHtml(notice.registrationUrl)}</code><button type="button" data-copy-registration>Copy registration link</button></div>` : ""}<div class="summary-list" style="margin-top: 12px;">${invitationRows || `<p class="muted">No invitations yet.</p>`}</div></section>
+    <section class="tab-panel" role="tabpanel" ${activeTab === "invitations" ? "" : "hidden"}>${notice.registrationUrl ? `<div class="secret-box"><input data-registration-url value="${escapeHtml(notice.registrationUrl)}" readonly aria-label="Registration link"><button type="button" data-copy-registration>Copy registration link</button><span class="muted" role="status" aria-live="polite" data-copy-registration-status></span></div>` : ""}<div class="summary-list" style="margin-top: 12px;">${invitationRows || `<p class="muted">No invitations yet.</p>`}</div></section>
     ${mayMerge ? `<section class="tab-panel" role="tabpanel" ${activeTab === "merge" ? "" : "hidden"}>${mergeUsersPanel(users, notice.mergePreview)}</section>` : ""}
   </section>
   <div id="invite-user-modal" class="modal" hidden><div class="modal-dialog"><div class="target-status-head"><h2>Invite user</h2><button class="secondary" type="button" data-close-modal>Close</button></div><form method="post" action="/admin/users/invitations"><div class="field-grid">
@@ -650,7 +666,17 @@ export function userAdminPage(
       if (event.target.classList?.contains('modal')) event.target.hidden = true;
     });
     const copyRegistration = document.querySelector('[data-copy-registration]');
-    copyRegistration?.addEventListener('click', async event => { await navigator.clipboard.writeText(${JSON.stringify(notice.registrationUrl ?? "")}); event.currentTarget.textContent = 'Copied'; });
+    copyRegistration?.addEventListener('click', async event => {
+      const input = document.querySelector('[data-registration-url]');
+      const status = document.querySelector('[data-copy-registration-status]');
+      try {
+        let copied = false;
+        try { if (navigator.clipboard?.writeText) { await navigator.clipboard.writeText(input.value); copied = true; } } catch {}
+        if (!copied) { input.focus(); input.select(); copied = document.execCommand('copy'); }
+        if (!copied) throw new Error('Copy is unavailable');
+        event.currentTarget.textContent = 'Copied'; status.textContent = 'Registration link copied.';
+      } catch { input.focus(); input.select(); status.textContent = 'Copy was blocked. The link is selected so you can copy it manually.'; }
+    });
   </script>`);
 }
 
@@ -683,7 +709,7 @@ export function teamAdminPage(
       const role = roleById.get(membership.roleId);
       return `<div class="reservation-card compact"><div><strong>${escapeHtml(account?.displayName ?? account?.username ?? membership.userId)}</strong><div class="target-status-meta"><span class="pill">${escapeHtml(role?.name ?? membership.roleId)}</span><span class="pill">${escapeHtml(membership.source)}</span></div></div>${membership.source === "manual" ? `<form method="post" action="/admin/teams/${escapeHtml(team.id)}/members/${escapeHtml(membership.userId)}/remove"><input type="hidden" name="source" value="manual"><button class="secondary" type="submit">Remove</button></form>` : `<span class="muted">Managed at sign-in</span>`}</div>`;
     }).join("");
-    return `<details class="drilldown"><summary><div><strong>${escapeHtml(team.name)}</strong><div class="muted">${team.parentTeamId ? `Child of ${escapeHtml(teamById.get(team.parentTeamId)?.name ?? team.parentTeamId)} · ` : ""}${memberships.length} direct member${memberships.length === 1 ? "" : "s"}</div></div><span class="badge active">team</span></summary><div class="drilldown-body" data-tabs><div class="tabbar"><button type="button" data-tab="members" aria-selected="true">Members</button><button type="button" data-tab="edit" aria-selected="false">Edit</button><button type="button" data-tab="delete" aria-selected="false">Delete</button></div><section class="tab-panel" data-tab-panel="members">${team.description ? `<p>${escapeHtml(team.description)}</p>` : ""}<div class="reservation-list">${memberRows || `<p class="muted">No direct members.</p>`}</div><form method="post" action="/admin/teams/${escapeHtml(team.id)}/members"><div class="field-grid"><p><label>User<br><select name="userId" required><option value="">Choose a user</option>${userOptions}</select></label></p><p><label>Team role<br><select name="roleId" required>${roleOptions}</select></label></p></div><button type="submit">Add member</button></form></section><section class="tab-panel" data-tab-panel="edit" hidden><form method="post" action="/admin/teams/${escapeHtml(team.id)}/update"><p><label>Name<br><input name="name" value="${escapeHtml(team.name)}" required></label></p><p><label>Description<br><textarea name="description">${escapeHtml(team.description ?? "")}</textarea></label></p><p><label>Parent team<br><select name="parentTeamId">${parentOptions(team.parentTeamId, team.id)}</select></label></p><button type="submit">Save team</button></form></section><section class="tab-panel" data-tab-panel="delete" hidden><form method="post" action="/admin/teams/${escapeHtml(team.id)}/delete"><p class="status">Move or delete shared profiles first. Deleting a team removes its direct memberships and hierarchy links.</p><p><label>Type <code>${escapeHtml(team.name)}</code><br><input name="confirmName" required></label></p><button class="danger" type="submit">Delete team</button></form></section></div></details>`;
+    return `<details class="drilldown"><summary><div><strong>${escapeHtml(team.name)}</strong><div class="muted">${team.parentTeamId ? `Child of ${escapeHtml(teamById.get(team.parentTeamId)?.name ?? team.parentTeamId)} · ` : ""}${memberships.length} direct member${memberships.length === 1 ? "" : "s"}</div></div><span class="badge active">team</span></summary><div class="drilldown-body" data-tabs><div class="tabbar"><button type="button" data-tab="members" aria-selected="true">Members</button><button type="button" data-tab="edit" aria-selected="false">Edit</button><button type="button" data-tab="delete" aria-selected="false">Delete</button></div><section class="tab-panel" data-tab-panel="members">${team.description ? `<p>${escapeHtml(team.description)}</p>` : ""}<div class="reservation-list">${memberRows || `<p class="muted">No direct members.</p>`}</div><div class="subsection-divider"><h3>Add member</h3><form method="post" action="/admin/teams/${escapeHtml(team.id)}/members"><div class="field-grid"><p><label>User<br><select name="userId" required><option value="">Choose a user</option>${userOptions}</select></label></p><p><label>Team role<br><select name="roleId" required>${roleOptions}</select></label></p></div><button type="submit">Add member</button></form></div></section><section class="tab-panel" data-tab-panel="edit" hidden><form method="post" action="/admin/teams/${escapeHtml(team.id)}/update"><p><label>Name<br><input name="name" value="${escapeHtml(team.name)}" required></label></p><p><label>Description<br><textarea name="description">${escapeHtml(team.description ?? "")}</textarea></label></p><p><label>Parent team<br><select name="parentTeamId">${parentOptions(team.parentTeamId, team.id)}</select></label></p><button type="submit">Save team</button></form></section><section class="tab-panel" data-tab-panel="delete" hidden><form method="post" action="/admin/teams/${escapeHtml(team.id)}/delete"><p class="status">Move or delete shared profiles first. Deleting a team removes its direct memberships and hierarchy links.</p><p><label>Type <code>${escapeHtml(team.name)}</code><br><input name="confirmName" required></label></p><button class="danger" type="submit">Delete team</button></form></section></div></details>`;
   }).join("");
   return layout("Teams", user, `<section class="panel"><div class="target-status-head"><h1>Teams</h1><button type="button" data-open-modal="create-team-modal">Create team</button></div>${error ? `<p class="status">${escapeHtml(error)}</p>` : ""}<div class="summary-list">${teamRows || `<p class="muted">No teams configured yet.</p>`}</div></section>
   <div id="create-team-modal" class="modal" hidden><div class="modal-dialog"><div class="target-status-head"><h2>Create team</h2><button class="secondary" type="button" data-close-modal>Close</button></div><form method="post" action="/admin/teams"><p><label>Name<br><input name="name" required></label></p><p><label>Description<br><textarea name="description"></textarea></label></p><p><label>Parent team<br><select name="parentTeamId">${parentOptions(undefined)}</select></label></p><div class="actions"><button type="submit">Create team</button></div></form></div></div>
@@ -721,7 +747,7 @@ export function welcomePage(user: AuthenticatedUser, hasProfiles: boolean, helpM
   </section>`);
 }
 
-export function startPage(user: AuthenticatedUser, targets: Array<{ target: CapacityTarget; models: ModelDefinition[] }>, profiles: ReservationProfile[] = [], error = "", costEstimates: Record<string, { hourlyUsd: number }> = {}, statusPollSeconds = 5, selectionDeployments: ModelDeploymentSelectionView[] = [], assignableTeams: Team[] = []): string {
+export function startPage(user: AuthenticatedUser, targets: Array<{ target: CapacityTarget; models: ModelDefinition[] }>, profiles: ReservationProfile[] = [], error = "", costEstimates: Record<string, { hourlyUsd: number }> = {}, statusPollSeconds = 5, selectionDeployments: ModelDeploymentSelectionView[] = [], assignableTeams: Team[] = [], litellmApiBaseUrl?: string): string {
   const initialTargetId = targets[0]?.target.id ?? "";
   return layout("NeurOn", user, `<div class="home-grid"><div><section class="panel">
     <h2>Your reservations</h2>
@@ -763,6 +789,7 @@ export function startPage(user: AuthenticatedUser, targets: Array<{ target: Capa
     const modelLookup = ${safeJson(modelLookupForTargets(targets))};
     const reservationRoutingLookup = ${safeJson(reservationRoutingLookupForTargets(targets))};
     const targetLookup = ${safeJson(targetLookupForTargets(targets))};
+    const litellmUiUrl = ${JSON.stringify(litellmConsoleUrl(litellmApiBaseUrl))};
     const profiles = ${safeJson(profilesForClient(profiles, targets))};
     const costLookup = ${safeJson(costEstimates)};
     const currentUser = ${JSON.stringify(user.username)};
@@ -839,10 +866,11 @@ export function startPage(user: AuthenticatedUser, targets: Array<{ target: Capa
             if (!scoped || scoped === alias) return '<span class="route-kind">Global + target</span>' + copyButton(alias, index === 0);
             return '<span class="route-kind">Global</span>' + copyButton(alias, index === 0) + '<span class="route-kind">Target</span>' + copyButton(scoped);
           }).join('');
-          return '<div class="reservation-route-model"><div><strong>' + escapeText(model.displayName) + '</strong><div class="copy-row"><span class="route-label">LiteLLM</span>' + (routes || '<span class="muted">Alias not found</span>') + '</div></div><div class="model-meta"><span class="route-label">Direct runtime / llama.cpp</span><br>' + model.runtimeModelIds.map(id => '<code>' + escapeText(id) + '</code>').join(' · ') + '</div></div>';
+          const liteLlmLink = litellmUiUrl ? '<a href="' + escapeText(litellmUiUrl) + '" target="_blank" rel="noopener noreferrer">Open LiteLLM playground ↗</a>' : '';
+          const directLink = target.directHostUrl ? '<a href="' + escapeText(target.directHostUrl) + '" target="_blank" rel="noopener noreferrer">Open direct model host ↗</a>' : '';
+          return '<div class="reservation-route-model"><strong>' + escapeText(model.displayName) + '</strong><div class="routing-blocks"><div class="routing-block"><div class="target-status-head"><h4>LiteLLM gateway</h4>' + liteLlmLink + '</div><div class="copy-row">' + (routes || '<span class="muted">Alias not found</span>') + '</div><p class="model-meta">Global aliases follow priority and fallback; target aliases pin this deployment.</p></div><div class="routing-block"><div class="target-status-head"><h4>Direct model host</h4>' + directLink + '</div><div class="model-meta">' + model.runtimeModelIds.map(id => '<code>' + escapeText(id) + '</code>').join(' · ') + '</div></div></div></div>';
         }).join('') : '<p class="muted">All models on this target</p>';
-        const directLink = target.directHostUrl ? '<a class="direct-host-link" href="' + escapeText(target.directHostUrl) + '" target="_blank" rel="noopener noreferrer">Open direct model host ↗</a>' : '';
-        return '<div class="reservation-route-group"><div class="reservation-route-head"><strong>' + escapeText(target.displayName) + '</strong>' + directLink + '</div>' + modelRows + '</div>';
+        return '<div class="reservation-route-group"><div class="reservation-route-head"><strong>' + escapeText(target.displayName) + '</strong><a href="/client-setup">Client configuration</a></div>' + modelRows + '</div>';
       }).filter(Boolean).join('');
       return groups ? '<div class="reservation-routing">' + groups + '</div>' : '';
     };
@@ -1131,7 +1159,7 @@ export function reservationPage(
     <p>Projected total: <span id="reservation-cost-projected" class="status">Not available</span></p>
     <h2>Connect to your models</h2>
     <p class="muted">Use a LiteLLM alias in OpenCode or another configured client. Runtime IDs are the values exposed directly by the model host.</p>
-    ${reservationRoutingHtml(reservation, targets)}
+    ${reservationRoutingHtml(reservation, targets, undefined, config.litellmApiBaseUrl)}
     <div id="target-status"></div>
     <form method="post" action="/reservations/${escapeHtml(reservation.id)}/done"><button class="large danger" type="submit">I'm done</button></form>
   </section>
@@ -1219,6 +1247,8 @@ NEURON_ALLOWED_PROVIDERS=litellm</pre></section>
     (() => {
       const routes = ${serialized};
       const profile = document.querySelector('#client-profile');
+      const requestedProfile = new URLSearchParams(window.location.search).get('profile');
+      if (requestedProfile && [...profile.options].some(option => option.value === requestedProfile)) profile.value = requestedProfile;
       const table = document.querySelector('#client-aliases');
       const config = document.querySelector('#opencode-config');
       const escapeText = (value) => String(value).replace(/[&<>"']/g, character => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[character]));
@@ -1387,8 +1417,8 @@ function profileListCard(profile: ReservationProfile, targets: Array<{ target: C
     const modelSummary = aliases.length ? aliases.map((alias) => `<span class="copy-chip">${escapeHtml(alias)}</span>`).join("") : `<span class="pill">All models</span>`;
     return `<div class="target-status-card"><div class="target-status-head"><strong>${escapeHtml(targetLookup[selection.targetId]?.displayName ?? selection.targetId)}</strong><span class="muted"><code>${escapeHtml(selection.targetId)}</code></span></div><div class="chip-row">${modelSummary}</div></div>`;
   }).join("");
-  const scope = profile.teamId ? `<span class="pill">Team: ${escapeHtml(team?.name ?? profile.teamId)}</span>` : `<span class="pill">Personal</span>`;
-  const actions = manageable ? `<div class="inline-actions"><a class="button secondary" href="/profiles/${escapeHtml(profile.id)}/edit">Edit</a><form method="post" action="/reservation-profiles/${escapeHtml(profile.id)}/delete"><button class="danger" type="submit">Delete</button></form></div>` : "";
+  const scope = profile.sharingScope === "everyone" ? `<span class="pill">Everyone</span>` : profile.teamId ? `<span class="pill">Team: ${escapeHtml(team?.name ?? profile.teamId)}</span>` : `<span class="pill">Personal</span>`;
+  const actions = `<div class="inline-actions"><a class="button secondary" href="/client-setup?profile=${encodeURIComponent(profile.id)}">Client setup</a>${manageable ? `<a class="button secondary" href="/profiles/${escapeHtml(profile.id)}/edit">Edit</a><form method="post" action="/reservation-profiles/${escapeHtml(profile.id)}/delete"><button class="danger" type="submit">Delete</button></form>` : ""}</div>`;
   return `<details class="drilldown"><summary><div><strong>${escapeHtml(profile.name)}</strong>${profile.description ? `<div class="muted">${escapeHtml(profile.description)}</div>` : ""}<div class="target-status-meta">${scope}${defaults ? `<span class="pill">${escapeHtml(defaults)}</span>` : ""}<span class="muted">${profile.selections.length} target selection${profile.selections.length === 1 ? "" : "s"}</span></div></div>${actions}</summary><div class="drilldown-body">${selections}</div></details>`;
 }
 
@@ -1556,20 +1586,29 @@ export function assistantConfigPage(user: AuthenticatedUser, deployments: ModelD
   const options = deployments.map((deployment) => `<option value="${escapeHtml(JSON.stringify({ targetId: deployment.targetId, modelId: deployment.modelId }))}" ${config?.targetId === deployment.targetId && config.modelId === deployment.modelId ? "selected" : ""}>${escapeHtml(deployment.targetDisplayName)} · ${escapeHtml(deployment.modelDisplayName)}</option>`).join("");
   const reservationMinutes = config?.reservationMinutes ?? 15;
   const keepaliveMinutes = config?.keepaliveMinutes ?? 15;
+  const requestTimeoutSeconds = config?.requestTimeoutSeconds ?? 300;
   const choices = (kind: string, values: number[], selected: number) => values.map((value) => `<button class="choice" type="button" data-assistant-${kind}="${value}" aria-pressed="${String(value === selected)}">${value} min</button>`).join("");
-  return layout("Assistant", user, `${error ? `<p class="status">${escapeHtml(error)}</p>` : ""}<section class="panel"><h1>Assistant</h1><p>Select the existing NeurOn target and model that power the in-application assistant. The configuration is stored independently from targets and model-selection data.</p><p class="muted">The selected deployment must support OpenAI-compatible chat completions and function/tool calling. Asking a question may create a visible synthetic reservation and cold-start that target through normal reconciliation.</p></section><section class="panel"><form id="assistant-config-form"><input type="hidden" name="reservationMinutes" value="${reservationMinutes}"><input type="hidden" name="keepaliveMinutes" value="${keepaliveMinutes}"><label>Target and model${helpTip("The exact deployment NeurOn reserves and calls for assistant requests.")}<br><select name="deployment"><option value="">Disabled</option>${options}</select></label><div class="field-grid" style="margin-top:16px"><div><h2>Reservation duration${helpTip("How long the assistant reservation remains active. This is also the maximum cold-start wait for an individual request.")}</h2><div class="row">${choices("duration", [2, 5, 15, 30, 60], reservationMinutes)}</div></div><div><h2>Keepalive${helpTip("How long idle assistant capacity stays available after its reservation window, reducing repeated cold starts.")}</h2><div class="row">${choices("keepalive", [1, 2, 5, 15], keepaliveMinutes)}</div></div></div><label style="display:block;margin-top:16px">Additional system guidance${helpTip("Trusted local terminology, priorities, or workflow guidance appended to NeurOn's built-in Assistant prompt. Tool validation, authorization, and confirmation rules still apply. Do not enter credentials or private source data.")}<br><textarea name="additionalInstructions" maxlength="8000" rows="5" placeholder="Optional organization-specific guidance">${escapeHtml(config?.additionalInstructions ?? "")}</textarea></label><details style="margin-top:16px"><summary><strong>Advanced</strong></summary><label>Warm-model response timeout (seconds)${helpTip("Maximum time for the already-ready model to answer. Cold-start waiting uses Reservation duration instead.")}<br><input name="requestTimeoutSeconds" type="number" min="1" max="600" value="${config?.requestTimeoutSeconds ?? 300}"></label></details><div class="actions"><button type="submit">Save assistant settings</button><span class="muted" data-assistant-config-status></span></div></form></section>
+  const timeoutValues = Array.from(new Set([30, 60, 120, 300, 600, requestTimeoutSeconds])).sort((left, right) => left - right);
+  const timeoutLabel = (seconds: number) => seconds < 60 ? `${seconds} sec` : `${seconds / 60} min`;
+  const timeoutChoices = timeoutValues.map((value) => `<button class="choice" type="button" data-assistant-timeout="${value}" aria-pressed="${String(value === requestTimeoutSeconds)}">${escapeHtml(timeoutLabel(value))}</button>`).join("");
+  return layout("Assistant", user, `${error ? `<p class="status">${escapeHtml(error)}</p>` : ""}<section class="panel"><h1>Assistant</h1><p>Select the existing NeurOn target and model that power the in-application assistant. The configuration is stored independently from targets and model-selection data.</p><p class="muted">The selected deployment must support OpenAI-compatible chat completions and function/tool calling. Asking a question may create a visible synthetic reservation and cold-start that target through normal reconciliation.</p></section><section class="panel"><form id="assistant-config-form"><input type="hidden" name="reservationMinutes" value="${reservationMinutes}"><input type="hidden" name="keepaliveMinutes" value="${keepaliveMinutes}"><input type="hidden" name="requestTimeoutSeconds" value="${requestTimeoutSeconds}"><label>Target and model${helpTip("The exact deployment NeurOn reserves and calls for assistant requests.")}<br><select name="deployment"><option value="">Disabled</option>${options}</select></label><div class="field-grid" style="margin-top:16px"><div><h2>Reservation duration${helpTip("How long the assistant reservation remains active. This is also the maximum cold-start wait for an individual request.")}</h2><div class="row">${choices("duration", [2, 5, 15, 30, 60], reservationMinutes)}</div></div><div><h2>Keepalive${helpTip("How long idle assistant capacity stays available after its reservation window, reducing repeated cold starts.")}</h2><div class="row">${choices("keepalive", [1, 2, 5, 15], keepaliveMinutes)}</div></div></div><label style="display:block;margin-top:16px">Additional system guidance${helpTip("Trusted local terminology, priorities, or workflow guidance appended to NeurOn's built-in Assistant prompt. Tool validation, authorization, and confirmation rules still apply. Do not enter credentials or private source data.")}<br><textarea name="additionalInstructions" maxlength="8000" rows="5" placeholder="Optional organization-specific guidance">${escapeHtml(config?.additionalInstructions ?? "")}</textarea></label><details style="margin-top:16px"><summary><strong>Advanced</strong></summary><div><h2>Warm-model response timeout${helpTip("Maximum time for an already-ready model to answer. Cold-start waiting uses Reservation duration instead.")}</h2><div class="row" aria-label="Warm-model response timeout">${timeoutChoices}</div></div></details><div class="actions"><button type="submit">Save assistant settings</button></div></form></section><div class="toast" role="status" aria-live="polite" data-assistant-config-toast hidden></div>
   <script type="module">
     const form = document.querySelector('#assistant-config-form');
-    const select = (kind, button) => { form.querySelectorAll('[data-assistant-' + kind + ']').forEach(candidate => candidate.setAttribute('aria-pressed', String(candidate === button))); form.elements[kind === 'duration' ? 'reservationMinutes' : 'keepaliveMinutes'].value = button.dataset['assistant' + kind[0].toUpperCase() + kind.slice(1)]; };
+    const toast = document.querySelector('[data-assistant-config-toast]');
+    let toastTimer;
+    const showToast = (message, failed = false) => { clearTimeout(toastTimer); toast.textContent = message; toast.classList.toggle('error', failed); toast.hidden = false; toastTimer = setTimeout(() => { toast.hidden = true; }, 3500); };
+    const select = (kind, button) => { form.querySelectorAll('[data-assistant-' + kind + ']').forEach(candidate => candidate.setAttribute('aria-pressed', String(candidate === button))); const field = kind === 'duration' ? 'reservationMinutes' : kind === 'keepalive' ? 'keepaliveMinutes' : 'requestTimeoutSeconds'; form.elements[field].value = button.dataset['assistant' + kind[0].toUpperCase() + kind.slice(1)]; };
     form.querySelectorAll('[data-assistant-duration]').forEach(button => button.addEventListener('click', () => select('duration', button)));
     form.querySelectorAll('[data-assistant-keepalive]').forEach(button => button.addEventListener('click', () => select('keepalive', button)));
+    form.querySelectorAll('[data-assistant-timeout]').forEach(button => button.addEventListener('click', () => select('timeout', button)));
     form.addEventListener('submit', async event => {
-      event.preventDefault(); const status = form.querySelector('[data-assistant-config-status]'); status.textContent = ' Saving…';
+      event.preventDefault(); const submit = form.querySelector('button[type="submit"]'); submit.disabled = true; submit.textContent = 'Saving…';
       try {
         const deployment = form.elements.deployment.value ? JSON.parse(form.elements.deployment.value) : { targetId: null, modelId: null }; const { targetId, modelId } = deployment;
         const response = await fetch('/api/admin/assistant-config', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ targetId, modelId, reservationMinutes: Number(form.elements.reservationMinutes.value), keepaliveMinutes: Number(form.elements.keepaliveMinutes.value), requestTimeoutSeconds: Number(form.elements.requestTimeoutSeconds.value), additionalInstructions: form.elements.additionalInstructions.value }) });
-        if (!response.ok) throw new Error((await response.json()).error || 'Save failed'); status.textContent = ' Saved'; setTimeout(() => location.reload(), 250);
-      } catch (caught) { status.textContent = ' ' + (caught instanceof Error ? caught.message : 'Save failed'); }
+        if (!response.ok) throw new Error((await response.json()).error || 'Save failed'); showToast('Assistant settings saved.');
+      } catch (caught) { showToast(caught instanceof Error ? caught.message : 'Save failed', true); }
+      finally { submit.disabled = false; submit.textContent = 'Save assistant settings'; }
     });
   </script>`);
 }
@@ -1584,6 +1623,7 @@ export function updatesPage(
   user: AuthenticatedUser,
   update: UpdateStatus,
   shutdown: ShutdownStatus,
+  maintenance: MaintenanceControlStatus,
   safety: UpdateSafetySummary,
   error = "",
   success = ""
@@ -1592,11 +1632,15 @@ export function updatesPage(
     ? "Update checks are disabled or this image does not contain build revision metadata."
     : update.error
       ? `The last update check failed: ${update.error}`
-      : update.updateAvailable
+      : update.revisionState === "update_available"
         ? "A newer successfully built NeurOn image is available."
-        : update.updateAvailable === false
-          ? "This NeurOn instance matches the latest successful image build."
-          : "The current image revision is unknown, so availability cannot be compared yet.";
+        : update.revisionState === "running_ahead"
+          ? "This NeurOn instance is newer than the latest successful image build. No update is needed; CI is still catching up."
+          : update.revisionState === "diverged"
+            ? "The running and latest successful revisions have diverged. Review the comparison before restarting."
+            : update.revisionState === "current" || update.updateAvailable === false
+              ? "This NeurOn instance matches the latest successful image build."
+              : "The current image revision could not be compared with the latest successful build.";
   const hassleOffCoverage = safety.hassleOffConfigured && safety.totalTargets > 0 && safety.protectedTargets === safety.totalTargets;
   const targetRows = shutdown.targetStates.length
     ? shutdown.targetStates.map((target) => `<tr><td>${escapeHtml(target.displayName)}</td><td><code>${escapeHtml(target.id)}</code></td><td>${escapeHtml(target.desired)}</td><td><span class="pill ${escapeHtml(target.observed)}">${escapeHtml(target.observed)}</span></td></tr>`).join("")
@@ -1609,6 +1653,16 @@ export function updatesPage(
       }).join("")}</div>`
     : `<p class="muted">${update.updateAvailable ? "No individual patch notes were published for this comparison." : "Patch notes appear here when an update is available."}</p>`;
   const compareUrl = safeGithubRepositoryUrl(update.compareUrl, update.repository);
+  const maintenanceChanged = maintenance.updatedAt
+    ? `<p class="muted">Last requested ${escapeHtml(new Date(maintenance.updatedAt).toLocaleString())}${maintenance.updatedBy ? ` by ${escapeHtml(maintenance.updatedBy)}` : ""}.</p>`
+    : "";
+  const maintenanceControls = activeRestart
+    ? `<p class="muted">Finish or cancel the active ${escapeHtml(shutdown.purpose?.replaceAll("-", " ") ?? "restart")} transition before changing operating mode.</p>`
+    : maintenance.effectiveMode
+      ? maintenance.forced
+        ? `<p class="status">Maintenance is forced by deployment configuration. Remove the forced setting and restart NeurOn before an administrator can resume normal operation here.</p>`
+        : `<p>Reservations and provider reconciliation are paused. Resuming records the normal-operation choice and restarts NeurOn so every lifecycle component starts coherently.</p><form method="post" action="/admin/updates/maintenance/resume"><p><label>Type <code>RESUME</code> to confirm<br><input name="confirm" type="text" autocomplete="off" required></label></p><button type="submit">Resume normal operation</button></form>`
+      : `<p>Entering maintenance uses the same safe-drain scheduler as an update restart: new demand is blocked, active work may finish, and NeurOn restarts in maintenance only after every target reports stopped.</p><form method="post" action="/admin/updates/maintenance/enter"><p><label>Type <code>MAINTENANCE</code> to confirm<br><input name="confirm" type="text" autocomplete="off" required></label></p><button class="secondary" type="submit">Enter maintenance when safe</button></form>`;
   return layout("NeurOn Updates", user, `<section class="panel">
     <h1>Updates and restart</h1>
     ${error ? `<p class="status">${escapeHtml(error)}</p>` : ""}
@@ -1622,8 +1676,14 @@ export function updatesPage(
     <form method="post" action="/admin/updates/check"><button class="secondary" type="submit">Check now</button></form>
   </section>
   <section class="panel">
+    <div class="target-status-head"><h2>Operating mode</h2><span class="badge ${maintenance.effectiveMode ? "active" : "done"}">${maintenance.effectiveMode ? "Maintenance" : "Normal"}</span></div>
+    ${maintenance.stateError ? `<p class="status">${escapeHtml(maintenance.stateError)}</p>` : ""}
+    ${maintenanceChanged}
+    ${maintenanceControls}
+  </section>
+  <section class="panel">
     <div class="target-status-head"><h2>What changes in this update</h2>${compareUrl ? `<a href="${escapeHtml(compareUrl)}" target="_blank" rel="noreferrer">Full comparison</a>` : ""}</div>
-    ${update.releaseNotesError ? `<p class="status">Patch notes could not be loaded: ${escapeHtml(update.releaseNotesError)}</p>` : ""}
+    ${update.releaseNotesError ? `<p class="status">Revision comparison or patch notes could not be loaded: ${escapeHtml(update.releaseNotesError)}</p>` : ""}
     ${releaseNotes}
   </section>
   <section class="panel">
@@ -1631,6 +1691,7 @@ export function updatesPage(
     <p class="status">${escapeHtml(shutdown.message)}</p>
     <div class="field-grid">
       <p><strong>Mode</strong><br><span class="badge ${shutdown.mode === "idle" ? "done" : "active"}">${escapeHtml(shutdown.mode)}</span></p>
+      <p><strong>Purpose</strong><br>${shutdown.purpose ? escapeHtml(shutdown.purpose.replaceAll("-", " ")) : "None"}</p>
       <p><strong>New reservations</strong><br>${shutdown.acceptingReservations ? "Accepted" : "Blocked while draining"}</p>
       <p><strong>Active reservations</strong><br>${shutdown.activeReservationCount}</p>
       <p><strong>Active discoveries</strong><br>${shutdown.activeDiscoveryCount}</p>
@@ -2978,7 +3039,20 @@ function profileCreateModal(
   const rootClass = standalone ? "profile-builder-page" : "modal";
   const dialogClass = standalone ? "panel profile-builder-dialog" : "modal-dialog profile-builder-dialog";
   const personalAllowed = !profile || profile.userId === user.id;
-  const sharingOptions = `${personalAllowed ? `<option value="" ${profile?.teamId ? "" : "selected"}>Only me</option>` : ""}${teams.map((team) => `<option value="${escapeHtml(team.id)}" ${profile?.teamId === team.id ? "selected" : ""}>Team: ${escapeHtml(team.name)}</option>`).join("")}`;
+  const sharingScope = profile?.sharingScope ?? (profile?.teamId ? "team" : "personal");
+  const sharingOptions = `${personalAllowed ? `<option value="personal" ${sharingScope === "personal" ? "selected" : ""}>Only me</option><option value="everyone" ${sharingScope === "everyone" ? "selected" : ""}>Everyone</option>` : ""}${teams.map((team) => `<option value="team:${escapeHtml(team.id)}" ${sharingScope === "team" && profile?.teamId === team.id ? "selected" : ""}>Team: ${escapeHtml(team.name)}</option>`).join("")}`;
+  const reviewDeployments = deployments.map((deployment) => {
+    const entry = targets.find(({ target }) => target.id === deployment.targetId);
+    const model = entry?.models.find((candidate) => candidate.id === deployment.modelId);
+    const aliases = entry ? litellmAliases(entry.target, deployment.modelId, deployment.aliases) : { global: deployment.aliases, scoped: [] };
+    return {
+      ...deployment,
+      globalAliases: aliases.global,
+      scopedAliases: aliases.scoped,
+      runtimeModelIds: Array.from(new Set([...(model?.runtimeModelIds ?? []), ...(model?.backendModelIds ?? []), deployment.modelId])),
+      directHostUrl: entry ? directRuntimeHostUrl(entry.target) : undefined
+    };
+  });
   return `<div id="profile-modal" class="${rootClass}"${standalone ? "" : " hidden"}>
     <div class="${dialogClass}">
       <div class="target-status-head"><h1>${profile ? "Edit" : "New"} reservation profile</h1>${standalone ? `<a class="button secondary" href="/profiles">← Back to profiles</a>` : `<button class="secondary" type="button" data-close-modal>Close</button>`}</div>
@@ -2991,8 +3065,8 @@ function profileCreateModal(
             <div class="field-grid">
               <p><label>Name<br><input name="name" type="text" placeholder="Daily coding" value="${escapeHtml(profile?.name ?? "")}" required></label></p>
               <p><label>Description<br><input name="description" type="text" placeholder="Target and models for this workflow" value="${escapeHtml(profile?.description ?? "")}"></label></p>
-              <p><label>Who can use this profile${helpTip("Personal profiles are available only to you. Team profiles are shared with eligible members of that team and its descendants.")}<br><select name="teamId">${sharingOptions}</select></label>${teams.length ? `<br><span class="muted">Team owners and managers can maintain shared profiles.</span>` : `<br><span class="muted">Join or manage a team to share profiles.</span>`}</p>
             </div>
+            <p class="profile-audience"><label>Audience${helpTip("Only me keeps the profile personal. Everyone shares it with every NeurOn user and permits only globally available targets. A team audience shares it with members of that team and its descendants. The creator remains the owner; team managers may help maintain a team-shared profile.")}<br><select name="profileAudience">${sharingOptions}</select></label></p>
             ${profileDefaultControls(durationMinutes, keepaliveMinutes)}
             ${profileSelectionGuide(deployments)}
             <h2>Targets and models</h2>
@@ -3004,11 +3078,12 @@ function profileCreateModal(
             }).join("")}</div>
           </div>
         </div>
-        <div class="actions"><button type="submit">${profile ? "Save changes" : "Save profile"}</button></div>
+        ${standalone ? `<div class="profile-save-bar"><span><strong data-profile-selection-count>0 targets selected</strong><br><span class="muted">Review the audience, cost, models, and routes before saving.</span></span><button type="submit">Review profile</button></div>` : `<div class="actions"><button type="submit">${profile ? "Save changes" : "Save profile"}</button></div>`}
       </form>
     </div>
+    ${standalone ? `<div id="profile-save-review-modal" class="modal" hidden><div class="modal-dialog"><div class="target-status-head"><div><h2>Review profile</h2><p class="muted">Confirm the changes and the routes users will call.</p></div><button class="secondary" type="button" data-profile-review-close>Back</button></div><div class="profile-review-grid" data-profile-review-content></div><div class="actions"><button class="secondary" type="button" data-profile-review-close>Keep editing</button><button type="button" data-profile-review-confirm>${profile ? "Confirm changes" : "Create profile"}</button></div></div></div>` : ""}
     ${profileSelectionClientScript(deployments)}
-    ${standalone ? profileEditorClientScript() : ""}
+    ${standalone ? profileEditorClientScript(reviewDeployments, costs, profile) : ""}
   </div>`;
 }
 
@@ -3381,11 +3456,26 @@ function profileSelectionClientScript(deployments: ModelDeploymentSelectionView[
   </script>`;
 }
 
-function profileEditorClientScript(): string {
+function profileEditorClientScript(
+  deployments: Array<ModelDeploymentSelectionView & { globalAliases: string[]; scopedAliases: string[]; runtimeModelIds: string[]; directHostUrl?: string }>,
+  costs: Record<string, { hourlyUsd: number }>,
+  profile?: ReservationProfile
+): string {
   return `<script type="module">
     (() => {
       const form = document.querySelector('#profile-form');
       if (!form) return;
+      const deployments = ${safeJson(deployments)};
+      const costs = ${safeJson(costs)};
+      const initial = ${safeJson(profile ? {
+        name: profile.name,
+        description: profile.description ?? "",
+        audience: profile.sharingScope === "team" ? `team:${profile.teamId}` : profile.sharingScope,
+        duration: profile.defaultDurationMinutes ?? 2,
+        keepalive: profile.defaultKeepaliveMinutes ?? 2,
+        selections: profile.selections
+      } : null)};
+      const byKey = new Map(deployments.map(deployment => [deployment.key, deployment]));
       const targetInputs = [...form.querySelectorAll('[data-profile-target]')];
       const durationInput = form.querySelector('#profile-duration-minutes');
       const keepaliveInput = form.querySelector('#profile-keepalive-minutes');
@@ -3395,12 +3485,26 @@ function profileEditorClientScript(): string {
       const customKeepalive = form.querySelector('#profile-custom-keepalive');
       const customDurationWrap = form.querySelector('#profile-custom-duration-wrap');
       const customKeepaliveWrap = form.querySelector('#profile-custom-keepalive-wrap');
+      const reviewModal = document.querySelector('#profile-save-review-modal');
+      const reviewContent = reviewModal?.querySelector('[data-profile-review-content]');
+      const selectionCount = form.querySelector('[data-profile-selection-count]');
+      let confirmed = false;
+      const escapeText = value => String(value ?? '').replace(/[&<>"']/g, character => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' }[character]));
+      const formatMetricValue = value => Number(value).toLocaleString(undefined, { maximumFractionDigits: 1 });
+      const currentState = () => {
+        const selections = targetInputs.filter(input => input.checked).map(input => ({
+          targetId: input.value,
+          modelIds: [...input.closest('[data-profile-target-card]').querySelectorAll('[data-profile-model]:checked')].map(model => JSON.parse(model.value).modelId).sort()
+        })).sort((left, right) => left.targetId.localeCompare(right.targetId));
+        return { name: form.elements.name.value.trim(), description: form.elements.description.value.trim(), audience: form.elements.profileAudience.value, duration: Number(durationInput.value), keepalive: Number(keepaliveInput.value), selections };
+      };
       const syncTargets = () => targetInputs.forEach(input => {
         const card = input.closest('[data-profile-target-card]');
         card?.classList.toggle('selected', input.checked);
         const models = [...card.querySelectorAll('[data-profile-model]')];
         models.forEach(model => { model.disabled = !input.checked; });
         if (input.checked && models.length === 1) models[0].checked = true;
+        if (selectionCount) { const count = targetInputs.filter(candidate => candidate.checked).length; selectionCount.textContent = count + ' target' + (count === 1 ? '' : 's') + ' selected'; }
       });
       const selectDuration = (button, focus = true) => {
         const custom = Boolean(button?.dataset.profileCustomDuration);
@@ -3421,6 +3525,44 @@ function profileEditorClientScript(): string {
       keepaliveButtons.forEach(button => button.addEventListener('click', () => selectKeepalive(button)));
       customDuration.addEventListener('input', () => selectDuration(form.querySelector('[data-profile-custom-duration]'), false));
       customKeepalive.addEventListener('input', () => selectKeepalive(form.querySelector('[data-profile-custom-keepalive]'), false));
+      const renderReview = () => {
+        const current = currentState();
+        const changes = [];
+        if (!initial) changes.push('Create a new profile');
+        else {
+          if (initial.name !== current.name) changes.push('Rename the profile');
+          if (initial.description !== current.description) changes.push('Update the description');
+          if (initial.audience !== current.audience) changes.push('Change the audience');
+          if (initial.duration !== current.duration) changes.push('Change default duration');
+          if (initial.keepalive !== current.keepalive) changes.push('Change default keepalive');
+          const normalize = value => JSON.stringify(value.map(selection => ({ targetId: selection.targetId, modelIds: [...selection.modelIds].sort() })).sort((left, right) => left.targetId.localeCompare(right.targetId)));
+          if (normalize(initial.selections) !== normalize(current.selections)) changes.push('Change targets or models');
+          if (!changes.length) changes.push('No field values changed');
+        }
+        const audience = form.elements.profileAudience.selectedOptions[0]?.textContent ?? current.audience;
+        const selectedDeployments = current.selections.flatMap(selection => selection.modelIds.map(modelId => byKey.get(selection.targetId + '::' + modelId)).filter(Boolean));
+        const selectedTargetIds = [...new Set(current.selections.map(selection => selection.targetId))];
+        const targetCosts = selectedTargetIds.map(targetId => costs[targetId]?.hourlyUsd ?? selectedDeployments.find(deployment => deployment.targetId === targetId)?.hourlyUsd);
+        const knownHourly = targetCosts.filter(value => typeof value === 'number').reduce((sum, value) => sum + value, 0);
+        const completeCost = targetCosts.length > 0 && targetCosts.every(value => typeof value === 'number');
+        const windowMinutes = current.duration + current.keepalive;
+        const costSummary = completeCost ? '$' + knownHourly.toFixed(2) + '/hr · about $' + (knownHourly * windowMinutes / 60).toFixed(2) + ' for duration + keepalive' : 'Cost estimate incomplete';
+        const modelCards = selectedDeployments.map(deployment => {
+          const metrics = [
+            deployment.intelligence === undefined ? '' : 'Intelligence ' + formatMetricValue(deployment.intelligence),
+            deployment.contextWindowTokens === undefined ? '' : Math.round(deployment.contextWindowTokens).toLocaleString() + ' context',
+            deployment.performance?.decodeTokensPerSecond === undefined ? '' : 'Decode ' + formatMetricValue(deployment.performance.decodeTokensPerSecond) + ' t/s',
+            deployment.performance?.prefillTokensPerSecond === undefined ? '' : 'Prefill ' + formatMetricValue(deployment.performance.prefillTokensPerSecond) + ' t/s',
+            deployment.quantization?.qualityRetentionPercent === undefined ? '' : 'Estimated quality retained ' + formatMetricValue(deployment.quantization.qualityRetentionPercent) + '%'
+          ].filter(Boolean);
+          const liteLlm = [...new Set([...deployment.globalAliases, ...deployment.scopedAliases])];
+          const aliasChips = liteLlm.length ? liteLlm.map(alias => '<span class="copy-chip">' + escapeText(alias) + '</span>').join('') : '<span class="muted">No LiteLLM alias</span>';
+          const directIds = deployment.runtimeModelIds.map(id => '<code>' + escapeText(id) + '</code>').join(' · ');
+          const directLink = deployment.directHostUrl ? '<a href="' + escapeText(deployment.directHostUrl) + '" target="_blank" rel="noopener noreferrer">Open direct model host ↗</a>' : '';
+          return '<div class="profile-review-model"><div class="target-status-head"><div><strong>' + escapeText(deployment.modelDisplayName) + '</strong><div class="muted">' + escapeText(deployment.targetDisplayName) + '</div></div>' + (deployment.hourlyUsd === undefined ? '' : '<span class="target-price">$' + deployment.hourlyUsd.toFixed(2) + '/hr</span>') + '</div>' + (metrics.length ? '<div class="model-metrics">' + metrics.map(metric => '<span class="metric">' + escapeText(metric) + '</span>').join('') + '</div>' : '<p class="muted">No selection measurements are available.</p>') + '<div class="routing-blocks"><div class="routing-block"><h4>LiteLLM gateway aliases</h4><div class="copy-row">' + aliasChips + '</div></div><div class="routing-block"><h4>Direct model host</h4><div>' + directIds + '</div>' + directLink + '</div></div></div>';
+        }).join('');
+        reviewContent.innerHTML = '<section><h3>Changes</h3><ul>' + changes.map(change => '<li>' + escapeText(change) + '</li>').join('') + '</ul></section><section><h3>Overall selection</h3><div class="target-status-meta"><span class="pill">' + escapeText(audience) + '</span><span class="pill">' + current.duration + ' min duration</span><span class="pill">' + current.keepalive + ' min keepalive</span><span class="pill">' + selectedTargetIds.length + ' targets</span></div><p><strong>' + escapeText(costSummary) + '</strong></p></section><section><div class="target-status-head"><h3>Models and routes</h3><a href="/client-setup">Open full client configuration</a></div>' + (modelCards || '<p class="muted">No individual models are configured for the selected target.</p>') + '</section>';
+      };
       form.addEventListener('submit', event => {
         const selectedTargets = targetInputs.filter(input => input.checked);
         const invalid = selectedTargets.find(input => {
@@ -3432,8 +3574,12 @@ function profileEditorClientScript(): string {
           const message = !selectedTargets.length ? 'Choose at least one target.' : 'Choose at least one model for every selected target.';
           window.alert(message);
           invalid?.closest('[data-profile-target-card]')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          return;
         }
+        if (!confirmed && reviewModal) { event.preventDefault(); renderReview(); reviewModal.hidden = false; }
       });
+      reviewModal?.querySelectorAll('[data-profile-review-close]').forEach(button => button.addEventListener('click', () => { reviewModal.hidden = true; }));
+      reviewModal?.querySelector('[data-profile-review-confirm]')?.addEventListener('click', () => { confirmed = true; form.requestSubmit(); });
       document.addEventListener('click', async event => {
         const copy = event.target.closest('[data-copy]');
         if (!copy) return;
@@ -3599,7 +3745,8 @@ function reservationRoutingLookupForTargets(targets: Array<{ target: CapacityTar
 function reservationRoutingHtml(
   reservation: Pick<Reservation, "modelIds" | "targetIds" | "targetSelections">,
   targets: Array<{ target: CapacityTarget; models: ModelDefinition[] }>,
-  onlyTargetId?: string
+  onlyTargetId?: string,
+  litellmApiBaseUrl?: string
 ): string {
   const targetMap = new Map(targets.map((entry) => [entry.target.id, entry]));
   const routingLookup = reservationRoutingLookupForTargets(targets);
@@ -3622,13 +3769,29 @@ function reservationRoutingHtml(
         if (!scoped || scoped === alias) return `<span class="route-kind">Global + target</span>${copyChip(alias, index === 0 ? "primary" : "")}`;
         return `<span class="route-kind">Global</span>${copyChip(alias, index === 0 ? "primary" : "")}<span class="route-kind">Target</span>${copyChip(scoped)}`;
       }).join("");
-      return `<div class="reservation-route-model"><div><strong>${escapeHtml(model.displayName)}</strong><div class="copy-row"><span class="route-label">LiteLLM</span>${routeChips || `<span class="muted">Alias not found</span>`}</div></div><div class="model-meta"><span class="route-label">Direct runtime / llama.cpp</span><br>${model.runtimeModelIds.map((id) => `<code>${escapeHtml(id)}</code>`).join(" · ")}</div></div>`;
+      const liteLlmUrl = litellmConsoleUrl(litellmApiBaseUrl);
+      const liteLlmLink = liteLlmUrl ? `<a href="${escapeHtml(liteLlmUrl)}" target="_blank" rel="noopener noreferrer">Open LiteLLM playground ↗</a>` : "";
+      const directUrl = directRuntimeHostUrl(entry.target);
+      const directLink = directUrl ? `<a href="${escapeHtml(directUrl)}" target="_blank" rel="noopener noreferrer">Open direct model host ↗</a>` : "";
+      return `<div class="reservation-route-model"><strong>${escapeHtml(model.displayName)}</strong><div class="routing-blocks"><div class="routing-block"><div class="target-status-head"><h4>LiteLLM gateway</h4>${liteLlmLink}</div><div class="copy-row">${routeChips || `<span class="muted">Alias not found</span>`}</div><p class="model-meta">Global aliases follow priority and fallback; target aliases pin this deployment.</p></div><div class="routing-block"><div class="target-status-head"><h4>Direct model host</h4>${directLink}</div><div class="model-meta">${model.runtimeModelIds.map((id) => `<code>${escapeHtml(id)}</code>`).join(" · ")}</div></div></div></div>`;
     }).join("") : `<p class="muted">All models on this target</p>`;
-    const directUrl = directRuntimeHostUrl(entry.target);
-    const directLink = directUrl ? `<a class="direct-host-link" href="${escapeHtml(directUrl)}" target="_blank" rel="noopener noreferrer">Open direct model host ↗</a>` : "";
-    return `<div class="reservation-route-group"><div class="reservation-route-head"><strong>${escapeHtml(entry.target.displayName)}</strong>${directLink}</div>${modelRows}</div>`;
+    return `<div class="reservation-route-group"><div class="reservation-route-head"><strong>${escapeHtml(entry.target.displayName)}</strong><a href="/client-setup">Client configuration</a></div>${modelRows}</div>`;
   }).filter(Boolean).join("");
   return groups ? `<div class="reservation-routing">${groups}</div>` : "";
+}
+
+function litellmConsoleUrl(baseUrl?: string): string | undefined {
+  if (!baseUrl) return undefined;
+  try {
+    const url = new URL(baseUrl);
+    if (!(["http:", "https:"] as string[]).includes(url.protocol) || url.username || url.password) return undefined;
+    url.pathname = "/ui/";
+    url.search = "";
+    url.hash = "";
+    return url.toString();
+  } catch {
+    return undefined;
+  }
 }
 
 function targetLookupForTargets(targets: Array<{ target: CapacityTarget; models: ModelDefinition[] }>): Record<string, { displayName: string; directHostUrl?: string }> {

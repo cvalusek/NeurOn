@@ -4,9 +4,11 @@ import type { Reconciler } from "../reconciler/Reconciler.js";
 import type { TargetOperationCoordinator } from "./TargetOperationCoordinator.js";
 
 export type ShutdownMode = "idle" | "draining" | "stopping-targets" | "failed" | "shutting-down";
+export type ShutdownPurpose = "update-restart" | "enter-maintenance" | "resume-normal";
 
 export interface ShutdownStatus {
   mode: ShutdownMode;
+  purpose?: ShutdownPurpose;
   acceptingReservations: boolean;
   requestedAt?: string;
   requestedBy?: string;
@@ -47,6 +49,8 @@ export class ShutdownCoordinator {
   private interval?: NodeJS.Timeout;
   private evaluating?: Promise<void>;
   private generation = 0;
+  private purpose?: ShutdownPurpose;
+  private beforeShutdown?: () => Promise<void>;
 
   constructor(private readonly options: ShutdownCoordinatorOptions) {}
 
@@ -71,6 +75,7 @@ export class ShutdownCoordinator {
     });
     return {
       mode: this.mode,
+      purpose: this.purpose,
       acceptingReservations: this.acceptingReservations(),
       requestedAt: this.requestedAt?.toISOString(),
       requestedBy: this.requestedBy,
@@ -88,17 +93,33 @@ export class ShutdownCoordinator {
 
   scheduleWhenSafe(username: string): void {
     if (this.mode !== "idle") throw new Error("A restart is already scheduled");
-    this.begin(username, false, false);
+    this.begin(username, false, false, "update-restart");
     this.mode = "draining";
     this.message = "Draining: new reservations and keepalives are blocked while active reservations finish.";
     this.startPolling();
     void this.evaluate();
   }
 
+  scheduleMaintenanceWhenSafe(username: string, beforeShutdown: () => Promise<void>): void {
+    if (this.mode !== "idle") throw new Error("A restart or maintenance transition is already scheduled");
+    this.begin(username, false, false, "enter-maintenance", beforeShutdown);
+    this.mode = "draining";
+    this.message = "Draining safely before entering maintenance mode. New demand is blocked while active work finishes.";
+    this.startPolling();
+    void this.evaluate();
+  }
+
+  resumeNormalOperation(username: string, beforeShutdown: () => Promise<void>): void {
+    if (this.mode !== "idle") throw new Error("A restart or maintenance transition is already scheduled");
+    this.begin(username, false, false, "resume-normal", beforeShutdown);
+    this.message = "Normal operation requested. NeurOn is restarting before reconciliation resumes.";
+    this.triggerShutdown("resume-normal-operation");
+  }
+
   force(username: string, stopTargets: boolean): void {
     if (this.mode === "shutting-down") throw new Error("NeurOn is already shutting down");
     if (this.mode === "stopping-targets") throw new Error("Target shutdown is already in progress");
-    this.begin(username, true, stopTargets);
+    this.begin(username, true, stopTargets, "update-restart");
     if (!stopTargets) {
       this.unmanagedCapacityRiskAccepted = true;
       this.message = "Forced restart accepted without stopping targets. Running capacity may be left unmanaged if NeurOn does not return.";
@@ -126,6 +147,8 @@ export class ShutdownCoordinator {
     this.stopTargets = false;
     this.unmanagedCapacityRiskAccepted = false;
     this.forceStopIssued = false;
+    this.purpose = undefined;
+    this.beforeShutdown = undefined;
     this.options.resumeLifecycle();
   }
 
@@ -133,7 +156,7 @@ export class ShutdownCoordinator {
     this.stopPolling();
   }
 
-  private begin(username: string, forced: boolean, stopTargets: boolean): void {
+  private begin(username: string, forced: boolean, stopTargets: boolean, purpose: ShutdownPurpose, beforeShutdown?: () => Promise<void>): void {
     this.generation += 1;
     this.stopPolling();
     this.options.stopTrafficPolling();
@@ -142,6 +165,8 @@ export class ShutdownCoordinator {
     this.forced = forced;
     this.stopTargets = stopTargets;
     this.unmanagedCapacityRiskAccepted = false;
+    this.purpose = purpose;
+    this.beforeShutdown = beforeShutdown;
   }
 
   private startPolling(): void {
@@ -196,7 +221,7 @@ export class ShutdownCoordinator {
     this.message = "No active reservations remain. Waiting for every target to report stopped.";
     await this.options.reconciler.requestReconcile();
     if (!this.isCurrent(generation, "draining")) return;
-    if (this.allTargetsStopped()) this.triggerShutdown("safe-update-restart");
+    if (this.allTargetsStopped()) this.triggerShutdown(this.purpose === "enter-maintenance" ? "enter-maintenance" : "safe-update-restart");
   }
 
   private async evaluateForcedStop(generation: number): Promise<void> {
@@ -260,10 +285,24 @@ export class ShutdownCoordinator {
   private triggerShutdown(reason: string): void {
     if (this.mode === "shutting-down") return;
     this.mode = "shutting-down";
-    this.message = "Safety conditions are satisfied. NeurOn is shutting down so the service can restart on the new image.";
+    this.message = this.purpose === "enter-maintenance"
+      ? "Safety conditions are satisfied. NeurOn is restarting in maintenance mode."
+      : this.purpose === "resume-normal"
+        ? "NeurOn is restarting so normal reconciliation can resume."
+        : "Safety conditions are satisfied. NeurOn is shutting down so the service can restart on the new image.";
     this.stopPolling();
-    const timer = setTimeout(() => void this.options.requestShutdown(reason), 500);
+    const timer = setTimeout(() => void this.finishShutdown(reason), 500);
     timer.unref();
+  }
+
+  private async finishShutdown(reason: string): Promise<void> {
+    try {
+      await this.beforeShutdown?.();
+      await this.options.requestShutdown(reason);
+    } catch (error) {
+      this.mode = "failed";
+      this.message = error instanceof Error ? error.message : String(error);
+    }
   }
 
   private isCurrent(generation: number, mode: ShutdownMode): boolean {

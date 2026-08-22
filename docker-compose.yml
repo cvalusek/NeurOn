@@ -5,7 +5,7 @@ services:
       dockerfile: Dockerfile
     image: neuron-control-plane:local
     container_name: neuron
-    restart: on-failure
+    restart: unless-stopped
     env_file:
       - .env
     ports:
