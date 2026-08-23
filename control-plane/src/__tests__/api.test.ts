@@ -138,6 +138,7 @@ describe("model selection guidance", () => {
     const { app } = await buildApp({
       ...config,
       litellmApiBaseUrl: "https://litellm.example.test/v1",
+      litellmUiUrl: "https://console.example.test/playground",
       capacityTargets: [{
         ...config.capacityTargets[0],
         aliasPriority: 10,
@@ -733,6 +734,7 @@ describe("API authentication context", () => {
     const { app } = await buildApp({
       ...config,
       litellmApiBaseUrl: "https://litellm.example.test/v1",
+      litellmUiUrl: "https://console.example.test/playground",
       capacityTargets: [{
         ...config.capacityTargets[0],
         apiUrl: "https://runtime.example.test/models/v1?ignored=1",
@@ -770,12 +772,15 @@ describe("API authentication context", () => {
     expect(page.body).toContain("Connect to your models");
     expect(page.body).toContain("LiteLLM gateway");
     expect(page.body).toContain("Direct model host");
-    expect(page.body).toContain("Open LiteLLM playground");
-    expect(page.body).toContain("https://litellm.example.test/ui/");
-    expect(page.body).toContain("Client configuration");
-    expect(page.body).toContain("fast");
-    expect(page.body).toContain("t1/fast");
-    expect(page.body).toContain("llama-m1");
+    expect(page.body).toContain('aria-label="Open LiteLLM"');
+    expect(page.body).toContain("https://console.example.test/playground");
+    expect(page.body).not.toContain("https://litellm.example.test/ui/");
+    expect(page.body).toContain("Connection to your models");
+    expect(page.body).toContain('data-copy="fast"');
+    expect(page.body).toContain('data-copy="t1/fast"');
+    expect(page.body).toContain('data-copy="m1"');
+    expect(page.body).toContain('data-copy="llama-m1"');
+    expect(page.body).toContain('aria-label="Open direct model host"');
     expect(page.body).toContain("https://runtime.example.test/models/");
     expect(page.body).not.toContain("ignored=1");
   });
@@ -1245,10 +1250,18 @@ describe("API authentication context", () => {
     const { app } = await buildApp(config, models);
     const auth = { authorization: `Basic ${Buffer.from("actual:local-test-secret").toString("base64")}` };
 
+    const team = await app.inject({ method: "POST", url: "/api/admin/teams", headers: auth, payload: { name: "Platform" } });
+    expect(team.statusCode).toBe(201);
     const page = await app.inject({ method: "GET", url: "/admin/targets", headers: auth });
     expect(page.statusCode).toBe(200);
     expect(page.body).toContain("T1");
     expect(page.body).toContain("CAPACITY_TARGET_KEYS=T1");
+    expect(page.body).toContain('name="audienceScope"');
+    expect(page.body).toContain('name="audienceTeamIds"');
+    expect(page.body).toContain('name="audienceUserIds"');
+    expect(page.body).toContain("Platform");
+    expect(page.body).toContain("actual");
+    expect(page.body).not.toContain('name="hostingMode"');
 
     const created = await app.inject({
       method: "POST",
@@ -1260,11 +1273,18 @@ describe("API authentication context", () => {
         providerId: "runpod",
         modelIds: "qwen",
         trafficModelPrefixes: "runpod/",
+        audienceScope: "teams",
+        audienceTeamIds: team.json().id,
         runpodPodId: "pod-qwen",
         runpodRuntimePort: "8080"
       }).toString()
     });
     expect(created.statusCode).toBe(302);
+    const createdTargets = await app.inject({ method: "GET", url: "/api/admin/targets", headers: auth });
+    expect(createdTargets.json().capacityTargets.find((target: { id: string }) => target.id === "runpod-qwen")).toMatchObject({
+      audience: { scope: "teams", teamIds: [team.json().id] },
+      hostingMode: "dedicated"
+    });
 
     const updated = await app.inject({
       method: "POST",
@@ -1295,7 +1315,9 @@ describe("API authentication context", () => {
       litellm: {
         credentialName: "neuron/runpod-prefer",
         apiKeyEnv: "PREFER_RUNPOD_API_KEY"
-      }
+      },
+      audience: { scope: "global" },
+      hostingMode: "multi-model"
     });
     expect(targets.json().capacityTargets.find((target: { id: string }) => target.id === "t1")).toMatchObject({
       trafficModelPrefixes: ["t1/"],

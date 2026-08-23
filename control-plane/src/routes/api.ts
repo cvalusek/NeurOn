@@ -1067,6 +1067,14 @@ const targetSchema = {
     modelIds: { type: "array", items: { type: "string" } },
     modelsMax: { type: "number" },
     hostingMode: { type: "string", enum: ["dedicated", "multi-model"] },
+    audience: {
+      type: "object",
+      properties: {
+        scope: { type: "string", enum: ["global", "teams", "users"] },
+        teamIds: { type: "array", items: { type: "string" } },
+        userIds: { type: "array", items: { type: "string" } }
+      }
+    },
     trafficModelPrefixes: { type: "array", items: { type: "string" } },
     litellmDisplayPrefix: { type: "string" },
     aliasPriority: { type: "number" },

@@ -143,6 +143,7 @@ RUNTIME_PROFILES_JSON=[{"id":"prefer-nightly","name":"PreFer Nightly","type":"do
 - `STORAGE_OPERATION_LOCK_PATH`
 - `AWS_REGION`
 - `LITELLM_API_BASE_URL`
+- `LITELLM_UI_URL`
 - `LITELLM_API_KEY`
 - `CAPACITY_PROVIDERS_JSON`
 - `RECONCILER_INTERVAL_SECONDS`
@@ -424,6 +425,15 @@ CAPACITY_TARGET_MULTIPLE_MOE_96GB_HEALTH_URL=http://llm-96gb.internal:8080/healt
 CAPACITY_TARGET_MULTIPLE_MOE_96GB_ESTIMATED_HOURLY_COST_USD=4.25
 ```
 
+Target audience is explicit in both JSON and expanded environment forms. Omit
+the scope, or use `global`, for everyone. Team- and user-scoped targets require
+at least one durable ID:
+
+```env
+CAPACITY_TARGET_MULTIPLE_MOE_96GB_AUDIENCE_SCOPE=teams
+CAPACITY_TARGET_MULTIPLE_MOE_96GB_AUDIENCE_TEAM_IDS=team-platform,team-research
+```
+
 Opt a rented target into the HassleOff start/provision interlock:
 
 ```env
@@ -632,6 +642,11 @@ discovered-model sync. A target-level `LITELLM_API_BASE_URL` overrides the
 runtime API base stored in its LiteLLM credential; normally the provider-derived
 `API_URL` is used instead.
 
+`LITELLM_UI_URL` is the exact browser destination for the optional LiteLLM
+launch icon shown beside reservation routes. NeurOn does not derive a UI path
+from `LITELLM_API_BASE_URL`: reverse proxies and LiteLLM's server root path can
+make that guess incorrect. Leave it empty to hide the icon.
+
 Set `TRAFFIC_MODEL_PREFIXES` to override the LiteLLM route prefixes for a target,
 for example `prefer/gemma-4b-e2b`. When omitted, NeurOn uses `<target-id>/`, so
 target `g6.xlarge.general` publishes and recognizes
@@ -645,18 +660,19 @@ configured. Set
 prefix from environment config when LiteLLM aliases the prefix away. JSON config
 can use `"litellmDisplayPrefix": ""` directly.
 
-Set the hosting shape and alias priority when they are known:
+Set the alias priority when several targets publish the same friendly name:
 
 ```env
-CAPACITY_TARGET_G6_XLARGE_GENERAL_HOSTING_MODE=dedicated
 CAPACITY_TARGET_G6_XLARGE_GENERAL_ALIAS_PRIORITY=10
 ```
 
-`HOSTING_MODE` is `dedicated` or `multi-model` and is used by the profile
-builder's hard filter. Lower positive `ALIAS_PRIORITY` values win collisions
-for global LiteLLM model-group aliases. Scoped `<target>/<alias>` names remain
-available for every target. Later targets become LiteLLM `fallbacks`; the
-priority does not create or order duplicate alias deployments.
+The profile builder derives hosting mode from the current target catalog: one
+known model is dedicated, more than one is a multi-model host, and a target with
+no known models remains unclassified until discovery. Lower positive
+`ALIAS_PRIORITY` values win collisions for global LiteLLM model-group aliases.
+Scoped `<target>/<alias>` names remain available for every target. Later targets
+become LiteLLM `fallbacks`; the priority does not create or order duplicate
+alias deployments.
 
 ## NeurOn Provider Env Fields
 

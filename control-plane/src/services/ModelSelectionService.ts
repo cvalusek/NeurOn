@@ -8,6 +8,7 @@ import type {
 import type { ModelMetadataRepository } from "../domain/interfaces.js";
 import { parseModelSelectionCatalog } from "../config/modelSelectionConfig.js";
 import { ModelCatalog } from "./ModelCatalog.js";
+import { targetHostingMode } from "../utils/hostingMode.js";
 
 const MIN_OBSERVED_SAMPLES = 3;
 const MAX_SAMPLES_PER_DEPLOYMENT = 200;
@@ -198,7 +199,7 @@ export class ModelSelectionService {
           modelFamily: model.modelFamily,
           aliases: this.catalog.deploymentAliases(target.id, model.id),
           technicalCapabilities: structuredClone(model.technicalCapabilities ?? []),
-          hostingMode: target.hostingMode,
+          hostingMode: targetHostingMode(this.catalog.listModelsForTarget(target.id).length),
           contextWindowTokens: runtimeContext.tokens,
           contextSource: runtimeContext.source,
           contextConcurrency: runtimeContext.concurrency,

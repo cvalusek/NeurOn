@@ -180,10 +180,11 @@ target-scoped aliases, canonical IDs, backend/runtime IDs, and legacy display
 prefix names. A 404 falls back to the older `/api/status` and `/api/models`
 mapping for compatibility.
 
-Users can open **Client setup** to copy an OpenCode provider configuration for
-the entire catalog or one profile. Global aliases choose the target with the
-lowest numeric `aliasPriority`; scoped `<target>/<alias>` names remain available
-for every deployment. The profile page shows these names alongside each model.
+Users can open **Connection to your models** to copy an OpenCode provider
+configuration for the entire catalog or one profile. Global aliases choose the
+target with the lowest numeric `aliasPriority`; scoped `<target>/<alias>` names
+remain available for every deployment. The profile page shows these names
+alongside each model.
 The Admin target create and persisted-target edit forms expose
 `trafficModelPrefixes` as **LiteLLM model route prefixes**, so a value such as
 `clint-desktop/` links `clint-desktop/gemma-4-e2b` to the selected target
@@ -207,12 +208,13 @@ accepts the replacement router settings, NeurOn deletes only stale or redundant
 NeurOn-owned deployment rows. This includes duplicate alias rows made by older
 versions; operator-owned rows and router settings remain untouched.
 
-Home and reservation detail pages present these formal global/scoped aliases
-before the separately labeled backend runtime IDs. A target with a safe HTTP(S)
-`apiUrl` also gets an **Open direct model host** link. The link points at the
-runtime root rather than its trailing `/v1` API path and omits credentials,
-query parameters, and fragments; non-HTTP or credential-bearing URLs are not
-rendered as links.
+Home and reservation detail pages present one short alias, the shortest scoped
+alias, and one ID instead of dumping every equivalent name. Direct-host blocks
+show the short alias and runtime ID. A target with a safe HTTP(S) `apiUrl` gets
+an icon that opens the runtime root rather than its trailing `/v1` API path and
+omits credentials, query parameters, and fragments. LiteLLM gets the same icon
+only when `LITELLM_UI_URL` explicitly names the correct operator-facing page;
+NeurOn does not guess that path from the API URL.
 
 LiteLLM traffic monitoring remains useful for clients that cannot run a plugin.
 The OpenCode plugin is a stronger signal when it is available because it can

@@ -45,7 +45,6 @@ const targetSchema = z.object({
   litellmDisplayPrefix: z.string().optional(),
   aliasPriority: z.number().int().positive().optional(),
   modelsMax: z.number().int().positive().optional(),
-  hostingMode: z.enum(["dedicated", "multi-model"]).optional(),
   audience: z.discriminatedUnion("scope", [
     z.object({ scope: z.literal("global") }),
     z.object({ scope: z.literal("teams"), teamIds: z.array(z.string().min(1)).min(1) }),
@@ -294,6 +293,7 @@ export async function loadConfig(): Promise<{ config: AppConfig; models: ModelDe
       storage,
       awsRegion: process.env.AWS_REGION ?? "us-east-1",
       litellmApiBaseUrl: process.env.LITELLM_API_BASE_URL,
+      litellmUiUrl: process.env.LITELLM_UI_URL,
       litellmApiKey: process.env.LITELLM_API_KEY,
       litellmTrafficPollSeconds: intEnv("LITELLM_TRAFFIC_POLL_SECONDS", 60),
       litellmTrafficLookbackSeconds: intEnv("LITELLM_TRAFFIC_LOOKBACK_SECONDS", 300),
@@ -612,7 +612,7 @@ function loadTargetsFromEnv(providers: CapacityProviderDefinition[]): unknown[] 
       litellmDisplayPrefix: displayPrefixEnv(`${prefix}_LITELLM_DISPLAY_PREFIX`),
       aliasPriority: intOptionalEnv(`${prefix}_ALIAS_PRIORITY`),
       modelsMax: intOptionalEnv(`${prefix}_MODELS_MAX`),
-      hostingMode: enumOptionalEnv(`${prefix}_HOSTING_MODE`, ["dedicated", "multi-model"]),
+      audience: loadTargetAudienceFromEnv(prefix),
       aws: provider === "aws-ecs" || provider === "aws-ecs-asg" || provider === "aws-ec2" ? loadAwsTargetFromEnv(prefix, provider) : undefined,
       docker: provider === "docker" ? loadDockerContainerTargetFromEnv(prefix) : undefined,
       dockerCompose: provider === "docker-compose" ? loadDockerTargetFromEnv(prefix) : undefined,
@@ -645,6 +645,14 @@ function loadTargetsFromEnv(providers: CapacityProviderDefinition[]): unknown[] 
         : undefined
     });
   });
+}
+
+function loadTargetAudienceFromEnv(prefix: string): CapacityTarget["audience"] {
+  const scope = env(`${prefix}_AUDIENCE_SCOPE`) ?? "global";
+  if (scope === "global") return { scope: "global" };
+  if (scope === "teams") return { scope, teamIds: listEnv(`${prefix}_AUDIENCE_TEAM_IDS`) };
+  if (scope === "users") return { scope, userIds: listEnv(`${prefix}_AUDIENCE_USER_IDS`) };
+  return { scope } as CapacityTarget["audience"];
 }
 
 function loadHassleOffClientConfig(): AppConfig["hassleOff"] {
@@ -792,7 +800,6 @@ async function fetchNeuronTargets(provider: CapacityProviderDefinition, config: 
           contextLabel: model.contextLabel
         })),
       modelsMax: target.modelsMax,
-      hostingMode: target.hostingMode,
       litellmDisplayPrefix: target.litellmDisplayPrefix,
       aliasPriority: target.aliasPriority,
       healthUrl: target.healthUrl,
@@ -824,7 +831,6 @@ interface NeuronStatusResponse {
     displayName: string;
     modelIds: string[];
     modelsMax?: number;
-    hostingMode?: "dedicated" | "multi-model";
     litellmDisplayPrefix?: string;
     aliasPriority?: number;
     healthUrl?: string;
@@ -904,13 +910,6 @@ export function resolveStorageOperationLockPath(storage: StorageConfig, configur
   if (storage.driver === "sqlite") return path.join(path.dirname(path.resolve(storage.path)), "neuron-storage.lock");
   return path.resolve(process.cwd(), "data", "neuron-storage.lock");
 }
-function enumOptionalEnv<T extends string>(name: string, values: readonly T[]): T | undefined {
-  const value = env(name);
-  if (value === undefined) return undefined;
-  if (values.includes(value as T)) return value as T;
-  throw new Error(`${name} must be one of ${values.join(", ")}`);
-}
-
 function jsonOptionalEnv(name: string): unknown | undefined {
   const value = env(name);
   if (!value) return undefined;

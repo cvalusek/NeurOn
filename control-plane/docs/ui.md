@@ -234,7 +234,7 @@ refreshes the cache, benchmarks an activated runtime, and may activate a stopped
 target. **Rediscover all** runs targets one by one. AWS EC2 resource discovery
 hides instances already assigned to a NeurOn target by default.
 
-## Client Setup
+## Connection to your models
 
 Route:
 
@@ -242,9 +242,10 @@ Route:
 GET /client-setup
 ```
 
-The page shows global and target-scoped LiteLLM aliases and creates an OpenCode
-provider configuration for all models or one selected profile. It never creates
-a reservation or changes capacity.
+The page shows the short alias, shortest target-scoped alias, and canonical ID
+for each LiteLLM route and creates an OpenCode provider configuration for all
+models or one selected profile. Direct-host connections show the short alias
+and runtime model ID. It never creates a reservation or changes capacity.
 
 ## Usage Reports
 

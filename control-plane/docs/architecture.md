@@ -122,7 +122,7 @@ Important fields:
 - optional LiteLLM backend config
 - optional runtime model discovery config
 - optional HassleOff protection and activate-or-reprovision policy
-- optional `hostingMode` and numeric LiteLLM `aliasPriority`
+- numeric LiteLLM `aliasPriority`; hosting mode is derived from known model count
 
 ### ModelDefinition
 

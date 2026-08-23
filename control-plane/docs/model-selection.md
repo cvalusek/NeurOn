@@ -152,9 +152,9 @@ The assistant receives a sanitized deployment catalog (IDs, display names,
 aliases, selection measurements, context, and cost), saved-profile IDs/names,
 and the user's active reservation summary. It also receives an application-
 constructed current-screen snapshot: a named surface such as Home, Profile
-create/edit, Client setup, or an admin area; the route and title; and only the
+create/edit, Connection to your models, or an admin area; the route and title; and only the
 relevant typed controls such as the current profile draft, requirement filters,
-ranking shares, selected Home profile/timing, or Client setup profile. This lets
+ranking shares, selected Home profile/timing, or Connection to your models profile. This lets
 it answer “what am I looking at?” and update the right controls without sending
 HTML or scraping visible text. It never receives target endpoints, provider or
 model credentials, raw DOM contents, prompt logs, hidden fields outside the

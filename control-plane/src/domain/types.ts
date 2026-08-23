@@ -406,8 +406,6 @@ export interface CapacityTarget {
   /** Lower values become the primary LiteLLM model-group alias; later targets are formal fallbacks. */
   aliasPriority?: number;
   modelsMax?: number;
-  /** Operator-owned scheduling shape. modelsMax remains display/debug metadata. */
-  hostingMode?: "dedicated" | "multi-model";
   aws?: AwsTargetConfig;
   docker?: DockerContainerTargetConfig;
   dockerCompose?: DockerComposeTargetConfig;
@@ -630,6 +628,8 @@ export interface AppConfig {
   storage: StorageConfig;
   awsRegion: string;
   litellmApiBaseUrl?: string;
+  /** Exact operator-configured browser URL for LiteLLM's UI or playground. */
+  litellmUiUrl?: string;
   litellmApiKey?: string;
   litellmTrafficPollSeconds: number;
   litellmTrafficLookbackSeconds: number;

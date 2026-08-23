@@ -22,7 +22,6 @@ Important fields:
 - `provider`: provider type, such as `docker`, `runpod`, or `aws-ecs-asg`
 - `providerId`: configured provider instance; defaults to `provider`
 - `modelIds` and optional detailed `models`
-- optional `hostingMode`: `dedicated` or `multi-model`
 - optional positive `aliasPriority`: lower values win global LiteLLM
   model-group alias collisions; later targets become formal fallbacks
 - optional `audience`: `global`, selected durable team IDs, or selected durable
@@ -35,12 +34,16 @@ Provider relationships are direct: a target should reference the provider
 instance that owns it. Shared account/endpoint details belong on the provider;
 resource identifiers belong on the target.
 
+Hosting mode is derived, not configured: one known model is a dedicated target,
+more than one is a multi-model host, and an empty catalog remains unknown until
+discovery. The same derived value powers the profile requirement filter.
+
 Persisted target models can carry operator-managed aliases in addition to
 runtime-discovered IDs. NeurOn keeps one canonical LiteLLM deployment for the
 exact target/model, maps scoped `<target>/<alias>` and global friendly names to
 it with LiteLLM model-group aliases, and makes the lowest-priority-number target
 the global alias owner. Later targets form the fallback chain. The same names
-appear in profile selection and Client setup.
+appear in profile selection and **Connection to your models**.
 
 Audience filtering is an authorization boundary, not only a display hint. It
 is enforced in the UI, REST API, MCP catalog and tools, reservation validation,

@@ -8,6 +8,7 @@ import type { ShutdownStatus } from "../services/ShutdownCoordinator.js";
 import type { MaintenanceControlStatus } from "../services/MaintenanceControl.js";
 import { safeGithubRepositoryUrl, type UpdateStatus } from "../services/UpdateChecker.js";
 import type { ModelDeploymentSelectionView } from "../services/ModelSelectionService.js";
+import { targetHostingMode } from "../utils/hostingMode.js";
 import { directRuntimeHostUrl } from "../utils/runtimeUrl.js";
 
 export interface HassleOffSafetyView {
@@ -147,6 +148,12 @@ export function layout(title: string, user: AuthenticatedUser | undefined, body:
     .modal-dialog.profile-builder-dialog { width: min(1180px, 100%); }
     .profile-builder-layout { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; align-items: start; }
     .profile-audience { max-width: 520px; }
+    .external-launch { display: inline-grid; place-items: center; width: 30px; height: 30px; border: 1px solid #b8c5bf; border-radius: 7px; text-decoration: none; font-size: 18px; line-height: 1; background: #fff; }
+    .external-launch:hover { background: #eef7f4; border-color: #0f766e; }
+    .audience-editor { border: 1px solid #d8ddd7; border-radius: 8px; padding: 12px; background: #fbfcfb; }
+    .audience-choice-list { display: grid; gap: 7px; margin-top: 8px; max-height: 220px; overflow: auto; }
+    .audience-choice { display: flex; gap: 9px; align-items: flex-start; padding: 8px 10px; border: 1px solid #d8ddd7; border-radius: 7px; background: #fff; }
+    .audience-choice input { width: auto; margin-top: 3px; }
     .profile-review-grid { display: grid; gap: 10px; }
     .profile-review-model { border: 1px solid #d8ddd7; border-radius: 8px; padding: 10px; background: #fbfcfb; }
     .profile-guide { border: 1px solid #c7d9d3; border-radius: 8px; background: #f5fbf9; padding: 14px; margin: 14px 0; }
@@ -312,7 +319,7 @@ export function layout(title: string, user: AuthenticatedUser | undefined, body:
           <a href="/">Home</a>
           <a href="/profiles">Profiles</a>
           <a href="/help">Guide</a>
-          <a href="/client-setup">Client setup</a>
+          <a href="/client-setup">Connection to your models</a>
           <a href="/api-keys">API keys</a>
           ${user ? `<form method="post" action="/logout"><button class="drawer-action" type="submit">Sign out</button></form>` : ""}
         </div>
@@ -747,7 +754,7 @@ export function welcomePage(user: AuthenticatedUser, hasProfiles: boolean, helpM
   </section>`);
 }
 
-export function startPage(user: AuthenticatedUser, targets: Array<{ target: CapacityTarget; models: ModelDefinition[] }>, profiles: ReservationProfile[] = [], error = "", costEstimates: Record<string, { hourlyUsd: number }> = {}, statusPollSeconds = 5, selectionDeployments: ModelDeploymentSelectionView[] = [], assignableTeams: Team[] = [], litellmApiBaseUrl?: string): string {
+export function startPage(user: AuthenticatedUser, targets: Array<{ target: CapacityTarget; models: ModelDefinition[] }>, profiles: ReservationProfile[] = [], error = "", costEstimates: Record<string, { hourlyUsd: number }> = {}, statusPollSeconds = 5, selectionDeployments: ModelDeploymentSelectionView[] = [], assignableTeams: Team[] = [], litellmUiUrl?: string): string {
   const initialTargetId = targets[0]?.target.id ?? "";
   return layout("NeurOn", user, `<div class="home-grid"><div><section class="panel">
     <h2>Your reservations</h2>
@@ -789,7 +796,7 @@ export function startPage(user: AuthenticatedUser, targets: Array<{ target: Capa
     const modelLookup = ${safeJson(modelLookupForTargets(targets))};
     const reservationRoutingLookup = ${safeJson(reservationRoutingLookupForTargets(targets))};
     const targetLookup = ${safeJson(targetLookupForTargets(targets))};
-    const litellmUiUrl = ${JSON.stringify(litellmConsoleUrl(litellmApiBaseUrl))};
+    const litellmUiUrl = ${JSON.stringify(safeConfiguredExternalUrl(litellmUiUrl))};
     const profiles = ${safeJson(profilesForClient(profiles, targets))};
     const costLookup = ${safeJson(costEstimates)};
     const currentUser = ${JSON.stringify(user.username)};
@@ -860,17 +867,16 @@ export function startPage(user: AuthenticatedUser, targets: Array<{ target: Capa
         const selection = reservation.targetSelections?.find(candidate => candidate.targetId === targetId);
         const modelIds = selection?.modelIds ?? reservation.modelIds;
         const modelRows = modelIds.length ? modelIds.map(modelId => {
-          const model = reservationRoutingLookup[targetId]?.[modelId] ?? { displayName: modelId, globalAliases: [], scopedAliases: [], runtimeModelIds: [modelId] };
-          const routes = model.globalAliases.map((alias, index) => {
-            const scoped = model.scopedAliases[index];
-            if (!scoped || scoped === alias) return '<span class="route-kind">Global + target</span>' + copyButton(alias, index === 0);
-            return '<span class="route-kind">Global</span>' + copyButton(alias, index === 0) + '<span class="route-kind">Target</span>' + copyButton(scoped);
-          }).join('');
-          const liteLlmLink = litellmUiUrl ? '<a href="' + escapeText(litellmUiUrl) + '" target="_blank" rel="noopener noreferrer">Open LiteLLM playground ↗</a>' : '';
-          const directLink = target.directHostUrl ? '<a href="' + escapeText(target.directHostUrl) + '" target="_blank" rel="noopener noreferrer">Open direct model host ↗</a>' : '';
-          return '<div class="reservation-route-model"><strong>' + escapeText(model.displayName) + '</strong><div class="routing-blocks"><div class="routing-block"><div class="target-status-head"><h4>LiteLLM gateway</h4>' + liteLlmLink + '</div><div class="copy-row">' + (routes || '<span class="muted">Alias not found</span>') + '</div><p class="model-meta">Global aliases follow priority and fallback; target aliases pin this deployment.</p></div><div class="routing-block"><div class="target-status-head"><h4>Direct model host</h4>' + directLink + '</div><div class="model-meta">' + model.runtimeModelIds.map(id => '<code>' + escapeText(id) + '</code>').join(' · ') + '</div></div></div></div>';
+          const model = reservationRoutingLookup[targetId]?.[modelId] ?? { displayName: modelId, canonicalModelId: modelId, shortAlias: modelId, directId: modelId };
+          const identifier = (label, value, primary = false) => value ? '<span class="route-kind">' + label + '</span>' + copyButton(value, primary) : '';
+          const routes = identifier('Alias', model.shortAlias, true) + identifier('Target alias', model.scopedAlias) + identifier('ID', model.canonicalModelId);
+          const directRoutes = identifier('Alias', model.shortAlias, true) + identifier('ID', model.directId);
+          const launch = (url, label) => url ? '<a class="external-launch" href="' + escapeText(url) + '" target="_blank" rel="noopener noreferrer" aria-label="' + escapeText(label) + '" title="' + escapeText(label) + '"><span aria-hidden="true">↗</span></a>' : '';
+          const liteLlmLink = launch(litellmUiUrl, 'Open LiteLLM');
+          const directLink = launch(target.directHostUrl, 'Open direct model host');
+          return '<div class="reservation-route-model"><strong>' + escapeText(model.displayName) + '</strong><div class="routing-blocks"><div class="routing-block"><div class="target-status-head"><h4>LiteLLM gateway</h4>' + liteLlmLink + '</div><div class="copy-row">' + routes + '</div><p class="model-meta">The short alias follows priority and fallback; the target alias pins this deployment.</p></div><div class="routing-block"><div class="target-status-head"><h4>Direct model host</h4>' + directLink + '</div><div class="copy-row">' + directRoutes + '</div></div></div></div>';
         }).join('') : '<p class="muted">All models on this target</p>';
-        return '<div class="reservation-route-group"><div class="reservation-route-head"><strong>' + escapeText(target.displayName) + '</strong><a href="/client-setup">Client configuration</a></div>' + modelRows + '</div>';
+        return '<div class="reservation-route-group"><div class="reservation-route-head"><strong>' + escapeText(target.displayName) + '</strong><a href="/client-setup">Connection to your models</a></div>' + modelRows + '</div>';
       }).filter(Boolean).join('');
       return groups ? '<div class="reservation-routing">' + groups + '</div>' : '';
     };
@@ -1159,7 +1165,7 @@ export function reservationPage(
     <p>Projected total: <span id="reservation-cost-projected" class="status">Not available</span></p>
     <h2>Connect to your models</h2>
     <p class="muted">Use a LiteLLM alias in OpenCode or another configured client. Runtime IDs are the values exposed directly by the model host.</p>
-    ${reservationRoutingHtml(reservation, targets, undefined, config.litellmApiBaseUrl)}
+    ${reservationRoutingHtml(reservation, targets, undefined, config.litellmUiUrl)}
     <div id="target-status"></div>
     <form method="post" action="/reservations/${escapeHtml(reservation.id)}/done"><button class="large danger" type="submit">I'm done</button></form>
   </section>
@@ -1235,8 +1241,8 @@ export function clientSetupPage(
   }).sort((left, right) => left.globalAlias.localeCompare(right.globalAlias) || left.priority - right.priority || left.targetDisplayName.localeCompare(right.targetDisplayName));
   const serialized = JSON.stringify(rows).replace(/</gu, "\\u003c");
   const options = profiles.map((profile) => `<option value="${escapeHtml(profile.id)}">${escapeHtml(profile.name)}</option>`).join("");
-  return layout("Client setup", user, `<section class="panel">
-    <div class="target-status-head"><div><h1>Client setup</h1><p class="muted">Copy a complete OpenCode model catalog or inspect the LiteLLM routes NeurOn publishes. Global aliases use target priority and fall back in numeric order; target-scoped aliases pin one deployment.</p></div><a class="button secondary" href="/api-keys">Create API key</a></div>
+  return layout("Connection to your models", user, `<section class="panel">
+    <div class="target-status-head"><div><h1>Connection to your models</h1><p class="muted">Copy a complete OpenCode model catalog or inspect the LiteLLM routes NeurOn publishes. Global aliases use target priority and fall back in numeric order; target-scoped aliases pin one deployment.</p></div><a class="button secondary" href="/api-keys">Create API key</a></div>
     <p><label>Configuration scope<br><select id="client-profile"><option value="">All models (global fallback aliases)</option>${options}</select></label></p>
   </section>
   <section class="panel"><h2>OpenCode provider</h2><p class="muted">Replace the endpoint placeholder and keep secrets in environment variables. The NeurOn plugin reserves and waits for the selected route before OpenCode sends the request.</p><div class="inline-actions"><button type="button" data-copy-client="opencode-config">Copy config</button><button class="secondary" type="button" data-copy-client="opencode-env">Copy plugin environment</button><span class="muted" id="client-copy-status"></span></div><pre id="opencode-config"></pre><pre id="opencode-env">NEURON_API_BASE_URL=&lt;NEURON_BASE_URL&gt;
@@ -1418,7 +1424,7 @@ function profileListCard(profile: ReservationProfile, targets: Array<{ target: C
     return `<div class="target-status-card"><div class="target-status-head"><strong>${escapeHtml(targetLookup[selection.targetId]?.displayName ?? selection.targetId)}</strong><span class="muted"><code>${escapeHtml(selection.targetId)}</code></span></div><div class="chip-row">${modelSummary}</div></div>`;
   }).join("");
   const scope = profile.sharingScope === "everyone" ? `<span class="pill">Everyone</span>` : profile.teamId ? `<span class="pill">Team: ${escapeHtml(team?.name ?? profile.teamId)}</span>` : `<span class="pill">Personal</span>`;
-  const actions = `<div class="inline-actions"><a class="button secondary" href="/client-setup?profile=${encodeURIComponent(profile.id)}">Client setup</a>${manageable ? `<a class="button secondary" href="/profiles/${escapeHtml(profile.id)}/edit">Edit</a><form method="post" action="/reservation-profiles/${escapeHtml(profile.id)}/delete"><button class="danger" type="submit">Delete</button></form>` : ""}</div>`;
+  const actions = `<div class="inline-actions"><a class="button secondary" href="/client-setup?profile=${encodeURIComponent(profile.id)}">Connection to your models</a>${manageable ? `<a class="button secondary" href="/profiles/${escapeHtml(profile.id)}/edit">Edit</a><form method="post" action="/reservation-profiles/${escapeHtml(profile.id)}/delete"><button class="danger" type="submit">Delete</button></form>` : ""}</div>`;
   return `<details class="drilldown"><summary><div><strong>${escapeHtml(profile.name)}</strong>${profile.description ? `<div class="muted">${escapeHtml(profile.description)}</div>` : ""}<div class="target-status-meta">${scope}${defaults ? `<span class="pill">${escapeHtml(defaults)}</span>` : ""}<span class="muted">${profile.selections.length} target selection${profile.selections.length === 1 ? "" : "s"}</span></div></div>${actions}</summary><div class="drilldown-body">${selections}</div></details>`;
 }
 
@@ -1937,14 +1943,14 @@ function authMethodDeletePanel(method: AuthMethodView): string {
   </form>`;
 }
 
-export function targetAdminPage(user: AuthenticatedUser, targets: TargetView[], providers: ProviderView[], runtimeProfiles: RuntimeProfile[] = [], error = "", createdTargetId = "", statusPollSeconds = 5): string {
+export function targetAdminPage(user: AuthenticatedUser, targets: TargetView[], providers: ProviderView[], runtimeProfiles: RuntimeProfile[] = [], teams: Team[] = [], users: UserAccount[] = [], error = "", createdTargetId = "", statusPollSeconds = 5): string {
   const rows = targets.length
-    ? targets.map((target) => targetRow(target, providers, runtimeProfiles)).join("")
+    ? targets.map((target) => targetRow(target, providers, runtimeProfiles, teams, users)).join("")
     : `<p class="muted">No targets configured</p>`;
   const addTarget = providers.length > 0
     ? `<button type="button" data-open-modal="target-modal">Add target</button>`
     : `<a href="/admin/providers">Add a provider first</a>`;
-  const modal = providers.length > 0 ? targetCreateModal(providers, runtimeProfiles) : "";
+  const modal = providers.length > 0 ? targetCreateModal(providers, runtimeProfiles, teams, users) : "";
   return layout("NeurOn Targets", user, `<section class="panel">
     <div class="target-status-head"><h1>Targets</h1><div class="inline-actions"><button class="secondary" type="button" data-rediscover-all>Rediscover and benchmark all</button>${addTarget}</div></div>
     <p class="muted" data-rediscover-all-status>Runs targets one at a time. Each target is discovered, briefly benchmarked, and returned through the normal demand controller before the next target begins.</p>
@@ -1958,7 +1964,38 @@ export function targetAdminPage(user: AuthenticatedUser, targets: TargetView[], 
   </script>`);
 }
 
-function targetCreateModal(providers: ProviderView[], runtimeProfiles: RuntimeProfile[]): string {
+function targetAudienceEditor(teams: Team[], users: UserAccount[], audience: CapacityTarget["audience"] = { scope: "global" }): string {
+  const teamIds = new Set(audience.scope === "teams" ? audience.teamIds : []);
+  const userIds = new Set(audience.scope === "users" ? audience.userIds : []);
+  const knownTeamIds = new Set(teams.map((team) => team.id));
+  const availableUsers = users.filter((user) => !user.mergedIntoUserId);
+  const availableUserIds = new Set(availableUsers.map((user) => user.id));
+  const usersById = new Map(users.map((user) => [user.id, user]));
+  const teamChoices = [
+    ...teams.map((team) => ({ id: team.id, label: team.name })),
+    ...Array.from(teamIds).filter((id) => !knownTeamIds.has(id)).map((id) => ({ id, label: id }))
+  ];
+  const userChoices = [
+    ...availableUsers.map((user) => ({ id: user.id, label: user.displayName ? `${user.displayName} (${user.username})` : user.username, status: user.status })),
+    ...Array.from(userIds).filter((id) => !availableUserIds.has(id)).map((id) => {
+      const user = usersById.get(id);
+      return { id, label: user?.displayName ? `${user.displayName} (${user.username})` : user?.username ?? id, status: "disabled" as const };
+    })
+  ];
+  const teamOptions = teamChoices.length
+    ? teamChoices.map((team) => `<label class="audience-choice"><input type="checkbox" name="audienceTeamIds" value="${escapeHtml(team.id)}" ${teamIds.has(team.id) ? "checked" : ""}><span><strong>${escapeHtml(team.label)}</strong></span></label>`).join("")
+    : `<p class="muted">No teams exist yet. Create a team before limiting a target to teams.</p>`;
+  const userOptions = userChoices.length
+    ? userChoices.map((entry) => `<label class="audience-choice"><input type="checkbox" name="audienceUserIds" value="${escapeHtml(entry.id)}" ${userIds.has(entry.id) ? "checked" : ""}><span><strong>${escapeHtml(entry.label)}</strong>${entry.status === "disabled" ? ` <span class="badge done">disabled</span>` : ""}</span></label>`).join("")
+    : `<p class="muted">No users are available.</p>`;
+  return `<section class="audience-editor" data-target-audience-editor>
+    <p><label>Target audience${helpTip("Global targets are available to every user. Team targets are available to members of the selected teams, including descendant-team members. User targets are private to the selected people.")}<br><select name="audienceScope"><option value="global" ${audience.scope === "global" ? "selected" : ""}>Everyone</option><option value="teams" ${audience.scope === "teams" ? "selected" : ""}>Selected teams</option><option value="users" ${audience.scope === "users" ? "selected" : ""}>Selected people</option></select></label></p>
+    <div data-audience-options="teams" ${audience.scope === "teams" ? "" : "hidden"}><p class="muted">Choose every team that may see and reserve this target.</p><div class="audience-choice-list">${teamOptions}</div></div>
+    <div data-audience-options="users" ${audience.scope === "users" ? "" : "hidden"}><p class="muted">Choose every person who may see and reserve this target.</p><div class="audience-choice-list">${userOptions}</div></div>
+  </section>`;
+}
+
+function targetCreateModal(providers: ProviderView[], runtimeProfiles: RuntimeProfile[], teams: Team[], users: UserAccount[]): string {
   return `<div id="target-modal" class="modal" hidden>
     <div class="modal-dialog">
     <div class="target-status-head"><h2>Add target</h2><button class="secondary" type="button" data-close-modal>Close</button></div>
@@ -1971,6 +2008,7 @@ function targetCreateModal(providers: ProviderView[], runtimeProfiles: RuntimePr
         <p><label>ID<br><input name="id" type="text" placeholder="target-id" required></label></p>
         <p><label>Display name<br><input name="displayName" type="text" placeholder="Target name"></label></p>
       </div>
+      ${targetAudienceEditor(teams, users)}
       <div id="runpod-target-fields">
         <p><label>RunPod Pod ID<br><input name="runpodPodId" type="text" placeholder="pod-id"></label></p>
         <p><label>RunPod runtime port<br><input name="runpodRuntimePort" type="number" min="1" placeholder="8080"></label></p>
@@ -2001,10 +2039,6 @@ function targetCreateModal(providers: ProviderView[], runtimeProfiles: RuntimePr
         <p><label>Health URL override<br><input name="healthUrl" type="text" placeholder="http://runtime.internal:8080/health"></label></p>
         <p><label>Hourly cost override (USD)<br><input name="estimatedHourlyCostUsd" type="number" min="0" step="0.000001" placeholder="leave empty for provider discovery"></label></p>
         <p><label>Configured model IDs<br><input name="modelIds" type="text" placeholder="qwen-3.6,gemma-4"></label></p>
-        <p><label>Hosting mode<br><select name="hostingMode"><option value="">Unknown</option><option value="dedicated">Dedicated model host</option><option value="multi-model">Multi-model host</option></select></label></p>
-        <p><label>Target audience<br><select name="audienceScope"><option value="global">Global</option><option value="teams">Specific teams</option><option value="users">Specific users</option></select></label></p>
-        <p><label>Team IDs<br><input name="audienceTeamIds" type="text" placeholder="engineering,research"></label></p>
-        <p><label>User IDs<br><input name="audienceUserIds" type="text" placeholder="usr_..."></label></p>
         <p><label>LiteLLM model-group alias priority<br><input name="aliasPriority" type="number" min="1" step="1" value="100"></label></p>
         <p class="muted">Lower priorities own a colliding alias; later targets become formal LiteLLM fallbacks.</p>
         <p><label>LiteLLM model route prefixes<br><input name="trafficModelPrefixes" type="text" placeholder="defaults to &lt;target-id&gt;/"></label></p>
@@ -2072,6 +2106,14 @@ function ec2InstanceDiscoveryScript(): string {
 
 function targetAdminScript(providers: ProviderView[], runtimeProfiles: RuntimeProfile[], statusPollSeconds: number): string {
   return `
+    const syncAudienceEditor = (editor) => {
+      const scope = editor.querySelector('select[name="audienceScope"]')?.value ?? 'global';
+      editor.querySelectorAll('[data-audience-options]').forEach(panel => { panel.hidden = panel.dataset.audienceOptions !== scope; });
+    };
+    document.querySelectorAll('[data-target-audience-editor]').forEach(editor => {
+      editor.querySelector('select[name="audienceScope"]')?.addEventListener('change', () => syncAudienceEditor(editor));
+      syncAudienceEditor(editor);
+    });
     document.addEventListener('click', async (event) => {
       const button = event.target.closest('[data-copy]');
       if (!button) return;
@@ -2240,14 +2282,14 @@ function targetAdminScript(providers: ProviderView[], runtimeProfiles: RuntimePr
   `;
 }
 
-function targetRow(target: TargetView, providers: ProviderView[], runtimeProfiles: RuntimeProfile[]): string {
+function targetRow(target: TargetView, providers: ProviderView[], runtimeProfiles: RuntimeProfile[], teams: Team[], users: UserAccount[]): string {
   const details = targetDetails(target);
   const editAction = target.editable
-    ? targetEditPanel(target, providers, runtimeProfiles)
+    ? targetEditPanel(target, providers, runtimeProfiles, teams, users)
     : `<p class="muted">Copy this target to the database before editing settings such as LiteLLM model route prefixes.</p><form method="post" action="/admin/targets/${escapeHtml(target.id)}/copy-to-db"><button class="secondary" type="submit">Copy to DB</button></form>`;
   const deleteAction = target.editable ? targetDeletePanel(target) : `<p class="muted">This target is loaded from declarative config. Remove it from configuration or copy it to the database before deleting it here.</p>`;
-  const users = target.modelIds.length > 0 ? `${target.modelIds.length} configured models` : "Discovery";
-  return `<details class="drilldown"><summary><div><strong>${escapeHtml(target.displayName)}</strong><div class="target-status-meta"><span class="pill off">${escapeHtml(target.provider)}</span><span class="muted"><code>${escapeHtml(target.id)}</code></span><span class="muted">${escapeHtml(users)}</span></div><div data-target-status="${escapeHtml(target.id)}"><p class="muted">Loading status...</p></div></div><span class="badge ${target.source === "persisted" ? "active" : "done"}">${escapeHtml(target.source)}</span></summary><div class="drilldown-body" data-tabs><div class="tabbar"><button type="button" data-tab="view" aria-selected="true">View</button><button type="button" data-tab="json" aria-selected="false">JSON</button><button type="button" data-tab="env" aria-selected="false">ENV</button><button type="button" data-tab="edit" aria-selected="false">Edit</button><button type="button" data-tab="delete" aria-selected="false">Delete</button></div>${details}<section class="tab-panel" data-tab-panel="edit" hidden><p class="muted">${target.editable ? "This target is stored in the database." : "This target is loaded from declarative config."}</p>${editAction}</section><section class="tab-panel" data-tab-panel="delete" hidden>${deleteAction}</section></div></details>`;
+  const modelSummary = target.modelIds.length > 0 ? `${target.modelIds.length} configured models` : "Discovery";
+  return `<details class="drilldown"><summary><div><strong>${escapeHtml(target.displayName)}</strong><div class="target-status-meta"><span class="pill off">${escapeHtml(target.provider)}</span><span class="muted"><code>${escapeHtml(target.id)}</code></span><span class="muted">${escapeHtml(modelSummary)}</span></div><div data-target-status="${escapeHtml(target.id)}"><p class="muted">Loading status...</p></div></div><span class="badge ${target.source === "persisted" ? "active" : "done"}">${escapeHtml(target.source)}</span></summary><div class="drilldown-body" data-tabs><div class="tabbar"><button type="button" data-tab="view" aria-selected="true">View</button><button type="button" data-tab="json" aria-selected="false">JSON</button><button type="button" data-tab="env" aria-selected="false">ENV</button><button type="button" data-tab="edit" aria-selected="false">Edit</button><button type="button" data-tab="delete" aria-selected="false">Delete</button></div>${details}<section class="tab-panel" data-tab-panel="edit" hidden><p class="muted">${target.editable ? "This target is stored in the database." : "This target is loaded from declarative config."}</p>${editAction}</section><section class="tab-panel" data-tab-panel="delete" hidden>${deleteAction}</section></div></details>`;
 }
 
 export function hassleOffSafetyPage(user: AuthenticatedUser, view: HassleOffSafetyView): string {
@@ -2347,7 +2389,7 @@ function safeDateLabel(value: string | undefined): string | undefined {
   return Number.isFinite(date.getTime()) ? formatDate(date) : undefined;
 }
 
-function targetEditPanel(target: TargetView, providers: ProviderView[], runtimeProfiles: RuntimeProfile[]): string {
+function targetEditPanel(target: TargetView, providers: ProviderView[], runtimeProfiles: RuntimeProfile[], teams: Team[], users: UserAccount[]): string {
   const providerSelection = target.providerId ?? target.provider;
   const runtimeProfileId = runtimeProfileForTarget(target, runtimeProfiles);
   return `<form method="post" action="/admin/targets/${escapeHtml(target.id)}/update" data-target-edit-form>
@@ -2357,6 +2399,7 @@ function targetEditPanel(target: TargetView, providers: ProviderView[], runtimeP
       <p><label>ID<br><input name="id" type="text" value="${escapeHtml(target.id)}" required></label></p>
       <p><label>Display name<br><input name="displayName" type="text" value="${escapeHtml(target.displayName)}"></label></p>
     </div>
+    ${targetAudienceEditor(teams, users, target.audience)}
     <div data-edit-provider-fields="runpod">
       <p><label>RunPod Pod ID<br><input name="runpodPodId" type="text" value="${escapeHtml(target.runpod?.podId ?? "")}"></label></p>
       <p><label>RunPod runtime port<br><input name="runpodRuntimePort" type="number" min="1" value="${escapeHtml(String(target.runpod?.runtimePort ?? ""))}"></label></p>
@@ -2386,10 +2429,6 @@ function targetEditPanel(target: TargetView, providers: ProviderView[], runtimeP
       <p><label>Health URL override<br><input name="healthUrl" type="text" value="${escapeHtml(target.healthUrl ?? "")}"></label></p>
       <p><label>Hourly cost override (USD)<br><input name="estimatedHourlyCostUsd" type="number" min="0" step="0.000001" value="${escapeHtml(String(target.costEstimate?.hourlyUsd ?? ""))}" placeholder="leave empty for provider discovery"></label></p>
       <p><label>Configured model IDs<br><input name="modelIds" type="text" value="${escapeHtml(target.modelIds.join(","))}"></label></p>
-      <p><label>Hosting mode<br><select name="hostingMode"><option value="" ${target.hostingMode ? "" : "selected"}>Unknown</option><option value="dedicated" ${target.hostingMode === "dedicated" ? "selected" : ""}>Dedicated model host</option><option value="multi-model" ${target.hostingMode === "multi-model" ? "selected" : ""}>Multi-model host</option></select></label></p>
-      <p><label>Target audience<br><select name="audienceScope"><option value="global" ${(target.audience?.scope ?? "global") === "global" ? "selected" : ""}>Global</option><option value="teams" ${target.audience?.scope === "teams" ? "selected" : ""}>Specific teams</option><option value="users" ${target.audience?.scope === "users" ? "selected" : ""}>Specific users</option></select></label></p>
-      <p><label>Team IDs<br><input name="audienceTeamIds" type="text" value="${escapeHtml(target.audience?.scope === "teams" ? target.audience.teamIds.join(",") : "")}"></label></p>
-      <p><label>User IDs<br><input name="audienceUserIds" type="text" value="${escapeHtml(target.audience?.scope === "users" ? target.audience.userIds.join(",") : "")}"></label></p>
       <p><label>LiteLLM model-group alias priority<br><input name="aliasPriority" type="number" min="1" step="1" value="${target.aliasPriority ?? 100}"></label></p>
       <p class="muted">Lower priorities own a colliding alias; matching aliases on higher-numbered targets are formal fallbacks.</p>
       <p><label>LiteLLM model route prefixes<br><input name="trafficModelPrefixes" type="text" value="${escapeHtml(target.trafficModelPrefixes?.join(",") ?? "")}" placeholder="defaults to ${escapeHtml(target.id)}/"></label></p>
@@ -2415,10 +2454,14 @@ function targetDeletePanel(target: TargetView): string {
 function targetDetails(target: CapacityTarget): string {
   const declarative = declarativeTargetJson(target);
   const env = declarativeTargetEnv(target);
+  const hostingMode = targetHostingMode(target.modelIds.length);
+  const audienceLabel = target.audience?.scope === "teams" ? `Selected teams (${target.audience.teamIds.length})` : target.audience?.scope === "users" ? `Selected people (${target.audience.userIds.length})` : "Everyone";
   const viewRows = [
     ["Provider", target.providerId ?? target.provider],
     ["Provider type", target.provider],
     ["Models", target.modelIds.length ? target.modelIds.join(", ") : "Discovery"],
+    ["Hosting mode", hostingMode === "dedicated" ? "Dedicated" : hostingMode === "multi-model" ? "Multi-model" : "Not discovered"],
+    ["Audience", audienceLabel],
     ["API URL", target.apiUrl],
     ["Health URL", target.healthUrl],
     ["LiteLLM route prefixes", litellmRoutePrefixes(target).join(", ")],
@@ -2474,6 +2517,7 @@ function declarativeTargetJson(target: CapacityTarget): string {
     trafficModelPrefixes: target.trafficModelPrefixes,
     litellmDisplayPrefix: target.litellmDisplayPrefix,
     modelsMax: target.modelsMax,
+    audience: target.audience,
     aws: target.aws,
     docker: target.docker,
     dockerCompose: target.dockerCompose,
@@ -2505,6 +2549,9 @@ function declarativeTargetEnv(target: CapacityTarget): string {
     target.trafficModelPrefixes?.length ? envLine(`${prefix}_TRAFFIC_MODEL_PREFIXES`, target.trafficModelPrefixes.join(",")) : "",
     target.litellmDisplayPrefix !== undefined ? envLine(`${prefix}_LITELLM_DISPLAY_PREFIX`, target.litellmDisplayPrefix || "__empty__") : "",
     target.modelsMax ? envLine(`${prefix}_MODELS_MAX`, String(target.modelsMax)) : "",
+    envLine(`${prefix}_AUDIENCE_SCOPE`, target.audience?.scope ?? "global"),
+    target.audience?.scope === "teams" ? envLine(`${prefix}_AUDIENCE_TEAM_IDS`, target.audience.teamIds.join(",")) : "",
+    target.audience?.scope === "users" ? envLine(`${prefix}_AUDIENCE_USER_IDS`, target.audience.userIds.join(",")) : "",
     target.aws?.cluster ? envLine(`${prefix}_AWS_CLUSTER`, target.aws.cluster) : "",
     target.aws?.service ? envLine(`${prefix}_AWS_SERVICE`, target.aws.service) : "",
     target.aws?.clusterName ? envLine(`${prefix}_AWS_CLUSTER_NAME`, target.aws.clusterName) : "",
@@ -3045,11 +3092,14 @@ function profileCreateModal(
     const entry = targets.find(({ target }) => target.id === deployment.targetId);
     const model = entry?.models.find((candidate) => candidate.id === deployment.modelId);
     const aliases = entry ? litellmAliases(entry.target, deployment.modelId, deployment.aliases) : { global: deployment.aliases, scoped: [] };
+    const discoveredRuntimeIds = Array.from(new Set([...(model?.runtimeModelIds ?? []), ...(model?.backendModelIds ?? [])]));
+    const runtimeModelIds = discoveredRuntimeIds.length ? discoveredRuntimeIds : [deployment.modelId];
     return {
       ...deployment,
       globalAliases: aliases.global,
       scopedAliases: aliases.scoped,
-      runtimeModelIds: Array.from(new Set([...(model?.runtimeModelIds ?? []), ...(model?.backendModelIds ?? []), deployment.modelId])),
+      runtimeModelIds,
+      ...routingIdentifiers(deployment.modelId, aliases.global, aliases.scoped, runtimeModelIds),
       directHostUrl: entry ? directRuntimeHostUrl(entry.target) : undefined
     };
   });
@@ -3108,7 +3158,7 @@ function profileSelectionGuide(deployments: ModelDeploymentSelectionView[]): str
     <p class="muted">Requirements below remove deployments that cannot work. Missing measurements never pass a selected requirement.</p>
     <div class="selection-filter-grid" style="margin-top: 14px;">
       <label>Minimum context${helpTip("A hard per-request context requirement. Values come from target configuration or runtime discovery, including any concurrency sharing.")}<br><input id="profile-min-context" class="context-slider" type="range" min="0" max="${contexts.length}" step="1" value="0" list="profile-context-stops" data-context-values="${escapeHtml(JSON.stringify(contexts))}"><datalist id="profile-context-stops"><option value="0" label="Any"></option>${contextStops}</datalist><output id="profile-min-context-output">No minimum</output></label>
-      <label>Hosting mode${helpTip("Dedicated and multi-model are explicit target settings. Unclassified targets stay separate; NeurOn does not guess from modelsMax or catalog size.")}<br><select id="profile-hosting-mode"><option value="">All hosting modes (${deployments.length})</option><option value="dedicated">Dedicated model host (${hostingCounts.dedicated})</option><option value="multi-model">Multi-model host (${hostingCounts.multi})</option><option value="unclassified">Unclassified (${hostingCounts.unclassified})</option></select></label>
+      <label>Hosting mode${helpTip("NeurOn derives this from the target's current catalog: one model is dedicated, and more than one is a multi-model host. Targets without a known model remain unclassified until discovery.")}<br><select id="profile-hosting-mode"><option value="">All hosting modes (${deployments.length})</option><option value="dedicated">Dedicated model host (${hostingCounts.dedicated})</option><option value="multi-model">Multi-model host (${hostingCounts.multi})</option><option value="unclassified">Not discovered (${hostingCounts.unclassified})</option></select></label>
       <label>Maximum target cost${helpTip("A hard hourly target-cost ceiling. The slider stops are the costs currently known to NeurOn.")}<br><input id="profile-max-cost" class="context-slider" type="range" min="0" max="${costs.length}" step="1" value="0" list="profile-cost-stops" data-cost-values="${escapeHtml(JSON.stringify(costs))}"><datalist id="profile-cost-stops"><option value="0" label="Any"></option>${costStops}</datalist><output id="profile-max-cost-output">No maximum</output></label>
     </div>
     ${technicalCapabilities.length ? `<fieldset><legend>Required technical capabilities${helpTip("Binary features advertised by the runtime or configured by an operator, such as vision or tool use. Selected features are hard requirements.")}</legend><div id="profile-technical-capabilities" class="requirement-tags">${technicalCapabilities.map((capability) => `<label><input type="checkbox" value="${escapeHtml(capability)}" data-profile-technical-capability> ${escapeHtml(domainLabel(capability))}</label>`).join("")}</div></fieldset>` : `<p class="muted">No runtime has advertised a recognized technical capability such as vision or tool use yet.</p>`}
@@ -3457,7 +3507,7 @@ function profileSelectionClientScript(deployments: ModelDeploymentSelectionView[
 }
 
 function profileEditorClientScript(
-  deployments: Array<ModelDeploymentSelectionView & { globalAliases: string[]; scopedAliases: string[]; runtimeModelIds: string[]; directHostUrl?: string }>,
+  deployments: Array<ModelDeploymentSelectionView & { globalAliases: string[]; scopedAliases: string[]; runtimeModelIds: string[]; shortAlias: string; scopedAlias?: string; directId: string; directHostUrl?: string }>,
   costs: Record<string, { hourlyUsd: number }>,
   profile?: ReservationProfile
 ): string {
@@ -3555,13 +3605,13 @@ function profileEditorClientScript(
             deployment.performance?.prefillTokensPerSecond === undefined ? '' : 'Prefill ' + formatMetricValue(deployment.performance.prefillTokensPerSecond) + ' t/s',
             deployment.quantization?.qualityRetentionPercent === undefined ? '' : 'Estimated quality retained ' + formatMetricValue(deployment.quantization.qualityRetentionPercent) + '%'
           ].filter(Boolean);
-          const liteLlm = [...new Set([...deployment.globalAliases, ...deployment.scopedAliases])];
-          const aliasChips = liteLlm.length ? liteLlm.map(alias => '<span class="copy-chip">' + escapeText(alias) + '</span>').join('') : '<span class="muted">No LiteLLM alias</span>';
-          const directIds = deployment.runtimeModelIds.map(id => '<code>' + escapeText(id) + '</code>').join(' · ');
-          const directLink = deployment.directHostUrl ? '<a href="' + escapeText(deployment.directHostUrl) + '" target="_blank" rel="noopener noreferrer">Open direct model host ↗</a>' : '';
-          return '<div class="profile-review-model"><div class="target-status-head"><div><strong>' + escapeText(deployment.modelDisplayName) + '</strong><div class="muted">' + escapeText(deployment.targetDisplayName) + '</div></div>' + (deployment.hourlyUsd === undefined ? '' : '<span class="target-price">$' + deployment.hourlyUsd.toFixed(2) + '/hr</span>') + '</div>' + (metrics.length ? '<div class="model-metrics">' + metrics.map(metric => '<span class="metric">' + escapeText(metric) + '</span>').join('') + '</div>' : '<p class="muted">No selection measurements are available.</p>') + '<div class="routing-blocks"><div class="routing-block"><h4>LiteLLM gateway aliases</h4><div class="copy-row">' + aliasChips + '</div></div><div class="routing-block"><h4>Direct model host</h4><div>' + directIds + '</div>' + directLink + '</div></div></div>';
+          const identifier = (label, value, primary = false) => value ? '<span class="route-kind">' + label + '</span><span class="copy-chip' + (primary ? ' primary' : '') + '">' + escapeText(value) + '</span>' : '';
+          const aliasChips = identifier('Alias', deployment.shortAlias, true) + identifier('Target alias', deployment.scopedAlias) + identifier('ID', deployment.modelId);
+          const directIds = identifier('Alias', deployment.shortAlias, true) + identifier('ID', deployment.directId);
+          const directLink = deployment.directHostUrl ? '<a class="external-launch" href="' + escapeText(deployment.directHostUrl) + '" target="_blank" rel="noopener noreferrer" aria-label="Open direct model host" title="Open direct model host"><span aria-hidden="true">↗</span></a>' : '';
+          return '<div class="profile-review-model"><div class="target-status-head"><div><strong>' + escapeText(deployment.modelDisplayName) + '</strong><div class="muted">' + escapeText(deployment.targetDisplayName) + '</div></div>' + (deployment.hourlyUsd === undefined ? '' : '<span class="target-price">$' + deployment.hourlyUsd.toFixed(2) + '/hr</span>') + '</div>' + (metrics.length ? '<div class="model-metrics">' + metrics.map(metric => '<span class="metric">' + escapeText(metric) + '</span>').join('') + '</div>' : '<p class="muted">No selection measurements are available.</p>') + '<div class="routing-blocks"><div class="routing-block"><h4>LiteLLM gateway</h4><div class="copy-row">' + aliasChips + '</div></div><div class="routing-block"><div class="target-status-head"><h4>Direct model host</h4>' + directLink + '</div><div class="copy-row">' + directIds + '</div></div></div></div>';
         }).join('');
-        reviewContent.innerHTML = '<section><h3>Changes</h3><ul>' + changes.map(change => '<li>' + escapeText(change) + '</li>').join('') + '</ul></section><section><h3>Overall selection</h3><div class="target-status-meta"><span class="pill">' + escapeText(audience) + '</span><span class="pill">' + current.duration + ' min duration</span><span class="pill">' + current.keepalive + ' min keepalive</span><span class="pill">' + selectedTargetIds.length + ' targets</span></div><p><strong>' + escapeText(costSummary) + '</strong></p></section><section><div class="target-status-head"><h3>Models and routes</h3><a href="/client-setup">Open full client configuration</a></div>' + (modelCards || '<p class="muted">No individual models are configured for the selected target.</p>') + '</section>';
+        reviewContent.innerHTML = '<section><h3>Changes</h3><ul>' + changes.map(change => '<li>' + escapeText(change) + '</li>').join('') + '</ul></section><section><h3>Overall selection</h3><div class="target-status-meta"><span class="pill">' + escapeText(audience) + '</span><span class="pill">' + current.duration + ' min duration</span><span class="pill">' + current.keepalive + ' min keepalive</span><span class="pill">' + selectedTargetIds.length + ' targets</span></div><p><strong>' + escapeText(costSummary) + '</strong></p></section><section><div class="target-status-head"><h3>Models and routes</h3><a href="/client-setup">Connection to your models</a></div>' + (modelCards || '<p class="muted">No individual models are configured for the selected target.</p>') + '</section>';
       };
       form.addEventListener('submit', event => {
         const selectedTargets = targetInputs.filter(input => input.checked);
@@ -3601,7 +3651,8 @@ function profileTargetSelection(target: CapacityTarget, models: ModelDefinition[
     : models.length === 1
       ? `<p class="muted">This target has one model, so NeurOn selects it automatically.</p><div class="models">${profileModelOption(target, models[0], selected, deploymentByKey.get(`${target.id}::${models[0].id}`))}</div>`
       : `<p class="muted">Choose at least one model for this target. Matching models follow the active search, requirements, and sort or wizard ranking.</p><div class="models">${models.map((model) => profileModelOption(target, model, selectedModelIds.includes(model.id), deploymentByKey.get(`${target.id}::${model.id}`))).join("")}</div>`;
-  const hostingLabel = target.hostingMode === "dedicated" ? "Dedicated" : target.hostingMode === "multi-model" ? "Multi-model" : "Unclassified hosting";
+  const hostingMode = targetHostingMode(models.length);
+  const hostingLabel = hostingMode === "dedicated" ? "Dedicated" : hostingMode === "multi-model" ? "Multi-model" : "Not discovered";
   return `<section class="target-status-card profile-target-selection" data-profile-target-card data-target-id="${escapeHtml(target.id)}">
     <div class="target-status-head"><label class="profile-target-toggle"><input type="checkbox" name="selectionTargetIds" value="${escapeHtml(target.id)}" data-profile-target ${selected ? "checked" : ""}><span><strong>${escapeHtml(target.displayName)}</strong><span class="muted"><code>${escapeHtml(target.id)}</code> · ${hostingLabel}</span></span></label><span class="target-price">${targetCost === undefined ? "Cost unavailable" : `$${targetCost.toFixed(2)}/hr`}</span></div>
     <div data-profile-target-models>${modelContent}</div>
@@ -3721,6 +3772,9 @@ interface ReservationRoutingModel {
   globalAliases: string[];
   scopedAliases: string[];
   runtimeModelIds: string[];
+  shortAlias: string;
+  scopedAlias?: string;
+  directId: string;
 }
 
 function reservationRoutingLookupForTargets(targets: Array<{ target: CapacityTarget; models: ModelDefinition[] }>): Record<string, Record<string, ReservationRoutingModel>> {
@@ -3729,12 +3783,14 @@ function reservationRoutingLookupForTargets(targets: Array<{ target: CapacityTar
     for (const model of models) {
       const aliases = litellmAliases(target, model.id, model.aliases);
       const runtimeModelIds = Array.from(new Set([...(model.runtimeModelIds ?? []), ...(model.backendModelIds ?? [])]));
+      const identifiers = routingIdentifiers(model.id, aliases.global, aliases.scoped, runtimeModelIds);
       const value = {
         displayName: model.displayName,
         canonicalModelId: model.id,
         globalAliases: aliases.global,
         scopedAliases: aliases.scoped,
-        runtimeModelIds: runtimeModelIds.length ? runtimeModelIds : [model.id]
+        runtimeModelIds: runtimeModelIds.length ? runtimeModelIds : [model.id],
+        ...identifiers
       };
       for (const identifier of [model.id, ...model.aliases, ...(model.runtimeModelIds ?? []), ...(model.backendModelIds ?? [])]) lookup[identifier] = value;
     }
@@ -3746,7 +3802,7 @@ function reservationRoutingHtml(
   reservation: Pick<Reservation, "modelIds" | "targetIds" | "targetSelections">,
   targets: Array<{ target: CapacityTarget; models: ModelDefinition[] }>,
   onlyTargetId?: string,
-  litellmApiBaseUrl?: string
+  litellmUiUrl?: string
 ): string {
   const targetMap = new Map(targets.map((entry) => [entry.target.id, entry]));
   const routingLookup = reservationRoutingLookupForTargets(targets);
@@ -3761,37 +3817,54 @@ function reservationRoutingHtml(
       canonicalModelId: modelId,
       globalAliases: [],
       scopedAliases: [],
-      runtimeModelIds: [modelId]
+      runtimeModelIds: [modelId],
+      shortAlias: modelId,
+      directId: modelId
     });
     const modelRows = models.length ? models.map((model) => {
-      const routeChips = model.globalAliases.map((alias, index) => {
-        const scoped = model.scopedAliases[index];
-        if (!scoped || scoped === alias) return `<span class="route-kind">Global + target</span>${copyChip(alias, index === 0 ? "primary" : "")}`;
-        return `<span class="route-kind">Global</span>${copyChip(alias, index === 0 ? "primary" : "")}<span class="route-kind">Target</span>${copyChip(scoped)}`;
-      }).join("");
-      const liteLlmUrl = litellmConsoleUrl(litellmApiBaseUrl);
-      const liteLlmLink = liteLlmUrl ? `<a href="${escapeHtml(liteLlmUrl)}" target="_blank" rel="noopener noreferrer">Open LiteLLM playground ↗</a>` : "";
+      const routeChips = routingIdentifierRows([["Alias", model.shortAlias, true], ["Target alias", model.scopedAlias], ["ID", model.canonicalModelId]]);
+      const liteLlmLink = externalLaunchLink(litellmUiUrl, "Open LiteLLM");
       const directUrl = directRuntimeHostUrl(entry.target);
-      const directLink = directUrl ? `<a href="${escapeHtml(directUrl)}" target="_blank" rel="noopener noreferrer">Open direct model host ↗</a>` : "";
-      return `<div class="reservation-route-model"><strong>${escapeHtml(model.displayName)}</strong><div class="routing-blocks"><div class="routing-block"><div class="target-status-head"><h4>LiteLLM gateway</h4>${liteLlmLink}</div><div class="copy-row">${routeChips || `<span class="muted">Alias not found</span>`}</div><p class="model-meta">Global aliases follow priority and fallback; target aliases pin this deployment.</p></div><div class="routing-block"><div class="target-status-head"><h4>Direct model host</h4>${directLink}</div><div class="model-meta">${model.runtimeModelIds.map((id) => `<code>${escapeHtml(id)}</code>`).join(" · ")}</div></div></div></div>`;
+      const directLink = externalLaunchLink(directUrl, "Open direct model host");
+      const directIdentifiers = routingIdentifierRows([["Alias", model.shortAlias, true], ["ID", model.directId]]);
+      return `<div class="reservation-route-model"><strong>${escapeHtml(model.displayName)}</strong><div class="routing-blocks"><div class="routing-block"><div class="target-status-head"><h4>LiteLLM gateway</h4>${liteLlmLink}</div><div class="copy-row">${routeChips}</div><p class="model-meta">The short alias follows priority and fallback; the target alias pins this deployment.</p></div><div class="routing-block"><div class="target-status-head"><h4>Direct model host</h4>${directLink}</div><div class="copy-row">${directIdentifiers}</div></div></div></div>`;
     }).join("") : `<p class="muted">All models on this target</p>`;
-    return `<div class="reservation-route-group"><div class="reservation-route-head"><strong>${escapeHtml(entry.target.displayName)}</strong><a href="/client-setup">Client configuration</a></div>${modelRows}</div>`;
+    return `<div class="reservation-route-group"><div class="reservation-route-head"><strong>${escapeHtml(entry.target.displayName)}</strong><a href="/client-setup">Connection to your models</a></div>${modelRows}</div>`;
   }).filter(Boolean).join("");
   return groups ? `<div class="reservation-routing">${groups}</div>` : "";
 }
 
-function litellmConsoleUrl(baseUrl?: string): string | undefined {
-  if (!baseUrl) return undefined;
+function safeConfiguredExternalUrl(value?: string): string | undefined {
+  if (!value) return undefined;
   try {
-    const url = new URL(baseUrl);
+    const url = new URL(value);
     if (!(["http:", "https:"] as string[]).includes(url.protocol) || url.username || url.password) return undefined;
-    url.pathname = "/ui/";
-    url.search = "";
-    url.hash = "";
     return url.toString();
   } catch {
     return undefined;
   }
+}
+
+function externalLaunchLink(url: string | undefined, label: string): string {
+  const safeUrl = safeConfiguredExternalUrl(url);
+  return safeUrl ? `<a class="external-launch" href="${escapeHtml(safeUrl)}" target="_blank" rel="noopener noreferrer" aria-label="${escapeHtml(label)}" title="${escapeHtml(label)}"><span aria-hidden="true">↗</span></a>` : "";
+}
+
+function routingIdentifiers(canonicalModelId: string, globalAliases: string[], scopedAliases: string[], runtimeModelIds: string[]): Pick<ReservationRoutingModel, "shortAlias" | "scopedAlias" | "directId"> {
+  const orderedAliases = Array.from(new Set(globalAliases)).sort(shortestFirst);
+  const shortAlias = orderedAliases.find((alias) => alias !== canonicalModelId) ?? orderedAliases[0] ?? canonicalModelId;
+  const matchingIndex = globalAliases.indexOf(shortAlias);
+  const scopedAlias = matchingIndex >= 0 ? scopedAliases[matchingIndex] : Array.from(new Set(scopedAliases)).sort(shortestFirst)[0];
+  const directId = runtimeModelIds.find(Boolean) ?? canonicalModelId;
+  return { shortAlias, ...(scopedAlias && scopedAlias !== shortAlias ? { scopedAlias } : {}), directId };
+}
+
+function routingIdentifierRows(entries: Array<[string, string | undefined, boolean?]>): string {
+  return entries.filter((entry): entry is [string, string, boolean?] => Boolean(entry[1])).map(([label, value, primary]) => `<span class="route-kind">${escapeHtml(label)}</span>${copyChip(value, primary ? "primary" : "")}`).join("");
+}
+
+function shortestFirst(left: string, right: string): number {
+  return left.length - right.length || left.localeCompare(right);
 }
 
 function targetLookupForTargets(targets: Array<{ target: CapacityTarget; models: ModelDefinition[] }>): Record<string, { displayName: string; directHostUrl?: string }> {

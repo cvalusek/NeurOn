@@ -203,7 +203,7 @@ export function registerUiRoutes(
     if (profiles.length === 0 && (await reservationService.listActiveOwned(user)).length === 0) return reply.redirect("/welcome");
     const targets = (await visibleTargetsFor(user)).map((target) => ({ target, models: catalog.listModelsForTarget(target.id) }));
     const costEstimates = await startCostEstimates(targets.map(({ target }) => target), costEstimation);
-    return reply.type("text/html").send(startPage(user, targets, profiles, query.error, costEstimates, config.adminStatusPollSeconds, await selectionDeploymentsForUser(user, costEstimates), await reservationProfileService.listAssignableTeams(user), config.litellmApiBaseUrl));
+    return reply.type("text/html").send(startPage(user, targets, profiles, query.error, costEstimates, config.adminStatusPollSeconds, await selectionDeploymentsForUser(user, costEstimates), await reservationProfileService.listAssignableTeams(user), config.litellmUiUrl));
   });
   app.get("/welcome", async (request, reply) => {
     const user = requireUser(request);
@@ -743,11 +743,18 @@ export function registerUiRoutes(
   });
   app.get("/admin/targets", async (request, reply) => {
     const query = z.object({ error: z.string().optional(), created: z.string().optional() }).parse(request.query);
-    return reply.type("text/html").send(targetAdminPage(requireUser(request), await targetService.list(), await providerService.list(), config.runtimeProfiles, query.error, query.created, config.adminStatusPollSeconds));
+    const [targets, providers, teams, users] = await Promise.all([
+      targetService.list(),
+      providerService.list(),
+      identityService.listTeams(),
+      identityService.listUsers()
+    ]);
+    return reply.type("text/html").send(targetAdminPage(requireUser(request), targets, providers, config.runtimeProfiles, teams, users, query.error, query.created, config.adminStatusPollSeconds));
   });
   app.post("/admin/targets", async (request, reply) => {
     try {
       const body = targetFormSchema.parse(request.body ?? {});
+      await validateTargetAudienceSelection(body, identityService);
       const provider = await providerFromForm(body.providerId, providerService);
       const target = await targetService.create(targetFromForm(body, provider, config));
       await targetProvisioningService.createDraft({
@@ -766,6 +773,7 @@ export function registerUiRoutes(
     try {
       const { id } = z.object({ id: z.string() }).parse(request.params);
       const body = targetFormSchema.parse(request.body ?? {});
+      await validateTargetAudienceSelection(body, identityService);
       const provider = await providerFromForm(body.providerId, providerService);
       await targetService.update(id, targetFromForm(body, provider, config));
       return reply.redirect("/admin/targets");
@@ -889,10 +897,9 @@ const targetFormSchema = z.object({
   modelIds: z.string().optional(),
   trafficModelPrefixes: z.string().optional(),
   aliasPriority: optionalPositiveInteger,
-  hostingMode: z.enum(["", "dedicated", "multi-model"]).optional(),
   audienceScope: z.enum(["global", "teams", "users"]).default("global"),
-  audienceTeamIds: z.string().optional(),
-  audienceUserIds: z.string().optional(),
+  audienceTeamIds: z.union([z.string(), z.array(z.string())]).optional(),
+  audienceUserIds: z.union([z.string(), z.array(z.string())]).optional(),
   litellmCredentialName: z.string().optional(),
   litellmApiKeyEnv: z.string().optional(),
   litellmSyncDisabled: z.string().optional(),
@@ -919,6 +926,19 @@ async function providerFromForm(providerId: string, providerService: ProviderSer
   return provider;
 }
 
+async function validateTargetAudienceSelection(body: z.infer<typeof targetFormSchema>, identityService: IdentityService): Promise<void> {
+  if (body.audienceScope === "teams") {
+    const requested = listField(body.audienceTeamIds);
+    const known = new Set((await identityService.listTeams()).map((team) => team.id));
+    if (requested.some((id) => !known.has(id))) throw new Error("Choose valid teams for the target audience");
+  }
+  if (body.audienceScope === "users") {
+    const requested = listField(body.audienceUserIds);
+    const known = new Set((await identityService.listUsers()).filter((user) => !user.mergedIntoUserId).map((user) => user.id));
+    if (requested.some((id) => !known.has(id))) throw new Error("Choose valid people for the target audience");
+  }
+}
+
 function targetFromForm(body: z.infer<typeof targetFormSchema>, provider: CapacityProviderDefinition, config?: AppConfig): CapacityTarget {
   const profile = effectiveRuntimeProfile(config?.runtimeProfiles, body.runtimeProfileId, body.runtimeProfileVariantId);
   const target: Record<string, unknown> = {};
@@ -930,7 +950,6 @@ function targetFromForm(body: z.infer<typeof targetFormSchema>, provider: Capaci
   const trafficModelPrefixes = listField(body.trafficModelPrefixes);
   if (trafficModelPrefixes.length > 0) target.trafficModelPrefixes = trafficModelPrefixes;
   if (body.aliasPriority !== undefined) target.aliasPriority = body.aliasPriority;
-  if (body.hostingMode) target.hostingMode = body.hostingMode;
   if (body.audienceScope === "teams") {
     const teamIds = listField(body.audienceTeamIds);
     if (teamIds.length === 0) throw new Error("At least one team is required for a team target");
@@ -1060,9 +1079,9 @@ function runpodCreateFromProfile(profile: RuntimeProfile | undefined): Record<st
   return { imageName: profile.image };
 }
 
-function listField(value: string | undefined): string[] {
-  return (value ?? "")
-    .split(",")
+function listField(value: string | string[] | undefined): string[] {
+  return (Array.isArray(value) ? value : [value ?? ""])
+    .flatMap((entry) => entry.split(","))
     .map((entry) => entry.trim())
     .filter(Boolean);
 }

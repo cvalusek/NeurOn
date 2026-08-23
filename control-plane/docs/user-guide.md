@@ -1,7 +1,7 @@
 ---
 type: Guide
 title: User Guide
-description: How profiles, reservations, keepalive, status, model selection, and client setup work in NeurOn.
+description: How profiles, reservations, keepalive, status, model selection, and model connections work in NeurOn.
 tags: [users, profiles, reservations, models, cost]
 timestamp: 2026-08-14T00:00:00Z
 ---
@@ -120,12 +120,13 @@ profile, models, projected cost, quick extensions, and **I'm done** action.
 Ending one reservation does not stop capacity still required by another user or
 reservation.
 
-Each reservation groups connection details by target. **LiteLLM** chips are the
-global and target-scoped names to copy into a configured client. The separately
-labeled **Direct runtime / llama.cpp** values are backend model IDs, not extra
-LiteLLM routes. **Open direct model host** opens the target's HTTP runtime root
-in a new tab when the target publishes one; NeurOn removes a trailing `/v1` and
-does not carry URL credentials, query parameters, or fragments into that link.
+Each reservation groups connection details by target. The LiteLLM block shows
+one short alias, the shortest target-scoped alias, and the canonical ID. The
+direct-host block shows the model alias and runtime ID accepted by llama.cpp.
+An external-launch icon opens the target's HTTP runtime root when the target
+publishes one; NeurOn removes a trailing `/v1` and does not carry URL
+credentials, query parameters, or fragments into that link. LiteLLM's launch
+icon appears only when the operator configures its exact UI URL.
 
 Server status is grouped by target. Personally reserved targets come first,
 followed by other activated targets and then off targets. Within those groups,
@@ -136,13 +137,13 @@ Target cards also expose the direct-host link when one is available.
 
 ## Configure OpenCode and other clients
 
-Open **Client setup** to see every callable LiteLLM name. A global alias points
-to the lowest-priority-number target. The scoped `<target>/<alias>` form always
-selects that exact target/model deployment. Choose a profile to limit the list,
-then copy the generated OpenCode provider JSON and use the displayed model names
-instead of manually reconstructing them.
+Open **Connection to your models** to see every callable LiteLLM name. A global
+alias points to the lowest-priority-number target. The scoped
+`<target>/<alias>` form always selects that exact target/model deployment.
+Choose a profile to limit the list, then copy the generated OpenCode provider
+JSON and use the displayed model names instead of manually reconstructing them.
 
-![Client setup with global and scoped LiteLLM aliases](images/client-setup.png)
+![Connection to your models with global and scoped LiteLLM aliases](images/client-setup.png)
 
 ## Traffic reservation and cost
 

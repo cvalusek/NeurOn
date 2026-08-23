@@ -137,7 +137,7 @@ The New/Edit Profile page gives **Audience** its own row. `Only me` keeps a
 profile personal. `Everyone` makes it available to every eligible NeurOn user.
 A team option appears for every team the creator may use, including an inherited
 ancestor, and shares the profile with members of that team and its descendants.
-Eligible users see shared profiles on Home, Profiles, Client setup, and the REST
+Eligible users see shared profiles on Home, Profiles, Connection to your models, and the REST
 API and may start their own reservation from them. The creator retains normal
 ownership; team managers may additionally maintain team profiles in their
 managed hierarchy.

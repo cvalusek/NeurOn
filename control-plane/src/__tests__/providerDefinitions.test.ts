@@ -12,6 +12,9 @@ const managedEnv = [
   "CAPACITY_TARGET_GPU_PROVIDER",
   "CAPACITY_TARGET_GPU_MODEL_IDS",
   "CAPACITY_TARGET_GPU_ESTIMATED_HOURLY_COST_USD",
+  "CAPACITY_TARGET_GPU_AUDIENCE_SCOPE",
+  "CAPACITY_TARGET_GPU_AUDIENCE_TEAM_IDS",
+  "LITELLM_UI_URL",
   "CAPACITY_TARGETS_FILE",
   "CAPACITY_TARGET_EC2_GPU_DISPLAY_NAME",
   "CAPACITY_TARGET_EC2_GPU_PROVIDER",
@@ -157,6 +160,21 @@ describe("provider definitions", () => {
       id: "gpu",
       costEstimate: { hourlyUsd: 3.25 }
     });
+  });
+
+  it("loads an exact LiteLLM UI destination and target audience from environment configuration", async () => {
+    process.env.LITELLM_UI_URL = "https://litellm.example.test/tools/playground";
+    process.env.CAPACITY_TARGET_KEYS = "GPU";
+    process.env.CAPACITY_TARGET_GPU_DISPLAY_NAME = "GPU Pool";
+    process.env.CAPACITY_TARGET_GPU_PROVIDER = "fake";
+    process.env.CAPACITY_TARGET_GPU_MODEL_IDS = "m1";
+    process.env.CAPACITY_TARGET_GPU_AUDIENCE_SCOPE = "teams";
+    process.env.CAPACITY_TARGET_GPU_AUDIENCE_TEAM_IDS = "team-platform,team-research";
+
+    const { config } = await loadConfig();
+
+    expect(config.litellmUiUrl).toBe("https://litellm.example.test/tools/playground");
+    expect(config.capacityTargets[0]?.audience).toEqual({ scope: "teams", teamIds: ["team-platform", "team-research"] });
   });
 
   it("starts without configured providers or targets", async () => {

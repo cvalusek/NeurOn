@@ -3,6 +3,7 @@ import type { ApiKey, AuthenticatedUser, CapacityTarget, Reservation, TargetStat
 import { litellmDisplayPrefix, litellmRoutePrefixes } from "../litellm/modelRouting.js";
 import type { ReservationCostEstimate } from "../services/CostEstimationService.js";
 import type { StartupRuntimeModelDiscoveryOutcome } from "../services/RuntimeModelDiscovery.js";
+import { targetHostingMode } from "./hostingMode.js";
 import { directRuntimeHostUrl } from "./runtimeUrl.js";
 
 export function requireUser(request: FastifyRequest): AuthenticatedUser {
@@ -77,7 +78,8 @@ export function targetJson(
     providerId: target.providerId,
     modelIds: target.modelIds,
     modelsMax: target.modelsMax,
-    hostingMode: target.hostingMode,
+    hostingMode: targetHostingMode(target.modelIds.length),
+    audience: target.audience ?? { scope: "global" },
     trafficModelPrefixes: litellmRoutePrefixes(target),
     litellmDisplayPrefix: litellmDisplayPrefix(target),
     aliasPriority: target.aliasPriority,
