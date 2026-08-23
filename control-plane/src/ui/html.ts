@@ -133,8 +133,10 @@ export function layout(title: string, user: AuthenticatedUser | undefined, body:
     .reservation-route-model { display: grid; gap: 8px; }
     .reservation-route-model + .reservation-route-model { border-top: 1px solid #e2e7e1; margin-top: 8px; padding-top: 8px; }
     .route-label { color: #3f5142; font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; }
-    .route-kind { color: #657266; font-size: 12px; margin-left: 3px; }
-    .direct-host-link { white-space: nowrap; font-size: 13px; font-weight: 650; }
+    .routing-identifiers { display: grid; gap: 6px; margin-top: 8px; }
+    .routing-identifier { display: grid; grid-template-columns: minmax(62px, max-content) minmax(0, 1fr); gap: 8px; align-items: center; }
+    .routing-identifier .copy-chip { justify-self: start; text-align: left; }
+    .route-kind { color: #657266; font-size: 12px; }
     .copy-chip { border: 1px solid #c8d0c9; border-radius: 999px; padding: 3px 8px; background: white; color: #334155; font: 12px ui-monospace, SFMono-Regular, Menlo, monospace; max-width: 100%; overflow-wrap: anywhere; }
     .copy-chip.primary { border-color: #0f766e; color: #0f766e; background: #f0faf7; }
     .tag-row { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 7px; }
@@ -148,8 +150,8 @@ export function layout(title: string, user: AuthenticatedUser | undefined, body:
     .modal-dialog.profile-builder-dialog { width: min(1180px, 100%); }
     .profile-builder-layout { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; align-items: start; }
     .profile-audience { max-width: 520px; }
-    .external-launch { display: inline-grid; place-items: center; width: 30px; height: 30px; border: 1px solid #b8c5bf; border-radius: 7px; text-decoration: none; font-size: 18px; line-height: 1; background: #fff; }
-    .external-launch:hover { background: #eef7f4; border-color: #0f766e; }
+    .launch-link { display: inline-grid; place-items: center; width: 30px; height: 30px; border: 1px solid #b8c5bf; border-radius: 7px; text-decoration: none; font-size: 18px; line-height: 1; background: #fff; }
+    .launch-link:hover { background: #eef7f4; border-color: #0f766e; }
     .audience-editor { border: 1px solid #d8ddd7; border-radius: 8px; padding: 12px; background: #fbfcfb; }
     .audience-choice-list { display: grid; gap: 7px; margin-top: 8px; max-height: 220px; overflow: auto; }
     .audience-choice { display: flex; gap: 9px; align-items: flex-start; padding: 8px 10px; border: 1px solid #d8ddd7; border-radius: 7px; background: #fff; }
@@ -319,7 +321,7 @@ export function layout(title: string, user: AuthenticatedUser | undefined, body:
           <a href="/">Home</a>
           <a href="/profiles">Profiles</a>
           <a href="/help">Guide</a>
-          <a href="/client-setup">Connection to your models</a>
+          <a href="/client-setup">Connect</a>
           <a href="/api-keys">API keys</a>
           ${user ? `<form method="post" action="/logout"><button class="drawer-action" type="submit">Sign out</button></form>` : ""}
         </div>
@@ -868,15 +870,16 @@ export function startPage(user: AuthenticatedUser, targets: Array<{ target: Capa
         const modelIds = selection?.modelIds ?? reservation.modelIds;
         const modelRows = modelIds.length ? modelIds.map(modelId => {
           const model = reservationRoutingLookup[targetId]?.[modelId] ?? { displayName: modelId, canonicalModelId: modelId, shortAlias: modelId, directId: modelId };
-          const identifier = (label, value, primary = false) => value ? '<span class="route-kind">' + label + '</span>' + copyButton(value, primary) : '';
-          const routes = identifier('Alias', model.shortAlias, true) + identifier('Target alias', model.scopedAlias) + identifier('ID', model.canonicalModelId);
-          const directRoutes = identifier('Alias', model.shortAlias, true) + identifier('ID', model.directId);
-          const launch = (url, label) => url ? '<a class="external-launch" href="' + escapeText(url) + '" target="_blank" rel="noopener noreferrer" aria-label="' + escapeText(label) + '" title="' + escapeText(label) + '"><span aria-hidden="true">↗</span></a>' : '';
+          const identifier = (label, value, primary = false) => value ? '<span class="routing-identifier"><span class="route-kind">' + label + '</span>' + copyButton(value, primary) + '</span>' : '';
+          const routes = identifier('Use', model.scopedAlias ?? model.shortAlias, true) + identifier('Fallback', model.scopedAlias && model.scopedAlias !== model.shortAlias ? model.shortAlias : undefined);
+          const directRoutes = identifier('Use', model.shortAlias, true) + identifier('ID', model.directId);
+          const launch = (url, label) => url ? '<a class="launch-link" href="' + escapeText(url) + '" target="_blank" rel="noopener noreferrer" aria-label="' + escapeText(label) + '" title="' + escapeText(label) + '"><span aria-hidden="true">↗</span></a>' : '';
           const liteLlmLink = launch(litellmUiUrl, 'Open LiteLLM');
-          const directLink = launch(target.directHostUrl, 'Open direct model host');
-          return '<div class="reservation-route-model"><strong>' + escapeText(model.displayName) + '</strong><div class="routing-blocks"><div class="routing-block"><div class="target-status-head"><h4>LiteLLM gateway</h4>' + liteLlmLink + '</div><div class="copy-row">' + routes + '</div><p class="model-meta">The short alias follows priority and fallback; the target alias pins this deployment.</p></div><div class="routing-block"><div class="target-status-head"><h4>Direct model host</h4>' + directLink + '</div><div class="copy-row">' + directRoutes + '</div></div></div></div>';
+          const reservationTarget = reservation.targets.find(candidate => candidate.id === targetId);
+          const directLink = reservationTarget?.observed === 'healthy' ? launch(target.directHostUrl, 'Open direct model host') : '';
+          return '<div class="reservation-route-model"><strong>' + escapeText(model.displayName) + '</strong><div class="routing-blocks"><div class="routing-block"><div class="target-status-head"><h4>LiteLLM gateway</h4>' + liteLlmLink + '</div><div class="routing-identifiers">' + routes + '</div><p class="model-meta"><strong>Use</strong> pins this deployment. <strong>Fallback</strong> may route to another target.</p></div><div class="routing-block"><div class="target-status-head"><h4>Direct model host</h4>' + directLink + '</div><div class="routing-identifiers">' + directRoutes + '</div></div></div></div>';
         }).join('') : '<p class="muted">All models on this target</p>';
-        return '<div class="reservation-route-group"><div class="reservation-route-head"><strong>' + escapeText(target.displayName) + '</strong><a href="/client-setup">Connection to your models</a></div>' + modelRows + '</div>';
+        return '<div class="reservation-route-group"><div class="reservation-route-head"><strong>' + escapeText(target.displayName) + '</strong><a class="launch-link" href="/client-setup" aria-label="Connection to your models" title="Connection to your models"><span aria-hidden="true">↗</span></a></div>' + modelRows + '</div>';
       }).filter(Boolean).join('');
       return groups ? '<div class="reservation-routing">' + groups + '</div>' : '';
     };
@@ -1029,7 +1032,7 @@ export function startPage(user: AuthenticatedUser, targets: Array<{ target: Capa
       const mineRows = mine.length ? mine.map(reservation => reservationCard(reservation, false, target.id)).join('') : '';
       const otherRows = others.length ? '<details class="status-details" data-status-details="' + escapeText(target.id) + ':others"><summary>' + others.length + ' other reservations</summary><div class="reservation-list">' + others.map(reservation => compactReservationCard(reservation, target.id)).join('') + '</div></details>' : '';
       const rows = relevant.length ? mineRows + otherRows : '<p class="muted">No reservations for this server</p>';
-      const directLink = target.directHostUrl ? '<a class="direct-host-link" href="' + escapeText(target.directHostUrl) + '" target="_blank" rel="noopener noreferrer">Direct host ↗</a>' : '';
+      const directLink = target.observed === 'healthy' && target.directHostUrl ? '<a class="launch-link" href="' + escapeText(target.directHostUrl) + '" target="_blank" rel="noopener noreferrer" aria-label="Open direct model host" title="Open direct model host"><span aria-hidden="true">↗</span></a>' : '';
       return '<section class="target-status-card" data-status-target="' + escapeText(target.id) + '"><div class="target-status-head"><div><h3>' + escapeText(target.displayName) + '</h3><div class="target-status-meta">' + statusPill(target.desired) + statusPill(target.observed) + summary + startupEstimate(target) + '</div></div><div><div class="muted">' + escapeText(target.provider) + '</div>' + directLink + '</div></div><p class="muted">' + escapeText(target.message) + '</p><div class="target-status-meta">' + userLine + '</div><div class="reservation-list">' + rows + '</div></section>';
     };
     const selectDuration = (button, focus = true) => {
@@ -1198,6 +1201,9 @@ export function reservationPage(
       document.querySelector('#reservation-cost-so-far').textContent = data.costEstimate ? formatUsd(data.costEstimate.estimatedCostUsd) : 'Not allocated yet';
       document.querySelector('#reservation-cost-projected').textContent = data.costEstimate?.projectedTotalCostUsd !== undefined ? formatUsd(data.costEstimate.projectedTotalCostUsd) : 'Not available';
       document.querySelector('#target-status').innerHTML = data.targets.map(target => '<p><strong>' + escapeText(target.displayName ?? target.id) + '</strong>: ' + escapeText(target.observed) + ' - ' + escapeText(target.message) + '</p>').join('');
+      document.querySelectorAll('[data-direct-host-target]').forEach(element => {
+        element.hidden = data.targets.find(target => target.id === element.dataset.directHostTarget)?.observed !== 'healthy';
+      });
     }
     document.addEventListener('click', async (event) => {
       const button = event.target.closest('[data-copy]');
@@ -1242,13 +1248,13 @@ export function clientSetupPage(
   const serialized = JSON.stringify(rows).replace(/</gu, "\\u003c");
   const options = profiles.map((profile) => `<option value="${escapeHtml(profile.id)}">${escapeHtml(profile.name)}</option>`).join("");
   return layout("Connection to your models", user, `<section class="panel">
-    <div class="target-status-head"><div><h1>Connection to your models</h1><p class="muted">Copy a complete OpenCode model catalog or inspect the LiteLLM routes NeurOn publishes. Global aliases use target priority and fall back in numeric order; target-scoped aliases pin one deployment.</p></div><a class="button secondary" href="/api-keys">Create API key</a></div>
+    <div class="target-status-head"><div><h1>Connection to your models</h1><p class="muted">Use the target-scoped alias for the deployment selected by a profile. The shorter global alias is available when portability and automatic fallback matter more than pinning one target.</p></div><a class="button secondary" href="/api-keys">Create API key</a></div>
     <p><label>Configuration scope<br><select id="client-profile"><option value="">All models (global fallback aliases)</option>${options}</select></label></p>
   </section>
   <section class="panel"><h2>OpenCode provider</h2><p class="muted">Replace the endpoint placeholder and keep secrets in environment variables. The NeurOn plugin reserves and waits for the selected route before OpenCode sends the request.</p><div class="inline-actions"><button type="button" data-copy-client="opencode-config">Copy config</button><button class="secondary" type="button" data-copy-client="opencode-env">Copy plugin environment</button><span class="muted" id="client-copy-status"></span></div><pre id="opencode-config"></pre><pre id="opencode-env">NEURON_API_BASE_URL=&lt;NEURON_BASE_URL&gt;
 NEURON_API_KEY=sk-neuron-...
 NEURON_ALLOWED_PROVIDERS=litellm</pre></section>
-  <section class="panel"><h2>Available aliases</h2><p class="muted">Use the global alias when you want automatic fallback. Use the scoped alias when a profile or workload must stay on a particular target.</p><div style="overflow:auto"><table><thead><tr><th>Model</th><th>Global route</th><th>Target-scoped route</th><th>Target priority</th></tr></thead><tbody id="client-aliases"></tbody></table></div></section>
+  <section class="panel"><h2>Available aliases</h2><p class="muted"><strong>Use</strong> pins the selected deployment. The shorter <strong>Fallback</strong> alias follows target priority and may route elsewhere.</p><div style="overflow:auto"><table><thead><tr><th>Model</th><th>Use</th><th>Fallback</th><th>Target priority</th></tr></thead><tbody id="client-aliases"></tbody></table></div></section>
   <script>
     (() => {
       const routes = ${serialized};
@@ -1261,7 +1267,7 @@ NEURON_ALLOWED_PROVIDERS=litellm</pre></section>
       const visibleRoutes = () => profile.value ? routes.filter(route => route.profileIds.includes(profile.value)) : routes;
       const render = () => {
         const visible = visibleRoutes();
-        table.innerHTML = visible.map(route => '<tr><td><strong>' + escapeText(route.modelDisplayName) + '</strong><br><code>' + escapeText(route.modelId) + '</code></td><td><button class="copy-chip" type="button" data-copy-value="' + escapeText(route.globalAlias) + '">' + escapeText(route.globalAlias) + '</button></td><td><button class="copy-chip primary" type="button" data-copy-value="' + escapeText(route.scopedAlias) + '">' + escapeText(route.scopedAlias) + '</button><br><span class="muted">' + escapeText(route.targetDisplayName) + '</span></td><td>' + route.priority + '</td></tr>').join('') || '<tr><td colspan="4" class="muted">This profile has no model routes.</td></tr>';
+        table.innerHTML = visible.map(route => '<tr><td><strong>' + escapeText(route.modelDisplayName) + '</strong><br><code>' + escapeText(route.modelId) + '</code></td><td><button class="copy-chip primary" type="button" data-copy-value="' + escapeText(route.scopedAlias) + '">' + escapeText(route.scopedAlias) + '</button><br><span class="muted">' + escapeText(route.targetDisplayName) + '</span></td><td><button class="copy-chip" type="button" data-copy-value="' + escapeText(route.globalAlias) + '">' + escapeText(route.globalAlias) + '</button></td><td>' + route.priority + '</td></tr>').join('') || '<tr><td colspan="4" class="muted">This profile has no model routes.</td></tr>';
         const chosen = new Map();
         visible.forEach(route => {
           const modelID = profile.value ? route.scopedAlias : route.globalAlias;
@@ -3605,13 +3611,12 @@ function profileEditorClientScript(
             deployment.performance?.prefillTokensPerSecond === undefined ? '' : 'Prefill ' + formatMetricValue(deployment.performance.prefillTokensPerSecond) + ' t/s',
             deployment.quantization?.qualityRetentionPercent === undefined ? '' : 'Estimated quality retained ' + formatMetricValue(deployment.quantization.qualityRetentionPercent) + '%'
           ].filter(Boolean);
-          const identifier = (label, value, primary = false) => value ? '<span class="route-kind">' + label + '</span><span class="copy-chip' + (primary ? ' primary' : '') + '">' + escapeText(value) + '</span>' : '';
-          const aliasChips = identifier('Alias', deployment.shortAlias, true) + identifier('Target alias', deployment.scopedAlias) + identifier('ID', deployment.modelId);
-          const directIds = identifier('Alias', deployment.shortAlias, true) + identifier('ID', deployment.directId);
-          const directLink = deployment.directHostUrl ? '<a class="external-launch" href="' + escapeText(deployment.directHostUrl) + '" target="_blank" rel="noopener noreferrer" aria-label="Open direct model host" title="Open direct model host"><span aria-hidden="true">↗</span></a>' : '';
-          return '<div class="profile-review-model"><div class="target-status-head"><div><strong>' + escapeText(deployment.modelDisplayName) + '</strong><div class="muted">' + escapeText(deployment.targetDisplayName) + '</div></div>' + (deployment.hourlyUsd === undefined ? '' : '<span class="target-price">$' + deployment.hourlyUsd.toFixed(2) + '/hr</span>') + '</div>' + (metrics.length ? '<div class="model-metrics">' + metrics.map(metric => '<span class="metric">' + escapeText(metric) + '</span>').join('') + '</div>' : '<p class="muted">No selection measurements are available.</p>') + '<div class="routing-blocks"><div class="routing-block"><h4>LiteLLM gateway</h4><div class="copy-row">' + aliasChips + '</div></div><div class="routing-block"><div class="target-status-head"><h4>Direct model host</h4>' + directLink + '</div><div class="copy-row">' + directIds + '</div></div></div></div>';
+          const identifier = (label, value, primary = false) => value ? '<span class="routing-identifier"><span class="route-kind">' + label + '</span><span class="copy-chip' + (primary ? ' primary' : '') + '">' + escapeText(value) + '</span></span>' : '';
+          const aliasChips = identifier('Use', deployment.scopedAlias ?? deployment.shortAlias, true) + identifier('Fallback', deployment.scopedAlias && deployment.scopedAlias !== deployment.shortAlias ? deployment.shortAlias : undefined);
+          const directIds = identifier('Use', deployment.shortAlias, true) + identifier('ID', deployment.directId);
+          return '<div class="profile-review-model"><div class="target-status-head"><div><strong>' + escapeText(deployment.modelDisplayName) + '</strong><div class="muted">' + escapeText(deployment.targetDisplayName) + '</div></div>' + (deployment.hourlyUsd === undefined ? '' : '<span class="target-price">$' + deployment.hourlyUsd.toFixed(2) + '/hr</span>') + '</div>' + (metrics.length ? '<div class="model-metrics">' + metrics.map(metric => '<span class="metric">' + escapeText(metric) + '</span>').join('') + '</div>' : '<p class="muted">No selection measurements are available.</p>') + '<div class="routing-blocks"><div class="routing-block"><h4>LiteLLM gateway</h4><div class="routing-identifiers">' + aliasChips + '</div><p class="model-meta"><strong>Use</strong> pins this deployment. <strong>Fallback</strong> may route to another target.</p></div><div class="routing-block"><h4>Direct model host</h4><div class="routing-identifiers">' + directIds + '</div><p class="model-meta">The host link appears on Home only while this target is healthy.</p></div></div></div>';
         }).join('');
-        reviewContent.innerHTML = '<section><h3>Changes</h3><ul>' + changes.map(change => '<li>' + escapeText(change) + '</li>').join('') + '</ul></section><section><h3>Overall selection</h3><div class="target-status-meta"><span class="pill">' + escapeText(audience) + '</span><span class="pill">' + current.duration + ' min duration</span><span class="pill">' + current.keepalive + ' min keepalive</span><span class="pill">' + selectedTargetIds.length + ' targets</span></div><p><strong>' + escapeText(costSummary) + '</strong></p></section><section><div class="target-status-head"><h3>Models and routes</h3><a href="/client-setup">Connection to your models</a></div>' + (modelCards || '<p class="muted">No individual models are configured for the selected target.</p>') + '</section>';
+        reviewContent.innerHTML = '<section><h3>Changes</h3><ul>' + changes.map(change => '<li>' + escapeText(change) + '</li>').join('') + '</ul></section><section><h3>Overall selection</h3><div class="target-status-meta"><span class="pill">' + escapeText(audience) + '</span><span class="pill">' + current.duration + ' min duration</span><span class="pill">' + current.keepalive + ' min keepalive</span><span class="pill">' + selectedTargetIds.length + ' targets</span></div><p><strong>' + escapeText(costSummary) + '</strong></p></section><section><div class="target-status-head"><h3>Models and routes</h3><a class="launch-link" href="/client-setup" aria-label="Connection to your models" title="Connection to your models"><span aria-hidden="true">↗</span></a></div>' + (modelCards || '<p class="muted">No individual models are configured for the selected target.</p>') + '</section>';
       };
       form.addEventListener('submit', event => {
         const selectedTargets = targetInputs.filter(input => input.checked);
@@ -3673,7 +3678,8 @@ function profileModelOption(target: CapacityTarget, model: ModelDefinition, sele
   const metrics = deployment ? profileModelMetrics(deployment) : "";
   const capabilities = deployment?.technicalCapabilities.length ? `<span class="model-metrics">${deployment.technicalCapabilities.map((capability) => `<span class="metric" title="${escapeHtml(capability.title ?? "Advertised technical capability")}">${escapeHtml(domainLabel(capability.label))}</span>`).join("")}</span>` : "";
   const favorite = deployment ? `<button class="favorite-button" type="button" data-model-favorite data-target-id="${escapeHtml(target.id)}" data-model-id="${escapeHtml(model.id)}" aria-pressed="${String(Boolean(deployment.favorite))}" title="${deployment.favorite ? "Remove favorite" : "Favorite this deployment"}">${deployment.favorite ? "★" : "☆"}</button>` : "";
-  return `<label class="option" data-deployment-key="${escapeHtml(`${target.id}::${model.id}`)}"><input type="checkbox" name="selectionModels" value="${escapeHtml(value)}" data-profile-model ${selected ? "checked" : ""}><span class="model-body"><span class="model-head"><strong>${escapeHtml(model.displayName)}</strong><span>${context}${favorite}</span></span><span class="pill" data-profile-fit-score></span>${description}${capabilities}${metrics}<span class="copy-row">${scopedAlias ? copyChip(scopedAlias, "primary") : ""}${globalAlias && globalAlias !== scopedAlias ? copyChip(globalAlias) : ""}</span><span class="model-meta">Scoped route pins this target; the global route follows alias priority and fallback.</span></span></label>`;
+  const routes = routingIdentifierRows([["Use", scopedAlias ?? globalAlias, true], ["Fallback", scopedAlias && scopedAlias !== globalAlias ? globalAlias : undefined]]);
+  return `<label class="option" data-deployment-key="${escapeHtml(`${target.id}::${model.id}`)}"><input type="checkbox" name="selectionModels" value="${escapeHtml(value)}" data-profile-model ${selected ? "checked" : ""}><span class="model-body"><span class="model-head"><strong>${escapeHtml(model.displayName)}</strong><span>${context}${favorite}</span></span><span class="pill" data-profile-fit-score></span>${description}${capabilities}${metrics}<span class="routing-identifiers">${routes}</span><span class="model-meta"><strong>Use</strong> pins this deployment. <strong>Fallback</strong> may route to another target.</span></span></label>`;
 }
 
 function profileModelMetrics(deployment: ModelDeploymentSelectionView): string {
@@ -3822,14 +3828,14 @@ function reservationRoutingHtml(
       directId: modelId
     });
     const modelRows = models.length ? models.map((model) => {
-      const routeChips = routingIdentifierRows([["Alias", model.shortAlias, true], ["Target alias", model.scopedAlias], ["ID", model.canonicalModelId]]);
+      const routeChips = routingIdentifierRows([["Use", model.scopedAlias ?? model.shortAlias, true], ["Fallback", model.scopedAlias && model.scopedAlias !== model.shortAlias ? model.shortAlias : undefined]]);
       const liteLlmLink = externalLaunchLink(litellmUiUrl, "Open LiteLLM");
       const directUrl = directRuntimeHostUrl(entry.target);
-      const directLink = externalLaunchLink(directUrl, "Open direct model host");
-      const directIdentifiers = routingIdentifierRows([["Alias", model.shortAlias, true], ["ID", model.directId]]);
-      return `<div class="reservation-route-model"><strong>${escapeHtml(model.displayName)}</strong><div class="routing-blocks"><div class="routing-block"><div class="target-status-head"><h4>LiteLLM gateway</h4>${liteLlmLink}</div><div class="copy-row">${routeChips}</div><p class="model-meta">The short alias follows priority and fallback; the target alias pins this deployment.</p></div><div class="routing-block"><div class="target-status-head"><h4>Direct model host</h4>${directLink}</div><div class="copy-row">${directIdentifiers}</div></div></div></div>`;
+      const directLink = directUrl ? `<span data-direct-host-target="${escapeHtml(targetId)}" hidden>${externalLaunchLink(directUrl, "Open direct model host")}</span>` : "";
+      const directIdentifiers = routingIdentifierRows([["Use", model.shortAlias, true], ["ID", model.directId]]);
+      return `<div class="reservation-route-model"><strong>${escapeHtml(model.displayName)}</strong><div class="routing-blocks"><div class="routing-block"><div class="target-status-head"><h4>LiteLLM gateway</h4>${liteLlmLink}</div><div class="routing-identifiers">${routeChips}</div><p class="model-meta"><strong>Use</strong> pins this deployment. <strong>Fallback</strong> may route to another target.</p></div><div class="routing-block"><div class="target-status-head"><h4>Direct model host</h4>${directLink}</div><div class="routing-identifiers">${directIdentifiers}</div></div></div></div>`;
     }).join("") : `<p class="muted">All models on this target</p>`;
-    return `<div class="reservation-route-group"><div class="reservation-route-head"><strong>${escapeHtml(entry.target.displayName)}</strong><a href="/client-setup">Connection to your models</a></div>${modelRows}</div>`;
+    return `<div class="reservation-route-group"><div class="reservation-route-head"><strong>${escapeHtml(entry.target.displayName)}</strong>${internalLaunchLink("/client-setup", "Connection to your models")}</div>${modelRows}</div>`;
   }).filter(Boolean).join("");
   return groups ? `<div class="reservation-routing">${groups}</div>` : "";
 }
@@ -3847,7 +3853,11 @@ function safeConfiguredExternalUrl(value?: string): string | undefined {
 
 function externalLaunchLink(url: string | undefined, label: string): string {
   const safeUrl = safeConfiguredExternalUrl(url);
-  return safeUrl ? `<a class="external-launch" href="${escapeHtml(safeUrl)}" target="_blank" rel="noopener noreferrer" aria-label="${escapeHtml(label)}" title="${escapeHtml(label)}"><span aria-hidden="true">↗</span></a>` : "";
+  return safeUrl ? `<a class="launch-link" href="${escapeHtml(safeUrl)}" target="_blank" rel="noopener noreferrer" aria-label="${escapeHtml(label)}" title="${escapeHtml(label)}"><span aria-hidden="true">↗</span></a>` : "";
+}
+
+function internalLaunchLink(url: string, label: string): string {
+  return `<a class="launch-link" href="${escapeHtml(url)}" aria-label="${escapeHtml(label)}" title="${escapeHtml(label)}"><span aria-hidden="true">↗</span></a>`;
 }
 
 function routingIdentifiers(canonicalModelId: string, globalAliases: string[], scopedAliases: string[], runtimeModelIds: string[]): Pick<ReservationRoutingModel, "shortAlias" | "scopedAlias" | "directId"> {
@@ -3860,7 +3870,7 @@ function routingIdentifiers(canonicalModelId: string, globalAliases: string[], s
 }
 
 function routingIdentifierRows(entries: Array<[string, string | undefined, boolean?]>): string {
-  return entries.filter((entry): entry is [string, string, boolean?] => Boolean(entry[1])).map(([label, value, primary]) => `<span class="route-kind">${escapeHtml(label)}</span>${copyChip(value, primary ? "primary" : "")}`).join("");
+  return entries.filter((entry): entry is [string, string, boolean?] => Boolean(entry[1])).map(([label, value, primary]) => `<span class="routing-identifier"><span class="route-kind">${escapeHtml(label)}</span>${copyChip(value, primary ? "primary" : "")}</span>`).join("");
 }
 
 function shortestFirst(left: string, right: string): number {

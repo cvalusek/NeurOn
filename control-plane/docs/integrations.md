@@ -208,12 +208,16 @@ accepts the replacement router settings, NeurOn deletes only stale or redundant
 NeurOn-owned deployment rows. This includes duplicate alias rows made by older
 versions; operator-owned rows and router settings remain untouched.
 
-Home and reservation detail pages present one short alias, the shortest scoped
-alias, and one ID instead of dumping every equivalent name. Direct-host blocks
-show the short alias and runtime ID. A target with a safe HTTP(S) `apiUrl` gets
-an icon that opens the runtime root rather than its trailing `/v1` API path and
-omits credentials, query parameters, and fragments. LiteLLM gets the same icon
-only when `LITELLM_UI_URL` explicitly names the correct operator-facing page;
+Home and reservation detail pages emphasize the shortest target-scoped alias as
+**Use** because it pins the selected deployment. The short global alias appears
+as **Fallback** because it follows target priority and may route elsewhere. The
+canonical catalog ID is not presented as a LiteLLM route. Direct-host blocks
+show the short runtime alias as **Use** and the backend/runtime ID as **ID**.
+A healthy target with a safe HTTP(S) `apiUrl` gets an icon that opens the
+runtime root rather than its trailing `/v1` API path and omits credentials,
+query parameters, and fragments. Stopped, starting, stopping, and failed
+targets do not show a direct-host launch icon. LiteLLM gets the same icon only
+when `LITELLM_UI_URL` explicitly names the correct operator-facing page;
 NeurOn does not guess that path from the API URL.
 
 LiteLLM traffic monitoring remains useful for clients that cannot run a plugin.

@@ -198,7 +198,8 @@ describe("model selection guidance", () => {
       });
       const clientPage = await app.inject({ method: "GET", url: "/client-setup", headers: auth });
       expect(clientPage.statusCode).toBe(200);
-      expect(clientPage.body).toContain("Global aliases use target priority");
+      expect(clientPage.body).toContain("Use the target-scoped alias");
+      expect(clientPage.body).toContain("<th>Use</th><th>Fallback</th>");
       expect(clientPage.body).toContain("t1/fast");
       expect(clientPage.body).not.toContain("sk-neuron-test");
 
@@ -776,11 +777,14 @@ describe("API authentication context", () => {
     expect(page.body).toContain("https://console.example.test/playground");
     expect(page.body).not.toContain("https://litellm.example.test/ui/");
     expect(page.body).toContain("Connection to your models");
+    expect(page.body).toContain("<strong>Use</strong> pins this deployment");
+    expect(page.body).toContain("<strong>Fallback</strong> may route to another target");
     expect(page.body).toContain('data-copy="fast"');
     expect(page.body).toContain('data-copy="t1/fast"');
-    expect(page.body).toContain('data-copy="m1"');
+    expect(page.body).not.toContain('data-copy="m1"');
     expect(page.body).toContain('data-copy="llama-m1"');
     expect(page.body).toContain('aria-label="Open direct model host"');
+    expect(page.body).toContain('data-direct-host-target="t1" hidden');
     expect(page.body).toContain("https://runtime.example.test/models/");
     expect(page.body).not.toContain("ignored=1");
   });

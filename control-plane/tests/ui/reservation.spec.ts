@@ -12,12 +12,13 @@ let app: FastifyInstance;
 let baseUrl: string;
 let previousEnv: Record<string, string | undefined>;
 let reconcile: (now?: Date) => Promise<void>;
+let identityService: Awaited<ReturnType<typeof buildApp>>["identityService"];
+let markTargetHealthy: () => void;
 
 test.beforeEach(async () => {
   previousEnv = snapshotEnv();
   process.env.USE_FAKE_PROVIDER = "true";
   process.env.CAPACITY_TARGETS_FILE = targetFile;
-  process.env.SHARED_PASSWORD = password;
   process.env.COOKIE_SECRET = "browser-test-cookie-secret";
   process.env.LITELLM_TRAFFIC_POLL_SECONDS = "0";
 
@@ -25,8 +26,10 @@ test.beforeEach(async () => {
   loaded.config.capacityTargets[0].costEstimate = { hourlyUsd: 12 };
   loaded.config.capacityTargets[0].hostingMode = "dedicated";
   loaded.config.capacityTargets[0].models![0].contextWindowTokens = 32_000;
+  loaded.config.capacityTargets[0].models![0].aliases = ["qwen-smol"];
   loaded.config.capacityTargets[0].models![0].technicalCapabilities = [{ label: "tools", title: "Tool calling" }];
   loaded.models[0].contextWindowTokens = 32_000;
+  loaded.models[0].aliases = ["qwen-smol"];
   loaded.models[0].technicalCapabilities = [{ label: "tools", title: "Tool calling" }];
   loaded.config.modelSelectionCatalog = {
     schemaVersion: 1,
@@ -39,9 +42,12 @@ test.beforeEach(async () => {
     }]
   };
   const built = await buildApp(loaded.config, loaded.models);
+  identityService = built.identityService;
   app = built.app;
   app.log.level = "silent";
   reconcile = (now?: Date) => built.reconciler.reconcile(now);
+  const statuses = Reflect.get(built.reconciler, "statuses") as { set(status: { targetId: string; desired: "on"; observed: "healthy"; message: string }): void };
+  markTargetHealthy = () => statuses.set({ targetId: "prefer-smol", desired: "on", observed: "healthy", message: "Ready" });
   await app.listen({ port: 0, host: "127.0.0.1" });
   const address = app.server.address();
   if (!address || typeof address === "string") throw new Error("Could not determine test server address");
@@ -65,13 +71,14 @@ test.afterEach(async ({ page }, testInfo) => {
 });
 
 test("requires sign-in before showing protected pages", async ({ page }) => {
+  await createTestAccount("ui-user");
   await page.goto(`${baseUrl}/api-keys`);
 
   await expect(page).toHaveURL(`${baseUrl}/login`);
   await page.getByLabel("Username").fill("ui-user");
   await page.getByLabel("Password").fill("wrong-password");
   await page.getByRole("button", { name: "Sign in" }).click();
-  await expect(page.getByText("Invalid credentials")).toBeVisible();
+  await expect(page.getByText("Invalid username or password")).toBeVisible();
 
   await page.getByLabel("Username").fill("ui-user");
   await page.getByLabel("Password").fill(password);
@@ -89,6 +96,7 @@ test("creates, extends, and ends a reservation from the rendered UI", async ({ p
   await expect(page.locator("#start-form")).toContainText("PreFer Smol");
   await expect(page.locator("#start-form")).toContainText("qwen-smol");
   await expect(page.locator("#start-cost-estimate")).toContainText("Estimated cost: $0.80");
+  await expect(page.getByRole("link", { name: "Open direct model host" })).toHaveCount(0);
 
   await page.locator('[aria-label="Duration"]').getByRole("button", { name: "5 min", exact: true }).click();
   await expect(page.locator("#duration-minutes")).toHaveValue("5");
@@ -100,7 +108,12 @@ test("creates, extends, and ends a reservation from the rendered UI", async ({ p
   await expect(page.locator("#current-reservation")).toContainText("PreFer Smol");
   await expect(page.locator("#current-reservation")).toContainText("qwen-smol");
   await expect(page.locator("#current-reservation")).toContainText("LiteLLM");
-  await expect(page.locator("#current-reservation")).toContainText("Direct runtime / llama.cpp");
+  await expect(page.locator("#current-reservation")).toContainText("Direct model host");
+  await expect(page.locator("#current-reservation")).toContainText("Use");
+  await expect(page.locator("#current-reservation").getByRole("link", { name: "Connection to your models" })).toHaveText("↗");
+  await expect(page.locator("#current-reservation").getByRole("link", { name: "Open direct model host" })).toHaveCount(0);
+  markTargetHealthy();
+  await page.reload();
   await expect(page.locator("#current-reservation").getByRole("link", { name: "Open direct model host" })).toHaveAttribute("href", "http://host.docker.internal:8080/");
   await expect(page.locator("#server-status")).toContainText("Users: ui-user");
 
@@ -313,7 +326,7 @@ test("shows and completes the standalone reservation page", async ({ page }) => 
   await expect(page.getByRole("heading", { name: "Connect to your models" })).toBeVisible();
   await expect(page.locator(".reservation-routing")).toContainText("LiteLLM");
   await expect(page.locator(".reservation-routing")).toContainText("prefer/qwen-smol");
-  await expect(page.locator(".reservation-routing")).toContainText("Direct runtime / llama.cpp");
+  await expect(page.locator(".reservation-routing")).toContainText("Direct model host");
   await expect(page.getByRole("link", { name: "Open direct model host" })).toHaveAttribute("href", "http://host.docker.internal:8080/");
   await expect(page.locator("#target-status")).toContainText("PreFer Smol");
 
@@ -622,6 +635,7 @@ test("creates a target from a provider detail panel and provisions the created t
 });
 
 async function signIn(page: Page, username: string) {
+  await createTestAccount(username);
   await page.goto(baseUrl);
   await page.getByLabel("Username").fill(username);
   await page.getByLabel("Password").fill(password);
@@ -629,10 +643,20 @@ async function signIn(page: Page, username: string) {
   await expect(page).toHaveURL(`${baseUrl}/welcome`);
 }
 
+async function createTestAccount(username: string) {
+  const invitation = await identityService.createInvitation(undefined, {
+    intendedUsername: username,
+    initialRoleId: "role_owner"
+  });
+  await identityService.register(invitation.token, { username, password });
+}
+
 async function reserveSmolModel(page: Page) {
   await createSmolProfile(page);
   await page.getByRole("button", { name: "Reserve" }).click();
   await expect(page.locator("#current-reservation")).toContainText("active");
+  markTargetHealthy();
+  await page.reload();
 }
 
 async function createSmolProfile(page: Page) {
@@ -643,7 +667,18 @@ async function createSmolProfile(page: Page) {
   }
   const modal = page.locator("#profile-modal");
   await modal.getByLabel("Name", { exact: true }).fill("Smol profile");
-  await modal.getByRole("button", { name: "Save profile" }).click();
+  await modal.getByRole("button", { name: "Review profile" }).click();
+  const review = page.locator("#profile-save-review-modal");
+  await expect(review).toBeVisible();
+  const liteLlm = review.locator(".routing-block").first();
+  await expect(liteLlm.locator(".routing-identifier").nth(0)).toContainText("Use");
+  await expect(liteLlm.locator(".routing-identifier").nth(0)).toContainText("prefer/qwen-smol");
+  await expect(liteLlm.locator(".routing-identifier").nth(1)).toContainText("Fallback");
+  await expect(liteLlm.locator(".routing-identifier").nth(1)).toContainText("qwen-smol");
+  await expect(liteLlm).not.toContainText("ID");
+  await expect(review.getByRole("link", { name: "Connection to your models" })).toHaveText("↗");
+  await expect(review.getByRole("link", { name: "Open direct model host" })).toHaveCount(0);
+  await review.getByRole("button", { name: "Create profile" }).click();
   await expect(page).toHaveURL(`${baseUrl}/`);
   await expect(page.locator("#start-form")).toContainText("Smol profile");
 }
@@ -664,7 +699,6 @@ function snapshotEnv(): Record<string, string | undefined> {
   return {
     USE_FAKE_PROVIDER: process.env.USE_FAKE_PROVIDER,
     CAPACITY_TARGETS_FILE: process.env.CAPACITY_TARGETS_FILE,
-    SHARED_PASSWORD: process.env.SHARED_PASSWORD,
     COOKIE_SECRET: process.env.COOKIE_SECRET,
     LITELLM_TRAFFIC_POLL_SECONDS: process.env.LITELLM_TRAFFIC_POLL_SECONDS
   };

@@ -197,7 +197,8 @@ Model cards show:
 - context pill
 - model trait pills such as parameter shape, instruction tuning, and quantization
 - short description
-- copy chips for the shortest alias, canonical ID, and other aliases
+- copy chips that emphasize the target-scoped LiteLLM route and retain the
+  short global fallback route
 - exact global and target-scoped LiteLLM names
 - target hourly cost, intelligence, prefill/decode speed, and diagnostic TTFT
 - estimated quantization quality retained, when measured
@@ -242,10 +243,12 @@ Route:
 GET /client-setup
 ```
 
-The page shows the short alias, shortest target-scoped alias, and canonical ID
-for each LiteLLM route and creates an OpenCode provider configuration for all
-models or one selected profile. Direct-host connections show the short alias
-and runtime model ID. It never creates a reservation or changes capacity.
+The page labels the shortest target-scoped alias as **Use** and the short global
+alias as **Fallback** for each LiteLLM route, then creates an OpenCode provider
+configuration for all models or one selected profile. The model catalog ID is
+shown only as model metadata, not as a callable LiteLLM route. Direct-host
+connections show the short alias and runtime model ID. It never creates a
+reservation or changes capacity.
 
 ## Usage Reports
 

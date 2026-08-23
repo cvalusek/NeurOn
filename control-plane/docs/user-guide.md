@@ -120,20 +120,23 @@ profile, models, projected cost, quick extensions, and **I'm done** action.
 Ending one reservation does not stop capacity still required by another user or
 reservation.
 
-Each reservation groups connection details by target. The LiteLLM block shows
-one short alias, the shortest target-scoped alias, and the canonical ID. The
-direct-host block shows the model alias and runtime ID accepted by llama.cpp.
-An external-launch icon opens the target's HTTP runtime root when the target
-publishes one; NeurOn removes a trailing `/v1` and does not carry URL
-credentials, query parameters, or fragments into that link. LiteLLM's launch
-icon appears only when the operator configures its exact UI URL.
+Each reservation groups connection details by target. The LiteLLM block marks
+the shortest target-scoped alias as **Use**, because it pins that deployment,
+and the short global alias as **Fallback**. It does not present the canonical
+catalog ID as a callable LiteLLM route. The direct-host block marks the runtime
+alias as **Use** and retains the backend/runtime **ID** accepted by llama.cpp.
+A launch icon opens the target's HTTP runtime root only while that target is
+healthy; NeurOn removes a trailing `/v1` and does not carry URL credentials,
+query parameters, or fragments into that link. LiteLLM's launch icon appears
+only when the operator configures its exact UI URL.
 
 Server status is grouped by target. Personally reserved targets come first,
 followed by other activated targets and then off targets. Within those groups,
 recently used targets appear first. A multi-target reservation can appear under
 more than one target while remaining one reservation. Expanding a target stays
 expanded across polling, so controls and traffic help text remain usable.
-Target cards also expose the direct-host link when one is available.
+Target cards expose the direct-host launch icon only while the target is
+healthy.
 
 ## Configure OpenCode and other clients
 
