@@ -87,6 +87,13 @@ reservation or traffic demand can start the target again on a later pass.
 Successful discovery refreshes replace the persisted cache for that target.
 Deleting a persisted target also deletes its cached discovery record.
 
+For reservation-driven startup, runtime discovery runs after process health but
+before model warmup. This ordering is deliberate: runtimes may normalize a
+configured model identifier before advertising and accepting it. Warmup uses
+the target-scoped live discovery ID when available, then the explicitly
+configured backend ID. A warmup routing failure therefore cannot prevent the
+runtime catalog from being refreshed and persisted.
+
 Discovery failure messages include the last concrete blocker seen while
 waiting, such as provider status, failed health check, or `/v1/models` HTTP
 error. The admin action remains synchronous, returns that concrete error, and

@@ -48,7 +48,7 @@ export class ModelBenchmarkService {
   }
 
   private async benchmarkDeployment(target: CapacityTarget, model: ModelDefinition, endpoint: string): Promise<ModelBenchmarkResult> {
-    const runtimeModelId = model.runtimeModelIds?.[0] ?? model.backendModelIds?.[0] ?? model.id;
+    const runtimeModelId = this.catalog.requestModelId(target.id, model.id) ?? model.id;
     await this.sample(target, runtimeModelId, endpoint, 0, true);
     const samples = [];
     for (let index = 0; index < MEASURED_SAMPLES; index += 1) samples.push(await this.sample(target, runtimeModelId, endpoint, index + 1, false));

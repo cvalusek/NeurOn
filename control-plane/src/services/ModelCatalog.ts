@@ -29,6 +29,17 @@ export class ModelCatalog {
     return this.listModels().filter((model) => model.targetIds.includes(targetId));
   }
 
+  requestModelId(targetId: string, modelId: string): string | undefined {
+    const model = this.getModel(modelId);
+    if (!model) return undefined;
+    const discovered = this.runtimeModelsByDeployment
+      .get(deploymentKey(targetId, model.id))
+      ?.find((candidate) => candidate.id?.trim())
+      ?.id
+      ?.trim();
+    return discovered ?? model.backendModelIds?.[0] ?? model.runtimeModelIds?.[0] ?? model.id;
+  }
+
   getTarget(id: string): CapacityTarget | undefined {
     return this.targetById.get(id);
   }
@@ -85,7 +96,9 @@ export class ModelCatalog {
     if (target) target.modelIds = Array.from(new Set([...target.modelIds, ...runtimeIds]));
     for (const runtimeInfo of runtimeInfos) {
       const runtimeId = runtimeInfo.id;
-      const existing = this.modelByLookupId.get(runtimeId);
+      const existing = [runtimeId, ...(runtimeInfo.aliases ?? [])]
+        .map((candidate) => this.modelByLookupId.get(candidate))
+        .find((candidate): candidate is ModelDefinition => Boolean(candidate));
       if (existing) {
         this.updateModelFromRuntimeInfo(existing, targetId, runtimeInfo);
         this.recordDeploymentRuntime(targetId, existing.id, runtimeInfo);
@@ -111,7 +124,9 @@ export class ModelCatalog {
     for (const model of this.modelById.values()) {
       if (!model.targetIds.includes(targetId)) continue;
       const expected = new Set([model.id, ...model.aliases, ...(model.backendModelIds ?? [])]);
-      const matches = runtimeIds.filter((runtimeId) => expected.has(runtimeId));
+      const matches = runtimeInfos
+        .filter((runtimeInfo) => expected.has(runtimeInfo.id) || (runtimeInfo.aliases ?? []).some((alias) => expected.has(alias)))
+        .map((runtimeInfo) => runtimeInfo.id);
       model.runtimeModelIds = matches.length > 0 ? matches : model.runtimeModelIds;
       this.addModelLookups(model);
     }

@@ -1,4 +1,4 @@
-import type { CapacityTarget, ModelDefinition } from "../domain/types.js";
+import type { CapacityTarget } from "../domain/types.js";
 import { ModelCatalog } from "./ModelCatalog.js";
 
 export class ModelWarmupService {
@@ -14,8 +14,7 @@ export class ModelWarmupService {
     if (!apiBaseUrl) return;
 
     for (const modelId of uniqueModelIds) {
-      const model = this.catalog.getModel(modelId);
-      const warmupModelId = warmupModelIdFor(model, modelId);
+      const warmupModelId = this.catalog.requestModelId(target.id, modelId) ?? modelId;
       const key = `${target.id}:${warmupModelId}`;
       if (this.warmed.has(key)) continue;
       await warmupModel(apiBaseUrl, warmupModelId, target);
@@ -27,10 +26,6 @@ export class ModelWarmupService {
     const prefix = `${targetId}:`;
     for (const key of this.warmed) if (key.startsWith(prefix)) this.warmed.delete(key);
   }
-}
-
-function warmupModelIdFor(model: ModelDefinition | undefined, fallback: string): string {
-  return model?.runtimeModelIds?.[0] ?? model?.backendModelIds?.[0] ?? model?.id ?? fallback;
 }
 
 function warmupApiBaseUrl(target: CapacityTarget): string | undefined {

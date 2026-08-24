@@ -223,6 +223,43 @@ describe("reconciler decisions", () => {
     expect(statuses.get("t1")).toMatchObject({ desired: "on", observed: "healthy" });
   });
 
+  it("discovers live model IDs before warming requested models", async () => {
+    const repository = new InMemoryReservationRepository();
+    const statuses = new InMemoryTargetStatusRepository();
+    const provider = new FakeCapacityProvider();
+    provider.statuses.set("t1", { observed: "healthy", message: "Running" });
+    await repository.create({
+      username: "clint",
+      modelIds: ["m1"],
+      targetIds: ["t1"],
+      createdAt: new Date("2026-06-25T10:00:00.000Z"),
+      expiresAt: new Date("2026-06-25T11:00:00.000Z"),
+      status: "active"
+    });
+    const events: string[] = [];
+    const runtimeModelDiscovery = {
+      async refreshTarget() {
+        events.push("discover");
+        return [];
+      }
+    };
+    const modelWarmup = {
+      forgetTarget() {},
+      async warmupTargetModels() {
+        events.push("warmup");
+      }
+    };
+    const reconciler = new Reconciler(
+      [target], repository, statuses, provider, new NoopBackendConfigSync(), undefined,
+      runtimeModelDiscovery as never, modelWarmup as never
+    );
+
+    await reconciler.reconcile(new Date("2026-06-25T10:00:00.000Z"));
+
+    expect(events).toEqual(["discover", "warmup"]);
+    expect(statuses.get("t1")).toMatchObject({ desired: "on", observed: "healthy" });
+  });
+
   it("warms only the models selected for each target in a multi-target reservation", async () => {
     const secondTarget: CapacityTarget = { ...target, id: "t2", displayName: "T2", modelIds: ["m2"] };
     const repository = new InMemoryReservationRepository();

@@ -116,6 +116,9 @@ export class Reconciler {
         if (this.modelWarmup && (desired !== "on" || observed !== "healthy" || previous?.observed !== "healthy")) {
           this.modelWarmup.forgetTarget?.(target.id);
         }
+        if (desired === "on" && observed === "healthy" && !this.targetOperations?.isDiscoveryActive(target.id)) {
+          await this.runtimeModelDiscovery?.refreshTarget(runtimeTarget).catch(() => undefined);
+        }
         if (desired === "on" && observed === "healthy" && this.modelWarmup) {
           const modelIds = targetReservations.flatMap((reservation) =>
             reservation.targetSelections?.find((selection) => selection.targetId === target.id)?.modelIds ?? reservation.modelIds
@@ -129,9 +132,6 @@ export class Reconciler {
         }
         const next = targetStatus(target.id, desired, observed, message, now, previous);
         this.statuses.set(next);
-        if (next.observed === "healthy" && !this.targetOperations?.isDiscoveryActive(target.id)) {
-          await this.runtimeModelDiscovery?.refreshTarget(runtimeTarget).catch(() => undefined);
-        }
         if (next.observed === "failed") {
           await this.failActiveReservationsForTarget(target.id, next.message, now);
         }
