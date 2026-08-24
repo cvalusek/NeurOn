@@ -259,6 +259,8 @@ function technicalCapabilitiesForRuntimeModel(model: RuntimeModelInfo & { id: st
   addCollection(model.modalities);
   addCollection(model.input_modalities);
   addCollection(model.output_modalities);
+  addCollection(model.architecture?.input_modalities);
+  addCollection(model.architecture?.output_modalities);
   if (model.supports_vision === true) add("vision");
   if (model.supports_tools === true || model.supports_tool_calls === true) add("tools");
   for (const tag of model.tags ?? []) {

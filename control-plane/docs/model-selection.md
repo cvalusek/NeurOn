@@ -120,6 +120,16 @@ measurements are stored. Operators should run it during an appropriate capacity
 window because it generates inference work. A failure leaves the previous
 durable measurement intact and is reported to the operator.
 
+The in-application Assistant resolves its durable target/model selection back
+to the current canonical deployment at startup. This preserves an existing
+selection when llama.cpp normalizes a configured quant name such as
+`UD-Q4_K_XL` to the discovered `Q4_K_XL` identity. Its completion request then
+uses the exact target-scoped ID from discovery; the legacy configured spelling
+is never assumed to be request-compatible. Runtime-advertised modalities are
+included in the Assistant catalog even when llama.cpp nests them under its
+architecture record, and the catalog supplied with each request supersedes
+stale catalog claims from earlier conversation history.
+
 Ordinary LiteLLM traffic may still contribute a short-lived observational
 overlay when it supplies unambiguous token/timing data. Cache hits, failed or
 duplicate records, invalid timestamps, zero-token records, and routes that map

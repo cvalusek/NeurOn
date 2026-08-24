@@ -571,6 +571,10 @@ export interface RuntimeDiscoveredModel {
   id?: string;
   aliases?: string[];
   tags?: Array<string | { label?: string; title?: string }>;
+  architecture?: {
+    input_modalities?: unknown;
+    output_modalities?: unknown;
+  } | null;
   capabilities?: unknown;
   input_modalities?: unknown;
   output_modalities?: unknown;
