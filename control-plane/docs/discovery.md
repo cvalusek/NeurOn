@@ -94,6 +94,12 @@ the target-scoped live discovery ID when available, then the explicitly
 configured backend ID. A warmup routing failure therefore cannot prevent the
 runtime catalog from being refreshed and persisted.
 
+Persisted quality or performance metadata for an older runtime-discovery ID is
+retained but ignored when that ID is no longer selectable. A stale normalized
+or configured identifier cannot prevent the control plane from restarting;
+fresh discovery can repopulate the active catalog without destructive metadata
+cleanup.
+
 Discovery failure messages include the last concrete blocker seen while
 waiting, such as provider status, failed health check, or `/v1/models` HTTP
 error. The admin action remains synchronous, returns that concrete error, and

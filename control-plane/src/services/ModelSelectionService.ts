@@ -115,8 +115,15 @@ export class ModelSelectionService {
     const parsed = parseModelSelectionCatalog({ schemaVersion: 1, models: capabilities.map(withoutUpdatedAt), deployments: deployments.map(withoutUpdatedAt) });
     this.capabilities.clear();
     this.configuredDeployments.clear();
-    for (const capability of parsed.models) this.setCapability(capability);
-    for (const deployment of parsed.deployments) this.setDeployment(deployment);
+    for (const capability of parsed.models) {
+      const model = this.catalog.getModel(capability.modelId);
+      if (model?.id === capability.modelId) this.setCapability(capability);
+    }
+    for (const deployment of parsed.deployments) {
+      const target = this.catalog.getTarget(deployment.targetId);
+      const model = this.catalog.getModel(deployment.modelId);
+      if (target && model?.id === deployment.modelId && model.targetIds.includes(target.id)) this.setDeployment(deployment);
+    }
   }
 
   async upsertCapability(input: ModelCapabilityMetadata): Promise<void> {

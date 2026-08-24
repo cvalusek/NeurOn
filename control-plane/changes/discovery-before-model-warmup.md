@@ -5,3 +5,6 @@
   discovery.
 - Warmup and direct speed benchmarks now use the target-scoped discovered model
   ID, with the configured backend ID as the fallback.
+- Stale model metadata from an older runtime-discovery identifier no longer
+  prevents NeurOn from restarting; the durable row is retained but excluded
+  until its model is selectable again.
