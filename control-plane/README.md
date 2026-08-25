@@ -248,7 +248,9 @@ When `LITELLM_API_BASE_URL` and `LITELLM_API_KEY` are set, the poller reads
 LiteLLM spend logs, maps recent `model_group`/`model` values to NeurOn model IDs
 or target traffic prefixes, and refreshes a synthetic `traffic` reservation. It
 uses the active reservation's keepalive window and will not resurrect a failed
-target by itself.
+target by itself. Traffic logs do not supply model speed ratings; explicit
+direct benchmarks remain authoritative because prefix-cached prompt tokens
+cannot be identified reliably from LiteLLM's response-cache flag.
 
 ## Deployment Notes
 

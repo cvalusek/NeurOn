@@ -182,9 +182,10 @@ provenance. **Rediscover all** processes targets sequentially. Startup cache
 hydration does not benchmark or contact a model. Run explicit benchmarking only
 during an approved capacity window.
 
-Ordinary LiteLLM traffic can still contribute a short-lived observational
-overlay when timing/token data is successful, uncached, and unambiguous. A
-restart clears that overlay but leaves durable measurements intact. The profile
+Ordinary LiteLLM traffic is not a performance benchmark and contributes only
+demand, attribution, popularity, and keepalive signals. Controlled deployment
+benchmarks are authoritative for speed rankings; other observational speed
+sources are considered only when no controlled measurement exists. The profile
 assistant reuses the selected target's existing runtime credential reference;
 there is no separate advisor secret. Its target/model and timing controls live
 in the independent **Admin > Assistant** screen and `assistant_config` record.

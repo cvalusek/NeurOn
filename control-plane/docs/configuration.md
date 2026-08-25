@@ -747,7 +747,10 @@ environment config to publish an intentionally empty display prefix.
 
 LiteLLM traffic polling reads `model_group` and `model` from spend logs. NeurOn
 tries `/spend/logs/v2` first, then falls back to the legacy `/spend/logs`
-response shape when v2 is empty.
+response shape when v2 is empty. Spend-log traffic is used for demand,
+attribution, popularity, and keep-alive; it is not used as a speed benchmark
+because provider prefix-cache accounting is not equivalent to LiteLLM's
+response-cache flag.
 
 Use `docker-compose` provider targets when the runtime is still owned by a
 Compose project:

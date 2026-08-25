@@ -235,7 +235,7 @@ refreshes the cache, benchmarks an activated runtime, and may activate a stopped
 target. **Rediscover all** runs targets one by one. AWS EC2 resource discovery
 hides instances already assigned to a NeurOn target by default.
 
-## Connection to your models
+## Connect
 
 Route:
 

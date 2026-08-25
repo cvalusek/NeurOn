@@ -44,27 +44,28 @@ describe("model selection metadata", () => {
     ]));
   });
 
-  it("uses deduplicated rolling LiteLLM medians after three valid observations", () => {
+  it("uses deduplicated rolling medians when no controlled measurement exists", () => {
     const service = selectionService();
     const now = Date.now();
     for (const [index, [requestId, decode]] of ([["r1", 20], ["r2", 60], ["r3", 40]] as const).entries()) {
-      expect(service.recordObservation("small", "fast", { requestId, seenAt: new Date(now - (2 - index) * 60_000), decodeTokensPerSecond: decode, timeToFirstTokenSeconds: decode / 100 })).toBe(true);
+      expect(service.recordObservation("large", "smart", { requestId, seenAt: new Date(now - (2 - index) * 60_000), decodeTokensPerSecond: decode, timeToFirstTokenSeconds: decode / 100 })).toBe(true);
     }
-    expect(service.recordObservation("small", "fast", { requestId: "r3", seenAt: new Date(), decodeTokensPerSecond: 999 })).toBe(false);
-    const deployment = service.listDeployments().find((candidate) => candidate.key === "small::fast");
+    expect(service.recordObservation("large", "smart", { requestId: "r3", seenAt: new Date(), decodeTokensPerSecond: 999 })).toBe(false);
+    const deployment = service.listDeployments().find((candidate) => candidate.key === "large::smart");
     expect(deployment?.performance).toMatchObject({ decodeTokensPerSecond: 40, timeToFirstTokenSeconds: 0.4, sampleCount: 3, source: "observed" });
   });
 
-  it("keeps configured metrics when the observed overlay lacks three samples for that metric", () => {
+  it("keeps controlled metrics authoritative after observational sampling", () => {
     const service = selectionService();
     const now = Date.now();
     for (const [index, decodeTokensPerSecond] of [20, 40, 60].entries()) {
       service.recordObservation("small", "fast", { requestId: `decode-${index}`, seenAt: new Date(now - index * 1_000), decodeTokensPerSecond });
     }
     expect(service.listDeployments().find((deployment) => deployment.key === "small::fast")?.performance).toMatchObject({
-      decodeTokensPerSecond: 40,
+      decodeTokensPerSecond: 80,
       timeToFirstTokenSeconds: 0.5,
-      source: "observed"
+      sampleCount: 10,
+      source: "configured"
     });
   });
 

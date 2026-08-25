@@ -770,13 +770,13 @@ describe("API authentication context", () => {
     expect(home.body).toContain("Your reservations");
     expect(page.body).toContain("setInterval(updateReservationTime, 1000)");
     expect(page.body).toContain("String(seconds).padStart(2, '0')");
-    expect(page.body).toContain("Connect to your models");
+    expect(page.body).toContain("<h2>Connect</h2>");
     expect(page.body).toContain("LiteLLM gateway");
     expect(page.body).toContain("Direct model host");
     expect(page.body).toContain('aria-label="Open LiteLLM"');
     expect(page.body).toContain("https://console.example.test/playground");
     expect(page.body).not.toContain("https://litellm.example.test/ui/");
-    expect(page.body).toContain("Connection to your models");
+    expect(page.body).toContain('aria-label="Connect"');
     expect(page.body).toContain("<strong>Use</strong> pins this deployment");
     expect(page.body).toContain("<strong>Fallback</strong> may route to another target");
     expect(page.body).toContain('data-copy="fast"');

@@ -110,7 +110,7 @@ test("creates, extends, and ends a reservation from the rendered UI", async ({ p
   await expect(page.locator("#current-reservation")).toContainText("LiteLLM");
   await expect(page.locator("#current-reservation")).toContainText("Direct model host");
   await expect(page.locator("#current-reservation")).toContainText("Use");
-  await expect(page.locator("#current-reservation").getByRole("link", { name: "Connection to your models" })).toHaveText("↗");
+  await expect(page.locator("#current-reservation").getByRole("link", { name: "Connect" })).toHaveText("↗");
   await expect(page.locator("#current-reservation").getByRole("link", { name: "Open direct model host" })).toHaveCount(0);
   markTargetHealthy();
   await page.reload();
@@ -323,7 +323,7 @@ test("shows and completes the standalone reservation page", async ({ page }) => 
   await page.goto(`${baseUrl}/reservations/${reservationId}`);
   await expect(page.getByRole("heading", { name: new RegExp(`Reservation ${reservationId}`) })).toBeVisible();
   await expect(page.locator("#reservation-status")).toContainText("active");
-  await expect(page.getByRole("heading", { name: "Connect to your models" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Connect", exact: true })).toBeVisible();
   await expect(page.locator(".reservation-routing")).toContainText("LiteLLM");
   await expect(page.locator(".reservation-routing")).toContainText("prefer/qwen-smol");
   await expect(page.locator(".reservation-routing")).toContainText("Direct model host");
@@ -676,7 +676,7 @@ async function createSmolProfile(page: Page) {
   await expect(liteLlm.locator(".routing-identifier").nth(1)).toContainText("Fallback");
   await expect(liteLlm.locator(".routing-identifier").nth(1)).toContainText("qwen-smol");
   await expect(liteLlm).not.toContainText("ID");
-  await expect(review.getByRole("link", { name: "Connection to your models" })).toHaveText("↗");
+  await expect(review.getByRole("link", { name: "Connect" })).toHaveText("↗");
   await expect(review.getByRole("link", { name: "Open direct model host" })).toHaveCount(0);
   await review.getByRole("button", { name: "Create profile" }).click();
   await expect(page).toHaveURL(`${baseUrl}/`);

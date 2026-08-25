@@ -112,7 +112,7 @@ NeurOn exposes:
 Users create personal `sk-neuron-...` API keys from **API keys**. The full key
 is shown once and only its hash is stored. See
 [Integrations](control-plane/docs/integrations.md) for REST, MCP, Codex, and
-OpenCode examples. **Connection to your models** shows the live global and target-scoped
+OpenCode examples. **Connect** shows the live global and target-scoped
 LiteLLM names and generates an OpenCode provider configuration for all models or
 one profile. NeurOn publishes those friendly names through LiteLLM's formal
 model-group aliases and uses formal fallback chains for priority collisions;

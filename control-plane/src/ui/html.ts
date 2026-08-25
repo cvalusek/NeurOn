@@ -879,7 +879,7 @@ export function startPage(user: AuthenticatedUser, targets: Array<{ target: Capa
           const directLink = reservationTarget?.observed === 'healthy' ? launch(target.directHostUrl, 'Open direct model host') : '';
           return '<div class="reservation-route-model"><strong>' + escapeText(model.displayName) + '</strong><div class="routing-blocks"><div class="routing-block"><div class="target-status-head"><h4>LiteLLM gateway</h4>' + liteLlmLink + '</div><div class="routing-identifiers">' + routes + '</div><p class="model-meta"><strong>Use</strong> pins this deployment. <strong>Fallback</strong> may route to another target.</p></div><div class="routing-block"><div class="target-status-head"><h4>Direct model host</h4>' + directLink + '</div><div class="routing-identifiers">' + directRoutes + '</div></div></div></div>';
         }).join('') : '<p class="muted">All models on this target</p>';
-        return '<div class="reservation-route-group"><div class="reservation-route-head"><strong>' + escapeText(target.displayName) + '</strong><a class="launch-link" href="/client-setup" aria-label="Connection to your models" title="Connection to your models"><span aria-hidden="true">↗</span></a></div>' + modelRows + '</div>';
+        return '<div class="reservation-route-group"><div class="reservation-route-head"><strong>' + escapeText(target.displayName) + '</strong><a class="launch-link" href="/client-setup" aria-label="Connect" title="Connect"><span aria-hidden="true">↗</span></a></div>' + modelRows + '</div>';
       }).filter(Boolean).join('');
       return groups ? '<div class="reservation-routing">' + groups + '</div>' : '';
     };
@@ -1166,7 +1166,7 @@ export function reservationPage(
     <p>Expires: <span id="reservation-expires">${reservation.expiresAt.toISOString()}</span></p>
     <p>Cost so far: <span id="reservation-cost-so-far" class="status">Not allocated yet</span></p>
     <p>Projected total: <span id="reservation-cost-projected" class="status">Not available</span></p>
-    <h2>Connect to your models</h2>
+    <h2>Connect</h2>
     <p class="muted">Use a LiteLLM alias in OpenCode or another configured client. Runtime IDs are the values exposed directly by the model host.</p>
     ${reservationRoutingHtml(reservation, targets, undefined, config.litellmUiUrl)}
     <div id="target-status"></div>
@@ -1247,8 +1247,8 @@ export function clientSetupPage(
   }).sort((left, right) => left.globalAlias.localeCompare(right.globalAlias) || left.priority - right.priority || left.targetDisplayName.localeCompare(right.targetDisplayName));
   const serialized = JSON.stringify(rows).replace(/</gu, "\\u003c");
   const options = profiles.map((profile) => `<option value="${escapeHtml(profile.id)}">${escapeHtml(profile.name)}</option>`).join("");
-  return layout("Connection to your models", user, `<section class="panel">
-    <div class="target-status-head"><div><h1>Connection to your models</h1><p class="muted">Use the target-scoped alias for the deployment selected by a profile. The shorter global alias is available when portability and automatic fallback matter more than pinning one target.</p></div><a class="button secondary" href="/api-keys">Create API key</a></div>
+  return layout("Connect", user, `<section class="panel">
+    <div class="target-status-head"><div><h1>Connect</h1><p class="muted">Use the target-scoped alias for the deployment selected by a profile. The shorter global alias is available when portability and automatic fallback matter more than pinning one target.</p></div><a class="button secondary" href="/api-keys">Create API key</a></div>
     <p><label>Configuration scope<br><select id="client-profile"><option value="">All models (global fallback aliases)</option>${options}</select></label></p>
   </section>
   <section class="panel"><h2>OpenCode provider</h2><p class="muted">Replace the endpoint placeholder and keep secrets in environment variables. The NeurOn plugin reserves and waits for the selected route before OpenCode sends the request.</p><div class="inline-actions"><button type="button" data-copy-client="opencode-config">Copy config</button><button class="secondary" type="button" data-copy-client="opencode-env">Copy plugin environment</button><span class="muted" id="client-copy-status"></span></div><pre id="opencode-config"></pre><pre id="opencode-env">NEURON_API_BASE_URL=&lt;NEURON_BASE_URL&gt;
@@ -1430,7 +1430,8 @@ function profileListCard(profile: ReservationProfile, targets: Array<{ target: C
     return `<div class="target-status-card"><div class="target-status-head"><strong>${escapeHtml(targetLookup[selection.targetId]?.displayName ?? selection.targetId)}</strong><span class="muted"><code>${escapeHtml(selection.targetId)}</code></span></div><div class="chip-row">${modelSummary}</div></div>`;
   }).join("");
   const scope = profile.sharingScope === "everyone" ? `<span class="pill">Everyone</span>` : profile.teamId ? `<span class="pill">Team: ${escapeHtml(team?.name ?? profile.teamId)}</span>` : `<span class="pill">Personal</span>`;
-  const actions = `<div class="inline-actions"><a class="button secondary" href="/client-setup?profile=${encodeURIComponent(profile.id)}">Connection to your models</a>${manageable ? `<a class="button secondary" href="/profiles/${escapeHtml(profile.id)}/edit">Edit</a><form method="post" action="/reservation-profiles/${escapeHtml(profile.id)}/delete"><button class="danger" type="submit">Delete</button></form>` : ""}</div>`;
+  const connectLink = internalLaunchLink(`/client-setup?profile=${encodeURIComponent(profile.id)}`, "Connect");
+  const actions = `<div class="inline-actions">${connectLink}${manageable ? `<a class="button secondary" href="/profiles/${escapeHtml(profile.id)}/edit">Edit</a><form method="post" action="/reservation-profiles/${escapeHtml(profile.id)}/delete"><button class="danger" type="submit">Delete</button></form>` : ""}</div>`;
   return `<details class="drilldown"><summary><div><strong>${escapeHtml(profile.name)}</strong>${profile.description ? `<div class="muted">${escapeHtml(profile.description)}</div>` : ""}<div class="target-status-meta">${scope}${defaults ? `<span class="pill">${escapeHtml(defaults)}</span>` : ""}<span class="muted">${profile.selections.length} target selection${profile.selections.length === 1 ? "" : "s"}</span></div></div>${actions}</summary><div class="drilldown-body">${selections}</div></details>`;
 }
 
@@ -3616,7 +3617,7 @@ function profileEditorClientScript(
           const directIds = identifier('Use', deployment.shortAlias, true) + identifier('ID', deployment.directId);
           return '<div class="profile-review-model"><div class="target-status-head"><div><strong>' + escapeText(deployment.modelDisplayName) + '</strong><div class="muted">' + escapeText(deployment.targetDisplayName) + '</div></div>' + (deployment.hourlyUsd === undefined ? '' : '<span class="target-price">$' + deployment.hourlyUsd.toFixed(2) + '/hr</span>') + '</div>' + (metrics.length ? '<div class="model-metrics">' + metrics.map(metric => '<span class="metric">' + escapeText(metric) + '</span>').join('') + '</div>' : '<p class="muted">No selection measurements are available.</p>') + '<div class="routing-blocks"><div class="routing-block"><h4>LiteLLM gateway</h4><div class="routing-identifiers">' + aliasChips + '</div><p class="model-meta"><strong>Use</strong> pins this deployment. <strong>Fallback</strong> may route to another target.</p></div><div class="routing-block"><h4>Direct model host</h4><div class="routing-identifiers">' + directIds + '</div><p class="model-meta">The host link appears on Home only while this target is healthy.</p></div></div></div>';
         }).join('');
-        reviewContent.innerHTML = '<section><h3>Changes</h3><ul>' + changes.map(change => '<li>' + escapeText(change) + '</li>').join('') + '</ul></section><section><h3>Overall selection</h3><div class="target-status-meta"><span class="pill">' + escapeText(audience) + '</span><span class="pill">' + current.duration + ' min duration</span><span class="pill">' + current.keepalive + ' min keepalive</span><span class="pill">' + selectedTargetIds.length + ' targets</span></div><p><strong>' + escapeText(costSummary) + '</strong></p></section><section><div class="target-status-head"><h3>Models and routes</h3><a class="launch-link" href="/client-setup" aria-label="Connection to your models" title="Connection to your models"><span aria-hidden="true">↗</span></a></div>' + (modelCards || '<p class="muted">No individual models are configured for the selected target.</p>') + '</section>';
+        reviewContent.innerHTML = '<section><h3>Changes</h3><ul>' + changes.map(change => '<li>' + escapeText(change) + '</li>').join('') + '</ul></section><section><h3>Overall selection</h3><div class="target-status-meta"><span class="pill">' + escapeText(audience) + '</span><span class="pill">' + current.duration + ' min duration</span><span class="pill">' + current.keepalive + ' min keepalive</span><span class="pill">' + selectedTargetIds.length + ' targets</span></div><p><strong>' + escapeText(costSummary) + '</strong></p></section><section><div class="target-status-head"><h3>Models and routes</h3><a class="launch-link" href="/client-setup" aria-label="Connect" title="Connect"><span aria-hidden="true">↗</span></a></div>' + (modelCards || '<p class="muted">No individual models are configured for the selected target.</p>') + '</section>';
       };
       form.addEventListener('submit', event => {
         const selectedTargets = targetInputs.filter(input => input.checked);
@@ -3835,7 +3836,7 @@ function reservationRoutingHtml(
       const directIdentifiers = routingIdentifierRows([["Use", model.shortAlias, true], ["ID", model.directId]]);
       return `<div class="reservation-route-model"><strong>${escapeHtml(model.displayName)}</strong><div class="routing-blocks"><div class="routing-block"><div class="target-status-head"><h4>LiteLLM gateway</h4>${liteLlmLink}</div><div class="routing-identifiers">${routeChips}</div><p class="model-meta"><strong>Use</strong> pins this deployment. <strong>Fallback</strong> may route to another target.</p></div><div class="routing-block"><div class="target-status-head"><h4>Direct model host</h4>${directLink}</div><div class="routing-identifiers">${directIdentifiers}</div></div></div></div>`;
     }).join("") : `<p class="muted">All models on this target</p>`;
-    return `<div class="reservation-route-group"><div class="reservation-route-head"><strong>${escapeHtml(entry.target.displayName)}</strong>${internalLaunchLink("/client-setup", "Connection to your models")}</div>${modelRows}</div>`;
+    return `<div class="reservation-route-group"><div class="reservation-route-head"><strong>${escapeHtml(entry.target.displayName)}</strong>${internalLaunchLink("/client-setup", "Connect")}</div>${modelRows}</div>`;
   }).filter(Boolean).join("");
   return groups ? `<div class="reservation-routing">${groups}</div>` : "";
 }

@@ -327,14 +327,8 @@ function aggregateObservations(samples: StoredObservation[]): ModelDeploymentPer
 }
 
 function mergePerformance(configured: ModelDeploymentPerformance | undefined, observed: ModelDeploymentPerformance | undefined): ModelDeploymentSelectionView["performance"] {
-  if (observed) {
-    const merged = { ...configured };
-    for (const [key, value] of Object.entries(observed)) {
-      if (value !== undefined) Object.assign(merged, { [key]: value });
-    }
-    return { ...merged, source: "observed" };
-  }
-  return configured ? { ...structuredClone(configured), source: "configured" } : undefined;
+  if (configured) return { ...structuredClone(configured), source: "configured" };
+  return observed ? { ...structuredClone(observed), source: "observed" } : undefined;
 }
 
 function medianWithMinimumSamples(values: number[]): number | undefined {

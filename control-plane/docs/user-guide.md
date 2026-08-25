@@ -140,13 +140,13 @@ healthy.
 
 ## Configure OpenCode and other clients
 
-Open **Connection to your models** to see every callable LiteLLM name. A global
+Open **Connect** to see every callable LiteLLM name. A global
 alias points to the lowest-priority-number target. The scoped
 `<target>/<alias>` form always selects that exact target/model deployment.
 Choose a profile to limit the list, then copy the generated OpenCode provider
 JSON and use the displayed model names instead of manually reconstructing them.
 
-![Connection to your models with global and scoped LiteLLM aliases](images/client-setup.png)
+![Connect page with global and scoped LiteLLM aliases](images/client-setup.png)
 
 ## Traffic reservation and cost
 

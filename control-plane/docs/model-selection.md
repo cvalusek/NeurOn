@@ -130,11 +130,13 @@ included in the Assistant catalog even when llama.cpp nests them under its
 architecture record, and the catalog supplied with each request supersedes
 stale catalog claims from earlier conversation history.
 
-Ordinary LiteLLM traffic may still contribute a short-lived observational
-overlay when it supplies unambiguous token/timing data. Cache hits, failed or
-duplicate records, invalid timestamps, zero-token records, and routes that map
-to more than one target are excluded. The durable direct benchmark remains the
-repeatable baseline after restart.
+Ordinary LiteLLM traffic is not a benchmark. Provider- and runtime-side prefix
+caches are not represented consistently by LiteLLM's response-cache flag, so
+spend-log prompt counts and first-token timing cannot establish uncached prefill
+throughput. Traffic contributes demand, user attribution, popularity, and
+keep-alive only. The durable direct benchmark is authoritative for speed
+ranking. If another observational source supplies timing data, it is used only
+when no controlled deployment measurement exists.
 
 ## NeurOn-backed profile assistant
 
@@ -162,9 +164,9 @@ The assistant receives a sanitized deployment catalog (IDs, display names,
 aliases, selection measurements, context, and cost), saved-profile IDs/names,
 and the user's active reservation summary. It also receives an application-
 constructed current-screen snapshot: a named surface such as Home, Profile
-create/edit, Connection to your models, or an admin area; the route and title; and only the
+create/edit, Connect, or an admin area; the route and title; and only the
 relevant typed controls such as the current profile draft, requirement filters,
-ranking shares, selected Home profile/timing, or Connection to your models profile. This lets
+ranking shares, selected Home profile/timing, or Connect profile. This lets
 it answer “what am I looking at?” and update the right controls without sending
 HTML or scraping visible text. It never receives target endpoints, provider or
 model credentials, raw DOM contents, prompt logs, hidden fields outside the

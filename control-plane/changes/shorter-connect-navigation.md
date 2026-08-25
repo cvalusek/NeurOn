@@ -1,7 +1,7 @@
 # Clearer model connections
 
-- Shortened the workspace navigation label to **Connect** while keeping the
-  destination page's descriptive **Connection to your models** heading.
+- Standardized the workspace navigation and destination page on the concise
+  **Connect** label.
 - Emphasized the target-scoped LiteLLM alias users should normally copy, kept
   the short global alias as the fallback option, and removed the uncallable
   catalog ID from LiteLLM routing blocks.

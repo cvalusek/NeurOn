@@ -43,7 +43,7 @@ runtime-discovered IDs. NeurOn keeps one canonical LiteLLM deployment for the
 exact target/model, maps scoped `<target>/<alias>` and global friendly names to
 it with LiteLLM model-group aliases, and makes the lowest-priority-number target
 the global alias owner. Later targets form the fallback chain. The same names
-appear in profile selection and **Connection to your models**.
+appear in profile selection and **Connect**.
 
 Audience filtering is an authorization boundary, not only a display hint. It
 is enforced in the UI, REST API, MCP catalog and tools, reservation validation,

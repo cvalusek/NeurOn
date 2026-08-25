@@ -194,9 +194,10 @@ into AWS, Docker, LiteLLM, or a concrete repository from unrelated code.
 - `ModelCatalog`: maps selectable model IDs, aliases, backend IDs, and runtime
   IDs to model definitions and targets.
 - `ModelSelectionService`: combines durable capability metadata, exact
-  target-model deployment facts, target cost, and performance observations. It
-  applies hard requirements before deterministic weighted ranking and treats
-  missing measurements as unknown.
+  target-model deployment facts, target cost, and controlled performance
+  measurements. It applies hard requirements before deterministic weighted
+  ranking, keeps controlled measurements authoritative over observational
+  samples, and treats missing measurements as unknown.
 - `ModelBenchmarkService`: runs an explicit 50K-class warm-up-plus-three-sample suite
   against an activated target and persists median prefill/decode measurements.
 - `ModelFavoriteService`: stores user favorites for exact target-model pairs.

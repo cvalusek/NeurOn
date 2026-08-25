@@ -59,7 +59,7 @@ describe("LiteLlmSpendLogsTrafficSource", () => {
     ]);
   });
 
-  it("derives privacy-safe prefill, first-token, and decode observations from successful uncached logs", async () => {
+  it("uses spend logs for traffic without treating request timing as a benchmark", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ data: [{
       request_id: "request-1",
       model_group: "prefer/qwen",
@@ -79,13 +79,11 @@ describe("LiteLlmSpendLogsTrafficSource", () => {
     expect(events).toEqual([{
       modelId: "prefer/qwen",
       seenAt: new Date("2026-06-26T17:48:01.000Z"),
-      externalUserSubject: "usr_alice",
-      requestId: "request-1",
-      performance: { decodeTokensPerSecond: 50, prefillTokensPerSecond: 1000, timeToFirstTokenSeconds: 1 }
+      externalUserSubject: "usr_alice"
     }]);
   });
 
-  it("does not derive performance from cache hits or failed requests", async () => {
+  it("still records cache-hit traffic for demand without deriving performance", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ data: [{
       request_id: "request-1",
       model: "qwen",

@@ -1,16 +1,10 @@
 import type { TrafficSource } from "../domain/interfaces.js";
 
 interface LiteLlmSpendLog {
-  request_id?: string | null;
   model?: string | null;
   model_group?: string | null;
   endTime?: string | null;
   startTime?: string | null;
-  completionStartTime?: string | null;
-  prompt_tokens?: number | null;
-  completion_tokens?: number | null;
-  cache_hit?: string | boolean | null;
-  status?: string | null;
   /** Stable LiteLLM user identifier attached to the virtual key/request. */
   user?: string | null;
 }
@@ -33,24 +27,16 @@ export class LiteLlmSpendLogsTrafficSource implements TrafficSource {
     const events: Array<{
       modelId: string;
       seenAt: Date;
-      requestId?: string;
-      performance?: {
-        decodeTokensPerSecond?: number;
-        prefillTokensPerSecond?: number;
-        timeToFirstTokenSeconds?: number;
-      };
       externalUserSubject?: string;
     }> = [];
     for (const log of logs) {
       const seenAt = parseDate(log.endTime ?? log.startTime);
       if (!seenAt || seenAt < start || seenAt > end) continue;
-      const performance = performanceForLog(log);
-      for (const [index, modelId] of modelIdsForLog(log).entries()) {
+      for (const modelId of modelIdsForLog(log)) {
         events.push({
           modelId,
           seenAt,
-          ...(externalUserSubject(log) ? { externalUserSubject: externalUserSubject(log) } : {}),
-          ...(index === 0 && performance && log.request_id ? { requestId: log.request_id, performance } : {})
+          ...(externalUserSubject(log) ? { externalUserSubject: externalUserSubject(log) } : {})
         });
       }
     }
@@ -117,39 +103,6 @@ function utcDateOnly(date: Date): string {
 function externalUserSubject(log: LiteLlmSpendLog): string | undefined {
   const value = log.user?.trim();
   return value && value.length <= 500 ? value : undefined;
-}
-
-function performanceForLog(log: LiteLlmSpendLog): {
-  decodeTokensPerSecond?: number;
-  prefillTokensPerSecond?: number;
-  timeToFirstTokenSeconds?: number;
-} | undefined {
-  if (isCacheHit(log.cache_hit) || /(?:error|fail)/iu.test(log.status ?? "")) return undefined;
-  const start = parseDate(log.startTime);
-  const completionStart = parseDate(log.completionStartTime);
-  const end = parseDate(log.endTime);
-  if (!start || !completionStart || !end || completionStart < start || end < completionStart) return undefined;
-  const timeToFirstTokenSeconds = (completionStart.getTime() - start.getTime()) / 1000;
-  const decodeSeconds = (end.getTime() - completionStart.getTime()) / 1000;
-  const decodeTokensPerSecond = positiveRate(log.completion_tokens, decodeSeconds);
-  const prefillTokensPerSecond = positiveRate(log.prompt_tokens, timeToFirstTokenSeconds);
-  if (!decodeTokensPerSecond && !prefillTokensPerSecond && timeToFirstTokenSeconds <= 0) return undefined;
-  return {
-    decodeTokensPerSecond,
-    prefillTokensPerSecond,
-    timeToFirstTokenSeconds: timeToFirstTokenSeconds > 0 ? timeToFirstTokenSeconds : undefined
-  };
-}
-
-function positiveRate(tokens: number | null | undefined, seconds: number): number | undefined {
-  if (typeof tokens !== "number" || !Number.isFinite(tokens) || tokens <= 0 || !Number.isFinite(seconds) || seconds <= 0) return undefined;
-  return tokens / seconds;
-}
-
-function isCacheHit(value: LiteLlmSpendLog["cache_hit"]): boolean {
-  if (value === true) return true;
-  if (typeof value !== "string") return false;
-  return ["true", "1", "yes", "hit"].includes(value.trim().toLowerCase());
 }
 
 function dedupeTrafficEvents<T extends { modelId: string; seenAt: Date; requestId?: string; externalUserSubject?: string; performance?: unknown }>(events: T[]): T[] {

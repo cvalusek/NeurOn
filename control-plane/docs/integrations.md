@@ -180,7 +180,7 @@ target-scoped aliases, canonical IDs, backend/runtime IDs, and legacy display
 prefix names. A 404 falls back to the older `/api/status` and `/api/models`
 mapping for compatibility.
 
-Users can open **Connection to your models** to copy an OpenCode provider
+Users can open **Connect** to copy an OpenCode provider
 configuration for the entire catalog or one profile. Global aliases choose the
 target with the lowest numeric `aliasPriority`; scoped `<target>/<alias>` names
 remain available for every deployment. The profile page shows these names
