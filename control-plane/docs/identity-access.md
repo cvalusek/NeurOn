@@ -150,6 +150,34 @@ again whenever a reservation starts, so later membership or target-audience
 changes take effect immediately. A team with shared profiles cannot be deleted
 until those profiles are moved or removed.
 
+## Canonical account rename API
+
+Administrators can change an active, unmerged account's canonical username and
+display name from the Accounts screen or through the admin REST API:
+
+```http
+PUT /api/admin/users/usr_canonical/name
+Authorization: Bearer sk-neuron-...
+Content-Type: application/json
+
+{"username":"alice","displayName":"Alice Example"}
+```
+
+The rename is transactional. It updates denormalized ownership labels on
+reservations, profiles, API keys, and favorites, refreshes an active claim/reset
+link, preserves GitHub and OIDC provider subjects, rebuilds local sign-in
+metadata when applicable, revokes existing sessions, and records a
+`users.rename` audit event. If the requested username belongs to a disabled
+alias already merged into this account, NeurOn archives that alias before
+assigning its old name to the surviving account. Names owned by any other
+account remain unavailable.
+
+An external user who has no durable sign-in identity listed should sign in once
+before an administrator changes the canonical username. That first sign-in
+attaches the provider subject by matching the current username; later sign-ins
+resolve through the durable provider identity and no longer depend on the
+canonical name.
+
 ## Duplicate-account merge API
 
 The admin UI requires a preview before confirmation. Automation can use the

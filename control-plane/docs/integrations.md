@@ -69,8 +69,10 @@ status, API keys, and MCP.
 Local HTTP Basic authentication uses an individual user's password and is
 rejected when the durable local authentication method is disabled. Personal
 Bearer keys remain available for automation. Owners and Administrators with
-`users.merge` may preview and confirm duplicate-account merges at
-`POST /api/admin/users/merge/preview` and `POST /api/admin/users/merge`; see
+`users.manage` may rename an active canonical account at
+`PUT /api/admin/users/:id/name`. Those with `users.merge` may preview and
+confirm duplicate-account merges at `POST /api/admin/users/merge/preview` and
+`POST /api/admin/users/merge`; see
 [Identity and Access](identity-access.md).
 
 Reservation responses may include `costEstimate` after the reconciler has

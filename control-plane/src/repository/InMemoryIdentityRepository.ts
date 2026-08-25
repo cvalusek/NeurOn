@@ -40,6 +40,20 @@ export class InMemoryIdentityRepository implements IdentityRepository {
   async getUserByUsername(username: string): Promise<UserAccount | undefined> { const normalized=normalizeUsername(username); const user=Array.from(this.users.values()).find(value=>value.normalizedUsername===normalized); return user?cloneUser(user):undefined; }
   async listUsers(): Promise<UserAccount[]> { return Array.from(this.users.values()).map(cloneUser).sort((a,b)=>a.normalizedUsername.localeCompare(b.normalizedUsername)); }
   async updateUser(id:string,patch:Partial<Pick<UserAccount,"displayName"|"status"|"lastLoginAt">>):Promise<UserAccount>{const user=this.users.get(id);if(!user)throw new Error("User not found");if(patch.status==="disabled"&&user.status==="active"&&this.hasWildcard(id)&&this.enabledOwnerCount()<=1)throw new Error("The final enabled Owner cannot be disabled");const updated={...user,...patch,updatedAt:new Date()};this.users.set(id,updated);if(patch.status==="disabled")for(const invitation of this.invitations.values())if(invitation.userId===id&&!invitation.revokedAt)invitation.revokedAt=new Date();return cloneUser(updated)}
+  async renameUser(id:string,input:Pick<UserAccount,"username"|"displayName">,renamedAt:Date,_actorUserId?:string):Promise<UserAccount>{
+    const username=input.username.trim(),normalized=normalizeUsername(username);if(!normalized)throw new Error("Username is required");
+    const user=this.users.get(id);if(!user)throw new Error("User not found");if(user.status!=="active"||user.mergedIntoUserId)throw new Error("Only an active, unmerged account can be renamed");
+    const conflict=Array.from(this.users.values()).find(value=>value.id!==id&&value.normalizedUsername===normalized);
+    if(conflict&&!(conflict.status==="disabled"&&conflict.mergedIntoUserId===id))throw new Error("Username is already registered");
+    const localConflict=this.identities.get(identityKey("local","local",normalized));if(localConflict&&localConflict.userId!==id)throw new Error("This local identity belongs to another account");
+    if(conflict)Object.assign(conflict,{username:archivedMergeUsername(conflict),normalizedUsername:normalizeUsername(archivedMergeUsername(conflict)),updatedAt:renamedAt});
+    this.ownership?.reassign(id,id,username);
+    const localIdentities=Array.from(this.identities.entries()).filter(([,identity])=>identity.userId===id&&identity.providerType==="local"&&identity.providerId==="local");
+    for(const [key]of localIdentities)this.identities.delete(key);
+    if(this.credentials.has(id)){const prior=localIdentities.map(([,identity])=>identity).sort((left,right)=>left.createdAt.getTime()-right.createdAt.getTime())[0];await this.saveIdentity({userId:id,providerType:"local",providerId:"local",subject:normalized,username,id:prior?.id,createdAt:prior?.createdAt,lastSeenAt:renamedAt})}
+    Object.assign(user,{username,normalizedUsername:normalized,displayName:input.displayName?.trim()||undefined,sessionVersion:user.sessionVersion+1,updatedAt:renamedAt});
+    return cloneUser(user);
+  }
   async incrementSessionVersion(id:string):Promise<UserAccount>{const user=this.users.get(id);if(!user)throw new Error("User not found");user.sessionVersion+=1;user.updatedAt=new Date();return cloneUser(user)}
   async getLocalPasswordHash(userId:string):Promise<string|undefined>{return this.credentials.get(userId)}
   async setLocalPasswordHash(userId:string,passwordHash:string):Promise<void>{if(!this.users.has(userId))throw new Error("User not found");this.credentials.set(userId,passwordHash)}
@@ -120,6 +134,7 @@ export class InMemoryIdentityRepository implements IdentityRepository {
 
 const BUILTIN_ROLES:Array<[string,string,Role["scope"],string[],string]>=[["role_owner","Owner","global",["*"],"owner"],["role_admin","Administrator","global",["users.manage","users.merge","roles.manage","teams.manage","targets.read_all","targets.use_all","targets.manage","reservations.manage_any","discovery.run","reports.read_all","assistant.configure","auth.manage","system.manage"],"administrator"],["role_operator","Operator","global",["targets.read_all","targets.use_all","targets.manage","reservations.manage_any","discovery.run","reports.read_all"],"operator"],["role_member","Member","global",["targets.read","targets.use","reservations.create","reservations.manage_own","profiles.manage_own","api_keys.manage_own","favorites.manage_own","reports.read_own"],"member"],["role_viewer","Viewer","global",["targets.read","reports.read_own"],"viewer"],["role_team_owner","Team Owner","team",["team.manage","team.members.manage","team.profiles.manage","team.reports.read"],"team-owner"],["role_team_manager","Team Manager","team",["team.members.manage","team.profiles.manage","team.reports.read"],"team-manager"],["role_team_member","Team Member","team",["team.profiles.use","team.reports.read"],"team-member"],["role_team_viewer","Team Viewer","team",["team.reports.read"],"team-viewer"]];
 function normalizeUsername(value:string):string{return value.trim().toLocaleLowerCase("en-US")}
+function archivedMergeUsername(user:Pick<UserAccount,"id"|"username">):string{return`${user.username} [merged ${user.id}]`}
 function identityKey(type:string,id:string,subject:string):string{return`${type}\0${id}\0${subject}`}
 function membershipKey(value:Pick<TeamMembership,"teamId"|"userId"|"source"|"sourceReference">):string{return`${value.teamId}\0${value.userId}\0${value.source}\0${value.sourceReference??""}`}
 function unique(values:string[]):string[]{return Array.from(new Set(values.map(value=>value.trim()).filter(Boolean))).sort()}

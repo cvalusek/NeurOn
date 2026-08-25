@@ -207,6 +207,7 @@ describe("durable user identity", () => {
     const owner = await createOwner(handle.identities, identities);
     const source = await handle.identities.createUser({ id: "usr_source", username: "github-alice", status: "active" });
     const target = await handle.identities.createUser({ id: "usr_target", username: "alice", status: "active" });
+    await identities.setPassword(target.id, "target-local-password");
     const team = await identities.createTeam(owner, { name: "Users" });
     const now = new Date("2026-08-21T12:00:00.000Z");
 
@@ -234,6 +235,36 @@ describe("durable user identity", () => {
     expect(await handle.identities.isUserInAnyTeam(target.id, [team.id])).toBe(true);
     expect(await handle.capacityTargets.get("private-target")).toMatchObject({ audience: { scope: "users", userIds: [target.id] } });
     expect(await identities.canAccessTarget((await identities.authenticatedUser(target.id))!, configuredPrivateTarget)).toBe(true);
+
+    const renamed = await identities.renameUser(owner, target.id, { username: source.username, displayName: "Alice" });
+    expect(renamed).toMatchObject({ id: target.id, username: "github-alice", normalizedUsername: "github-alice", displayName: "Alice" });
+    expect(await handle.identities.getUser(source.id)).toMatchObject({ username: expect.stringContaining("[merged usr_source]"), status: "disabled", mergedIntoUserId: target.id });
+    expect(await handle.repository.get("reservation-source")).toMatchObject({ userId: target.id, username: "github-alice" });
+    expect(await handle.reservationProfiles.get("profile-source")).toMatchObject({ userId: target.id, username: "github-alice" });
+    expect(await handle.apiKeys.get("key-source")).toMatchObject({ userId: target.id, username: "github-alice" });
+    expect(await handle.modelFavorites.listForUser(target.id)).toMatchObject([{ username: "github-alice" }]);
+    expect(await identities.authenticateLocal("github-alice", "target-local-password")).toMatchObject({ id: target.id, username: "github-alice" });
+    expect(await identities.authenticateLocal("alice", "target-local-password")).toBeUndefined();
+    await handle.close();
+  });
+
+  it("transactionally renames a surviving merged SQLite account and archives its alias", async () => {
+    const directory = await mkdtemp(path.join(os.tmpdir(), "neuron-identity-rename-"));
+    temporaryDirectories.push(directory);
+    const handle = await createReservationRepository({ driver: "sqlite", path: path.join(directory, "neuron.db") });
+    const source = await handle.identities.createUser({ id: "usr-sqlite-alias", username: "github-user", status: "active" });
+    const target = await handle.identities.createUser({ id: "usr-sqlite-target", username: "user@example.test", status: "active" });
+    await handle.identities.saveIdentity({ userId: target.id, providerType: "oidc", providerId: "work", subject: "oidc-user", username: target.username });
+    await handle.reservationProfiles.create({ id: "sqlite-profile", userId: target.id, username: target.username, name: "SQLite profile", selections: [] });
+    await handle.identities.mergeUsers(source.id, target.id, new Date("2026-08-22T12:00:00.000Z"));
+
+    const renamed = await handle.identities.renameUser(target.id, { username: source.username, displayName: "GitHub User" }, new Date("2026-08-22T13:00:00.000Z"), target.id);
+    expect(renamed).toMatchObject({ username: source.username, displayName: "GitHub User", sessionVersion: 3 });
+    expect(await handle.identities.getUser(source.id)).toMatchObject({ username: expect.stringContaining(`[merged ${source.id}]`), mergedIntoUserId: target.id });
+    expect(await handle.identities.findIdentity("oidc", "work", "oidc-user")).toMatchObject({ userId: target.id });
+    expect(await handle.reservationProfiles.get("sqlite-profile")).toMatchObject({ userId: target.id, username: source.username });
+    const other = await handle.identities.createUser({ id: "usr-sqlite-other", username: "other", status: "active" });
+    await expect(handle.identities.renameUser(target.id, { username: other.username }, new Date())).rejects.toThrow("already registered");
     await handle.close();
   });
 

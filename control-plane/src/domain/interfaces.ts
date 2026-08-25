@@ -105,6 +105,7 @@ export interface IdentityRepository {
   getUserByUsername(username: string): Promise<UserAccount | undefined>;
   listUsers(): Promise<UserAccount[]>;
   updateUser(id: string, patch: Partial<Pick<UserAccount, "displayName" | "status" | "lastLoginAt">>): Promise<UserAccount>;
+  renameUser(id: string, input: Pick<UserAccount, "username" | "displayName">, renamedAt: Date, actorUserId?: string): Promise<UserAccount>;
   incrementSessionVersion(id: string): Promise<UserAccount>;
   getLocalPasswordHash(userId: string): Promise<string | undefined>;
   setLocalPasswordHash(userId: string, passwordHash: string): Promise<void>;

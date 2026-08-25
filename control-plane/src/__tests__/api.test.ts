@@ -445,6 +445,15 @@ describe("API authentication context", () => {
       const targetProfiles = await app.inject({ method: "GET", url: "/api/reservation-profiles", headers: targetAuth });
       expect(targetProfiles.statusCode).toBe(200);
       expect(targetProfiles.json().reservationProfiles).toMatchObject([{ name: "Preserved profile", userId: targetUser.id }]);
+
+      const renamed = await app.inject({ method: "PUT", url: `/api/admin/users/${targetUser.id}/name`, headers: adminAuth, payload: { username: source.username, displayName: "Canonical duplicate" } });
+      expect(renamed.statusCode).toBe(200);
+      expect(renamed.json()).toMatchObject({ id: targetUser.id, username: source.username, displayName: "Canonical duplicate" });
+      expect((await app.inject({ method: "GET", url: "/api/reservation-profiles", headers: targetAuth })).statusCode).toBe(401);
+      const renamedAuth = { authorization: `Basic ${Buffer.from(`${source.username}:duplicate-oidc-password`).toString("base64")}` };
+      expect((await app.inject({ method: "GET", url: "/api/reservation-profiles", headers: renamedAuth })).json().reservationProfiles).toMatchObject([{ username: source.username, userId: targetUser.id }]);
+      const renamedUsers = (await app.inject({ method: "GET", url: "/api/admin/users", headers: adminAuth })).json().users as Array<{ id: string; username: string; mergedIntoUserId?: string }>;
+      expect(renamedUsers.find((user) => user.id === source.id)).toMatchObject({ username: expect.stringContaining(`[merged ${source.id}]`), mergedIntoUserId: targetUser.id });
     } finally {
       await app.close();
     }

@@ -226,6 +226,15 @@ describePostgres("PostgreSQL schema and repositories", () => {
       expect(await handle.capacityTargets.get("private")).toMatchObject({ audience: { scope: "users", userIds: [target.id] } });
       expect(await handle.reservationProfiles.get("source-profile")).toMatchObject({ userId: target.id, username: target.username });
       expect(await handle.modelFavorites.listForUser(target.id)).toHaveLength(1);
+
+      const renamedAt = new Date("2026-08-21T14:00:00.000Z");
+      expect(await handle.identities.renameUser(target.id, { username: source.username, displayName: "Canonical user" }, renamedAt, target.id)).toMatchObject({ id: target.id, username: source.username, displayName: "Canonical user", sessionVersion: 3 });
+      expect(await handle.identities.getUser(source.id)).toMatchObject({ username: expect.stringContaining(`[merged ${source.id}]`), status: "disabled", mergedIntoUserId: target.id });
+      expect(await handle.reservationProfiles.get("source-profile")).toMatchObject({ userId: target.id, username: source.username });
+      expect(await handle.modelFavorites.listForUser(target.id)).toMatchObject([{ username: source.username }]);
+      expect(await handle.identities.findIdentity("local", "local", source.username)).toMatchObject({ userId: target.id, username: source.username });
+      expect((await handle.identities.listInvitations())[0]).toMatchObject({ userId: target.id, intendedUsername: source.username });
+      expect((await database.pool.query("select action,subject_id,details from identity_audit_events where action='users.rename'")).rows).toMatchObject([{ action: "users.rename", subject_id: target.id, details: { previousUsername: target.username, username: source.username, archivedAliasId: source.id } }]);
       await expect(handle.identities.updateTeam(parent.id, { name: "Engineering", parentTeamId: child.id })).rejects.toThrow("cycle");
       await handle.close();
     } finally {

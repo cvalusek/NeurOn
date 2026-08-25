@@ -392,6 +392,10 @@ export function registerUiRoutes(
     try { const {id}=z.object({id:z.string()}).parse(request.params); const {status}=z.object({status:z.enum(["active","disabled"])}).parse(request.body); await identityService.setUserStatus(requireUser(request),id,status); return reply.redirect("/admin/users"); }
     catch(error){return reply.code(400).type("text/html").send(await renderUserAdmin(request,{error:error instanceof Error?error.message:"Could not update user",activeTab:"accounts"}));}
   });
+  app.post("/admin/users/:id/name", async (request, reply) => {
+    try { const {id}=z.object({id:z.string()}).parse(request.params); const body=z.object({username:z.string().trim().min(1).max(200),displayName:z.string().trim().max(200).optional()}).parse(request.body); await identityService.renameUser(requireUser(request),id,{username:body.username,displayName:body.displayName||undefined}); return reply.redirect("/admin/users"); }
+    catch(error){return reply.code(400).type("text/html").send(await renderUserAdmin(request,{error:error instanceof Error?error.message:"Could not rename user",activeTab:"accounts"}));}
+  });
   app.post("/admin/users/:id/roles", async (request, reply) => {
     try { const {id}=z.object({id:z.string()}).parse(request.params); const {roleId}=z.object({roleId:z.string()}).parse(request.body); await identityService.assignRole(requireUser(request),id,roleId); return reply.redirect("/admin/users"); }
     catch(error){return reply.code(400).type("text/html").send(await renderUserAdmin(request,{error:error instanceof Error?error.message:"Could not assign role",activeTab:"accounts"}));}

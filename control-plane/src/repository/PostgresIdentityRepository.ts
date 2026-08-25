@@ -93,6 +93,66 @@ export class PostgresIdentityRepository implements IdentityRepository {
     } finally { client.release(); }
   }
 
+  async renameUser(id: string, input: Pick<UserAccount, "username" | "displayName">, renamedAt: Date, actorUserId?: string): Promise<UserAccount> {
+    const username = input.username.trim();
+    const normalized = normalizeUsername(username);
+    if (!normalized) throw new Error("Username is required");
+    const client = await this.pool.connect();
+    try {
+      await client.query("begin");
+      const currentResult = await client.query("select * from users where id=$1 for update", [id]);
+      const currentRow = currentResult.rows[0];
+      if (!currentRow) throw new Error("User not found");
+      if (currentRow.status !== "active" || currentRow.merged_into_user_id) throw new Error("Only an active, unmerged account can be renamed");
+
+      const conflictResult = await client.query("select * from users where normalized_username=$1 for update", [normalized]);
+      const conflictRow = conflictResult.rows.find((row) => row.id !== id);
+      if (conflictRow && !(conflictRow.status === "disabled" && conflictRow.merged_into_user_id === id)) throw new Error("Username is already registered");
+      const localConflict = await client.query("select user_id from user_identities where provider_type='local' and provider_id='local' and subject=$1", [normalized]);
+      if (localConflict.rows[0] && localConflict.rows[0].user_id !== id) throw new Error("This local identity belongs to another account");
+
+      let archivedAliasId: string | undefined;
+      if (conflictRow) {
+        archivedAliasId = String(conflictRow.id);
+        const archivedUsername = archivedMergeUsername({ id: archivedAliasId, username: String(conflictRow.username) });
+        await client.query("update users set username=$2,normalized_username=$3,updated_at=$4 where id=$1", [archivedAliasId, archivedUsername, normalizeUsername(archivedUsername), renamedAt]);
+      }
+
+      await client.query("update reservations set username=$2 where user_id=$1", [id, username]);
+      await client.query("update reservation_profiles set username=$2 where user_id=$1", [id, username]);
+      await client.query("update api_keys set username=$2 where user_id=$1", [id, username]);
+      await client.query("update model_favorites set username=$2 where user_id=$1", [id, username]);
+      await client.query("update registration_invitations set intended_username=$2 where user_id=$1 and revoked_at is null and use_count<max_uses and expires_at>$3", [id, username, renamedAt]);
+
+      if (String(currentRow.normalized_username) !== normalized) {
+        const localIdentities = await client.query("select * from user_identities where user_id=$1 and provider_type='local' and provider_id='local' order by created_at,id", [id]);
+        await client.query("delete from user_identities where user_id=$1 and provider_type='local' and provider_id='local'", [id]);
+        const credential = await client.query("select 1 from local_credentials where user_id=$1", [id]);
+        if (credential.rows[0]) {
+          const prior = localIdentities.rows[0];
+          await client.query(
+            "insert into user_identities (id,user_id,provider_type,provider_id,subject,username,created_at,last_seen_at) values ($1,$2,'local','local',$3,$4,$5,$6)",
+            [prior?.id ?? `uid_${nanoid(18)}`, id, normalized, username, prior?.created_at ?? renamedAt, renamedAt]
+          );
+        }
+      }
+
+      const updated = await client.query(
+        "update users set username=$2,normalized_username=$3,display_name=$4,session_version=session_version+1,updated_at=$5 where id=$1 returning *",
+        [id, username, normalized, input.displayName?.trim() || null, renamedAt]
+      );
+      await client.query(
+        "insert into identity_audit_events (id,actor_user_id,action,subject_type,subject_id,details,created_at) values ($1,$2,'users.rename','user',$3,$4::jsonb,$5)",
+        [`audit_${nanoid(18)}`, actorUserId ?? null, id, JSON.stringify({ previousUsername: String(currentRow.username), username, archivedAliasId }), renamedAt]
+      );
+      await client.query("commit");
+      return userFromRow(updated.rows[0]);
+    } catch (error) {
+      await client.query("rollback").catch(() => undefined);
+      throw error;
+    } finally { client.release(); }
+  }
+
   async incrementSessionVersion(id: string): Promise<UserAccount> {
     const result = await this.pool.query("update users set session_version=session_version+1,updated_at=now() where id=$1 returning *", [id]);
     if (!result.rows[0]) throw new Error("User not found");
@@ -643,6 +703,7 @@ function externalLinkFromRow(row: Record<string, unknown>): ExternalUserLink {
 }
 
 function normalizeUsername(value: string): string { return value.trim().toLocaleLowerCase("en-US"); }
+function archivedMergeUsername(user: { id: string; username: string }): string { return `${user.username} [merged ${user.id}]`; }
 function userId(): string { return `usr_${nanoid(20)}`; }
 function unique(values: string[]): string[] { return Array.from(new Set(values.map((value) => value.trim()).filter(Boolean))).sort(); }
 function stringArray(value: unknown): string[] { return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : []; }

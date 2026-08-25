@@ -82,6 +82,51 @@ export class SqliteIdentityRepository implements IdentityRepository {
     return userFromRow(row);
   }
 
+  async renameUser(id: string, input: Pick<UserAccount, "username" | "displayName">, renamedAt: Date, actorUserId?: string): Promise<UserAccount> {
+    const username = input.username.trim();
+    const normalized = normalizeUsername(username);
+    if (!normalized) throw new Error("Username is required");
+    const row = this.db.transaction(() => {
+      const currentRow = this.userRow(id);
+      if (!currentRow) throw new Error("User not found");
+      const current = userFromRow(currentRow);
+      if (current.status !== "active" || current.mergedIntoUserId) throw new Error("Only an active, unmerged account can be renamed");
+
+      const conflict = this.userByNormalized(normalized);
+      if (conflict && conflict.id !== id && !(conflict.status === "disabled" && conflict.merged_into_user_id === id)) throw new Error("Username is already registered");
+      const localConflict = this.db.prepare("select user_id from user_identities where provider_type='local' and provider_id='local' and subject=?").get(normalized) as { user_id: string } | undefined;
+      if (localConflict && localConflict.user_id !== id) throw new Error("This local identity belongs to another account");
+
+      let archivedAliasId: string | undefined;
+      if (conflict && conflict.id !== id) {
+        archivedAliasId = String(conflict.id);
+        const archivedUsername = archivedMergeUsername({ id: archivedAliasId, username: String(conflict.username) });
+        this.db.prepare("update users set username=?,normalized_username=?,updated_at=? where id=?").run(archivedUsername, normalizeUsername(archivedUsername), renamedAt.toISOString(), archivedAliasId);
+      }
+
+      for (const table of ["reservations", "reservation_profiles", "api_keys", "model_favorites"]) {
+        this.db.prepare(`update ${table} set username=? where user_id=?`).run(username, id);
+      }
+      this.db.prepare("update registration_invitations set intended_username=? where user_id=? and revoked_at is null and use_count<max_uses and expires_at>?").run(username, id, renamedAt.toISOString());
+
+      if (current.normalizedUsername !== normalized) {
+        const prior = this.db.prepare("select * from user_identities where user_id=? and provider_type='local' and provider_id='local' order by created_at,id limit 1").get(id) as Row | undefined;
+        this.db.prepare("delete from user_identities where user_id=? and provider_type='local' and provider_id='local'").run(id);
+        if (this.db.prepare("select 1 from local_credentials where user_id=?").get(id)) {
+          this.db.prepare("insert into user_identities (id,user_id,provider_type,provider_id,subject,username,created_at,last_seen_at) values (?,?,'local','local',?,?,?,?)")
+            .run(prior?.id ?? `uid_${nanoid(18)}`, id, normalized, username, prior?.created_at ?? renamedAt.toISOString(), renamedAt.toISOString());
+        }
+      }
+
+      this.db.prepare("update users set username=?,normalized_username=?,display_name=?,session_version=session_version+1,updated_at=? where id=?")
+        .run(username, normalized, input.displayName?.trim() || null, renamedAt.toISOString(), id);
+      this.db.prepare("insert into identity_audit_events (id,actor_user_id,action,subject_type,subject_id,details,created_at) values (?,?, 'users.rename','user',?,?,?)")
+        .run(`audit_${nanoid(18)}`, actorUserId ?? null, id, JSON.stringify({ previousUsername: current.username, username, archivedAliasId }), renamedAt.toISOString());
+      return this.userRow(id)!;
+    })();
+    return userFromRow(row);
+  }
+
   async incrementSessionVersion(id: string): Promise<UserAccount> {
     if (!this.db.prepare("update users set session_version=session_version+1,updated_at=? where id=?").run(new Date().toISOString(), id).changes) throw new Error("User not found");
     return (await this.getUser(id))!;
@@ -381,6 +426,7 @@ function membershipFromRow(row:Row):TeamMembership{return{teamId:String(row.team
 function invitationFromRow(row:Row):RegistrationInvitation{return{id:String(row.id),tokenHash:String(row.token_hash),userId:nullable(row.user_id),intendedUsername:nullable(row.intended_username),initialRoleId:nullable(row.initial_role_id),createdByUserId:nullable(row.created_by_user_id),expiresAt:new Date(String(row.expires_at)),maxUses:Number(row.max_uses),useCount:Number(row.use_count),revokedAt:date(row.revoked_at),createdAt:new Date(String(row.created_at))}}
 function externalLinkFromRow(row:Row):ExternalUserLink{return{integration:String(row.integration),externalSubject:String(row.external_subject),userId:String(row.user_id),source:row.source as ExternalUserLink["source"],createdAt:new Date(String(row.created_at)),lastSeenAt:new Date(String(row.last_seen_at))}}
 function normalizeUsername(value:string):string{return value.trim().toLocaleLowerCase("en-US")}
+function archivedMergeUsername(user:{id:string;username:string}):string{return`${user.username} [merged ${user.id}]`}
 function legacyUserId(value:string):string{return`usr_${crypto.createHash("sha256").update(value).digest("hex").slice(0,24)}`}
 function userId():string{return`usr_${nanoid(20)}`}
 function unique(values:string[]):string[]{return Array.from(new Set(values.map(v=>v.trim()).filter(Boolean))).sort()}

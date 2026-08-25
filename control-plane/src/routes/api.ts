@@ -146,6 +146,10 @@ export function registerApiRoutes(
     try { const {id}=z.object({id:z.string()}).parse(request.params); const {status}=z.object({status:z.enum(["active","disabled"])}).parse(request.body); return identityService.setUserStatus(requireUser(request),id,status); }
     catch(error){return sendError(reply,error);}
   });
+  app.put("/api/admin/users/:id/name", async (request, reply) => {
+    try { const {id}=z.object({id:z.string()}).parse(request.params); const body=z.object({username:z.string().trim().min(1).max(200),displayName:z.string().trim().max(200).optional()}).parse(request.body); return identityService.renameUser(requireUser(request),id,{username:body.username,displayName:body.displayName||undefined}); }
+    catch(error){return sendError(reply,error);}
+  });
   app.post("/api/admin/roles", async (request, reply) => {
     try { const body=z.object({name:z.string().trim().min(1),description:z.string().optional(),scope:z.enum(["global","team"]),permissions:z.array(z.string().trim().min(1))}).parse(request.body); return reply.code(201).send(await identityService.createRole(requireUser(request),body)); }
     catch(error){return sendError(reply,error);}
