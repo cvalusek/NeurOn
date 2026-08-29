@@ -21,6 +21,7 @@ services:
       HASSLEOFF_CHECK_INTERVAL_MS: "1000"
       HASSLEOFF_MIN_LEASE_MS: "5000"
       HASSLEOFF_MAX_LEASE_MS: "120000"
+      HASSLEOFF_ALLOW_INSECURE_HTTP: "true"
     healthcheck:
       test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:8091/readyz"]
       interval: 2s
@@ -55,4 +56,5 @@ services:
       HASSLEOFF_CONTROLLER_ID: neuron-safety-local
       HASSLEOFF_FAILSAFE_TEST_TARGET_ID: hassleoff-failsafe-test
       HASSLEOFF_REQUEST_TIMEOUT_SECONDS: "2"
+      HASSLEOFF_ALLOW_INSECURE_HTTP: "true"
       RECONCILER_INTERVAL_SECONDS: "2"

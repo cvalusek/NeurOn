@@ -70,6 +70,9 @@ export class HassleOffStore {
     const insert = this.db.prepare(
       "insert into hassleoff_registrations (target_id, registration_id, registration_json, registered_at) values (?, ?, ?, ?)"
     );
+    const updateCredentialMode = this.db.prepare(
+      "update hassleoff_registrations set registration_json = ? where target_id = ?"
+    );
     const transaction = this.db.transaction(() => {
       for (const target of configuredById.values()) {
         const persisted = persistedById.get(target.targetId);
@@ -80,6 +83,15 @@ export class HassleOffStore {
             registrationId: target.registrationId,
             actionType: target.action.type,
             testOnly: target.testOnly ?? false
+          });
+          persistedById.set(target.targetId, target);
+          continue;
+        }
+        if (isSafeCredentialModeUpgrade(persisted, target)) {
+          updateCredentialMode.run(JSON.stringify(target), target.targetId);
+          this.appendAudit(target.targetId, "registration_credential_mode_upgraded", "accepted", now, undefined, {
+            registrationId: target.registrationId,
+            credentialId: target.action.type === "runpod-stop" ? target.action.credentialId : undefined
           });
           persistedById.set(target.targetId, target);
           continue;
@@ -308,6 +320,7 @@ function normalizeRegistration(target: RegisteredTarget): RegisteredTarget {
         type: "runpod-stop" as const,
         podId: target.action.podId,
         apiBaseUrl: target.action.apiBaseUrl,
+        credentialId: target.action.credentialId,
         apiKeyEnv: target.action.apiKeyEnv
       };
   return {
@@ -317,6 +330,17 @@ function normalizeRegistration(target: RegisteredTarget): RegisteredTarget {
     testOnly: target.testOnly ?? false,
     action
   };
+}
+
+function isSafeCredentialModeUpgrade(persisted: RegisteredTarget, configured: RegisteredTarget): boolean {
+  if (persisted.action.type !== "runpod-stop" || configured.action.type !== "runpod-stop") return false;
+  if (persisted.action.credentialId || !configured.action.credentialId || configured.action.apiKeyEnv) return false;
+  return persisted.targetId === configured.targetId
+    && persisted.registrationId === configured.registrationId
+    && persisted.displayName === configured.displayName
+    && Boolean(persisted.testOnly) === Boolean(configured.testOnly)
+    && persisted.action.podId === configured.action.podId
+    && persisted.action.apiBaseUrl === configured.action.apiBaseUrl;
 }
 
 function stateFromRow(row: StateRow): LeaseState {

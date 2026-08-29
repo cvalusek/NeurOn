@@ -14,9 +14,25 @@ const targetSchema = z.object({
       type: z.literal("runpod-stop"),
       podId: z.string().min(1),
       apiBaseUrl: z.string().url().optional(),
+      credentialId: z.string().min(1).optional(),
       apiKeyEnv: z.string().min(1).optional()
     })
   ])
+}).superRefine((target, context) => {
+  if (target.action.type === "runpod-stop" && target.action.credentialId && target.action.apiKeyEnv) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["action"],
+      message: "RunPod actions must set only one of credentialId or apiKeyEnv"
+    });
+  }
+  if (target.action.type === "runpod-stop" && target.action.apiBaseUrl && new URL(target.action.apiBaseUrl).protocol !== "https:") {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["action", "apiBaseUrl"],
+      message: "RunPod action apiBaseUrl must use HTTPS"
+    });
+  }
 });
 
 export function loadHassleOffConfig(): HassleOffConfig {
@@ -36,7 +52,9 @@ export function loadHassleOffConfig(): HassleOffConfig {
     minLeaseMs: intEnv("HASSLEOFF_MIN_LEASE_MS", 15_000),
     maxLeaseMs: intEnv("HASSLEOFF_MAX_LEASE_MS", 300_000),
     maxMaintenanceHoldMs: intEnv("HASSLEOFF_MAX_MAINTENANCE_HOLD_MS", 3_600_000),
-    failedActionRetryMs: intEnv("HASSLEOFF_FAILED_ACTION_RETRY_MS", 15_000)
+    failedActionRetryMs: intEnv("HASSLEOFF_FAILED_ACTION_RETRY_MS", 15_000),
+    allowInsecureHttp: boolEnv("HASSLEOFF_ALLOW_INSECURE_HTTP", false),
+    trustProxy: boolEnv("HASSLEOFF_TRUST_PROXY", false)
   };
 }
 
@@ -61,4 +79,10 @@ function intEnv(name: string, fallback: number): number {
   const parsed = Number.parseInt(value, 10);
   if (!Number.isFinite(parsed) || parsed <= 0) throw new Error(`${name} must be a positive integer`);
   return parsed;
+}
+
+function boolEnv(name: string, fallback: boolean): boolean {
+  const value = process.env[name]?.trim();
+  if (!value) return fallback;
+  return ["1", "true", "yes", "on"].includes(value.toLowerCase());
 }

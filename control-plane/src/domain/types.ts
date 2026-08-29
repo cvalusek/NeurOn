@@ -265,6 +265,8 @@ export interface RunPodTargetConfig {
 
 export interface HassleOffTargetPolicy {
   protected: boolean;
+  /** Logical RunPod credential slot on HassleOff. Defaults to the target provider ID. */
+  credentialId?: string;
   leaseDurationSeconds?: number;
   staleTripTestShutdown?: {
     enabled?: boolean;
@@ -282,6 +284,7 @@ export interface HassleOffClientConfig {
   controllerId: string;
   requestTimeoutSeconds: number;
   failSafeTestTargetId: string;
+  allowInsecureHttp?: boolean;
 }
 
 export interface NeuronTargetConfig {

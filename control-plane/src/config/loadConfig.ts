@@ -122,6 +122,7 @@ const targetSchema = z.object({
   hassleOff: z
     .object({
       protected: z.boolean(),
+      credentialId: z.string().min(1).optional(),
       leaseDurationSeconds: z.number().int().positive().optional(),
       staleTripTestShutdown: z
         .object({
@@ -633,6 +634,7 @@ function loadTargetsFromEnv(providers: CapacityProviderDefinition[]): unknown[] 
       hassleOff: boolEnv(`${prefix}_HASSLEOFF_PROTECTED`) === true
         ? compactObject({
             protected: true,
+            credentialId: env(`${prefix}_HASSLEOFF_CREDENTIAL_ID`),
             leaseDurationSeconds: intOptionalEnv(`${prefix}_HASSLEOFF_LEASE_DURATION_SECONDS`),
             staleTripTestShutdown: compactObject({
               enabled: boolEnv(`${prefix}_HASSLEOFF_SHUTDOWN_ON_STALE_TRIP_TEST`),
@@ -664,7 +666,8 @@ function loadHassleOffClientConfig(): AppConfig["hassleOff"] {
     controllerToken,
     controllerId: env("HASSLEOFF_CONTROLLER_ID") ?? "neuron",
     requestTimeoutSeconds: intEnv("HASSLEOFF_REQUEST_TIMEOUT_SECONDS", 5),
-    failSafeTestTargetId: env("HASSLEOFF_FAILSAFE_TEST_TARGET_ID") ?? "hassleoff-failsafe-test"
+    failSafeTestTargetId: env("HASSLEOFF_FAILSAFE_TEST_TARGET_ID") ?? "hassleoff-failsafe-test",
+    allowInsecureHttp: boolEnv("HASSLEOFF_ALLOW_INSECURE_HTTP") === true
   };
 }
 

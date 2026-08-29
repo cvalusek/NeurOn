@@ -484,6 +484,7 @@ export function registerUiRoutes(
       ready: status?.service.ready,
       armed: status?.service.armed,
       registrationIssues: status?.service.registrationIssues ?? [],
+      credentialIssues: status?.service.credentialIssues ?? [],
       diagnostic,
       lastSuccessfulFailSafeTestAt: failSafeTest?.lastSucceededAt,
       lastSuccessfulFailSafeTestAuditEventId: failSafeTest?.auditEventId,
@@ -505,7 +506,11 @@ export function registerUiRoutes(
           registered: Boolean(registered),
           registrationActionType: registered?.actionType,
           registrationTestOnly: registered?.testOnly,
-          registrationArmed: registered?.armed
+          registrationArmed: registered?.armed,
+          credentialRequired: registered?.credential?.required,
+          credentialAvailable: registered?.credential?.available,
+          credentialId: registered?.credential?.credentialId,
+          credentialStorage: registered?.credential?.storage
         };
       }),
       csrfToken,

@@ -8,9 +8,10 @@ import type {
 } from "./types.js";
 import { HASSLEOFF_PROTOCOL_VERSION } from "./types.js";
 import { HassleOffStore } from "./store.js";
+import { InMemoryProviderCredentials } from "./credentials.js";
 
 export class HassleOffRequestError extends Error {
-  constructor(message: string, readonly statusCode = 400) {
+  constructor(message: string, readonly statusCode = 400, readonly code?: string) {
     super(message);
     this.name = "HassleOffRequestError";
   }
@@ -26,6 +27,7 @@ export class HassleOffService {
     private readonly config: HassleOffConfig,
     readonly store: HassleOffStore,
     private readonly actionExecutor: StopActionExecutor,
+    private readonly credentials: InMemoryProviderCredentials,
     private readonly clock: () => Date = () => new Date()
   ) {
     const registrations = store.syncRegistrations(config.targets, this.clock());
@@ -38,7 +40,37 @@ export class HassleOffService {
   }
 
   get ready(): boolean {
-    return this.armed;
+    return this.armed && this.credentialIssues().length === 0;
+  }
+
+  acceptRunPodCredential(
+    credentialId: string,
+    input: { protocolVersion: string; credentialId: string; apiKey: string },
+    now = this.clock()
+  ): { protocolVersion: typeof HASSLEOFF_PROTOCOL_VERSION; credentialId: string; accepted: true; replaced: boolean; receivedAt: string } {
+    if (input.protocolVersion !== HASSLEOFF_PROTOCOL_VERSION) throw new HassleOffRequestError("Unsupported protocolVersion");
+    if (input.credentialId !== credentialId) {
+      throw new HassleOffRequestError("Path credentialId and body credentialId must match exactly");
+    }
+    const targets = Array.from(this.targets.values()).filter(
+      (target) => target.action.type === "runpod-stop" && target.action.credentialId === credentialId
+    );
+    if (targets.length === 0) {
+      throw new HassleOffRequestError("Credential is not referenced by a registered RunPod target", 404, "credential_not_registered");
+    }
+    const result = this.credentials.put(credentialId, input.apiKey);
+    for (const target of targets) {
+      this.store.appendAudit(target.targetId, result.replaced ? "provider_credential_rotated" : "provider_credential_received", "accepted", now, undefined, {
+        credentialId
+      });
+    }
+    return {
+      protocolVersion: HASSLEOFF_PROTOCOL_VERSION,
+      credentialId,
+      accepted: true,
+      replaced: result.replaced,
+      receivedAt: now.toISOString()
+    };
   }
 
   acceptLease(targetId: string, input: ControllerLeaseInput, now = this.clock()): {
@@ -54,6 +86,10 @@ export class HassleOffService {
   } {
     const target = this.requireTarget(targetId);
     if (!this.armed) this.rejectLease(targetId, "HassleOff is not armed; resolve registration readiness issues", now, 503);
+    const credentialStatus = this.actionExecutor.credentialStatus?.(target);
+    if (credentialStatus?.required && !credentialStatus.available) {
+      this.rejectLease(targetId, "HassleOff does not have the required in-memory provider credential", now, 503, "credential_unavailable");
+    }
     if (input.protocolVersion !== HASSLEOFF_PROTOCOL_VERSION) this.rejectLease(targetId, "Unsupported protocolVersion", now);
     if (input.targetId !== targetId) this.rejectLease(targetId, "Path targetId and lease targetId must match exactly", now);
     if (!input.controllerId.trim() || !input.leaseId.trim()) this.rejectLease(targetId, "controllerId and leaseId are required", now);
@@ -234,7 +270,8 @@ export class HassleOffService {
         healthy: true,
         ready: this.ready,
         armed: this.armed,
-        registrationIssues: [...this.registrationIssues]
+        registrationIssues: [...this.registrationIssues],
+        credentialIssues: this.credentialIssues()
       },
       lastFullTripTestSucceededAt: lastFullTripTestSucceededAt?.toISOString(),
       tripTests: tripTests.map((result) => ({
@@ -251,6 +288,7 @@ export class HassleOffService {
           actionType: target.action.type,
           testOnly: target.testOnly ?? false,
           armed: Boolean(state.armedAt),
+          credential: this.credentialJson(target),
           lease: state.leaseId ? {
             controllerId: state.controllerId,
             leaseId: state.leaseId,
@@ -332,9 +370,27 @@ export class HassleOffService {
     return target;
   }
 
-  private rejectLease(targetId: string, message: string, now: Date, statusCode = 400): never {
+  private credentialIssues(): string[] {
+    return Array.from(this.targets.values()).flatMap((target) => {
+      if (!this.store.getState(target.targetId).armedAt) return [];
+      const status = this.actionExecutor.credentialStatus?.(target);
+      return status?.required && !status.available
+        ? [`Provider credential ${status.credentialId ?? "legacy environment reference"} is unavailable for ${target.targetId}`]
+        : [];
+    });
+  }
+
+  private credentialJson(target: RegisteredTarget): { required: boolean; available: boolean; credentialId?: string; storage: "memory" | "environment" | "none" } {
+    const status = this.actionExecutor.credentialStatus?.(target) ?? { required: false, available: true };
+    return {
+      ...status,
+      storage: target.action.type === "fake" ? "none" : target.action.credentialId ? "memory" : "environment"
+    };
+  }
+
+  private rejectLease(targetId: string, message: string, now: Date, statusCode = 400, code?: string): never {
     this.store.appendAudit(targetId, "lease_rejected", "rejected", now, undefined, { reason: message });
-    throw new HassleOffRequestError(message, statusCode);
+    throw new HassleOffRequestError(message, statusCode, code);
   }
 }
 

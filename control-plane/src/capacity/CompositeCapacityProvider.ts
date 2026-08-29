@@ -77,7 +77,7 @@ function adapterKey(providerType: string): string {
   return providerType === "aws-ecs-asg" ? "aws-ecs" : providerType;
 }
 
-function effectiveTarget(target: CapacityTarget, provider: CapacityProviderDefinition): CapacityTarget {
+export function effectiveTarget(target: CapacityTarget, provider: CapacityProviderDefinition): CapacityTarget {
   const next: CapacityTarget = { ...target, provider: provider.type };
   if (provider.type === "aws-ecs-asg") next.provider = "aws-ecs";
   if (provider.type === "runpod" && provider.config?.runpod) {

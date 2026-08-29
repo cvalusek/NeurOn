@@ -109,7 +109,7 @@ export async function buildApp(config: AppConfig, models: ModelDefinition[], opt
           runpod: new RunPodCapacityProvider()
         }, providerCatalog);
   const hassleOffClient = config.hassleOff ? new HassleOffClient(config.hassleOff) : undefined;
-  const interlockedProvider = new HassleOffCapacityProvider(providerAdapter, hassleOffClient);
+  const interlockedProvider = new HassleOffCapacityProvider(providerAdapter, hassleOffClient, providerCatalog);
   const capacityProvider = new ActivateOrReprovisionCapacityProvider(interlockedProvider, {
     canPersistReplacement: (targetId) => targetService.canPersistReplacementPatch(targetId),
     applyReplacementPatch: (targetId, patch) => targetService.applyReplacementPatch(targetId, patch)

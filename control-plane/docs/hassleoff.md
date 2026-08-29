@@ -14,8 +14,15 @@ targets. It has one narrow capability: stop the exact provider resource bound
 to a registered target. It has no start or provision operation.
 
 Run HassleOff in a failure domain that does not depend on the rented inference
-host. NeurOn remains the only service Ground Control should use for capacity;
-Ground Control must not call RunPod or HassleOff directly.
+host. For RunPod, the preferred shape is a small, always-on CPU Pod separate
+from every protected GPU Pod. Prefer the same data center as the protected
+capacity when practical to reduce cross-site dependencies, but remember that
+HassleOff still depends on RunPod's control API to stop a Pod. Same-site
+placement reduces one network path; it is not independence from a RunPod-wide
+control-plane outage.
+
+NeurOn remains the only service Ground Control should use for capacity; Ground
+Control must not call RunPod or HassleOff directly.
 
 ## Registration And Action Scope
 
@@ -34,7 +41,7 @@ action:
     "action": {
       "type": "runpod-stop",
       "podId": "the-exact-pod-id",
-      "apiKeyEnv": "HASSLEOFF_RUNPOD_API_KEY"
+      "credentialId": "runpod-main"
     }
   },
   {
@@ -51,15 +58,32 @@ Registrations are copied into SQLite. A restart uses the durable registration
 as the authority. If startup config changes a durable registration or omits
 one, HassleOff remains able to trip previously armed leases but reports not
 ready and refuses new leases. This prevents an accidental config change from
-silently remapping or dropping a protected resource. Registration migration or
-decommissioning is intentionally an operator-controlled database migration in
-this first slice; there is no remote delete or global disable endpoint.
+silently remapping or dropping a protected resource. Scope-changing
+registration migration or decommissioning remains an operator-controlled
+database migration; there is no remote delete or global disable endpoint. The
+one safe credential-source upgrade described below is the only automatic
+exception.
 
-The RunPod action sends only `POST /v1/pods/{registeredPodId}/stop`. The API key
-is read from the registered environment-variable name when the action runs. It
-is never stored in SQLite or returned by status/audit APIs. Provider stop
+The RunPod action sends only `POST /v1/pods/{registeredPodId}/stop`. The
+registration names a logical `credentialId`, not a secret or secret-bearing
+environment variable. Immediately before requesting the exact target lease,
+NeurOn resolves the effective target's RunPod credential and supplies it to
+that registered slot over the authenticated HTTPS channel. HassleOff keeps the
+credential only in process memory. It is never written to SQLite or returned
+by status/audit APIs, and replacing a credential overwrites the previous
+in-memory buffer.
+
+`apiKeyEnv` remains a deprecated compatibility path for an existing HassleOff
+deployment, but new registrations should use `credentialId`. Provider stop
 operations must be idempotent because a process crash can leave the result of a
 network request unknowable and HassleOff will safely retry.
+
+On startup, HassleOff permits one automatic durable-registration upgrade from
+legacy `apiKeyEnv` mode to `credentialId` mode only when the target ID,
+registration ID, display metadata, exact Pod ID, API base URL, and test scope
+are unchanged. The upgrade is transactional and audited. A Pod remap or any
+other registration difference still leaves the durable registration in place
+and reports a readiness issue.
 
 ## Authenticated Lease Protocol
 
@@ -70,7 +94,33 @@ Authorization: Bearer <HASSLEOFF_CONTROLLER_TOKEN>
 ```
 
 `/healthz` and `/readyz` do not require the token and do not expose secrets.
-The current protocol version is string `"1"`.
+The current protocol version is string `"1"`. HassleOff rejects `/v1` calls
+that do not arrive over HTTPS unless the explicit local-development exception
+`HASSLEOFF_ALLOW_INSECURE_HTTP=true` is set. When TLS terminates at a trusted
+reverse proxy, set `HASSLEOFF_TRUST_PROXY=true` so Fastify honors the proxy's
+forwarded protocol. Do not enable trust-proxy mode behind an untrusted direct
+listener.
+
+For a RunPod registration, NeurOn first supplies the memory-only credential:
+
+```http
+PUT /v1/credentials/runpod/runpod-main
+Authorization: Bearer <HASSLEOFF_CONTROLLER_TOKEN>
+Content-Type: application/json
+
+{
+  "protocolVersion": "1",
+  "credentialId": "runpod-main",
+  "apiKey": "<provider credential>"
+}
+```
+
+HassleOff accepts only a credential ID referenced by a configured RunPod stop
+registration. Responses and audit events contain the ID and acceptance result,
+never the credential. NeurOn remembers only a one-way digest for the life of
+its process so it does not retransmit an unchanged key before every lease. If a
+restarted HassleOff reports `credential_unavailable`, NeurOn resupplies the key
+once and retries the exact lease.
 
 NeurOn creates or renews a lease with:
 
@@ -111,7 +161,7 @@ attempt is audited.
 Authenticated `GET /v1/status` reports:
 
 - service health, readiness, and armed state;
-- durable registration issues;
+- durable registration issues and provider-credential readiness issues;
 - per-target armed and lease state;
 - the target-scoped maintenance hold, if any;
 - the last trip/action result;
@@ -120,8 +170,15 @@ Authenticated `GET /v1/status` reports:
 
 `GET /v1/audit?targetId=<id>&limit=100` returns the durable audit trail. Events
 include lease acceptance/rejection, expiry decisions, maintenance hold changes,
-provider stop start/success/failure, and complete fail-safe-test success. Tokens and
-provider credentials are never included.
+provider-credential receipt/rotation, provider stop start/success/failure, and
+complete fail-safe-test success. Tokens and provider credentials are never
+included.
+
+`/readyz` returns unavailable when an already-armed RunPod target is missing
+its required in-memory credential. A fresh, not-yet-armed registration can be
+ready to receive its first credential and lease. `/healthz` remains the
+liveness probe. This distinction matters after a watchdog restart: the proxy
+must still route the credential request before readiness recovers.
 
 ## Maintenance Holds
 
@@ -197,6 +254,7 @@ Deployment-level client configuration is:
 - `HASSLEOFF_CONTROLLER_ID`
 - `HASSLEOFF_REQUEST_TIMEOUT_SECONDS` (default `5`)
 - `HASSLEOFF_FAILSAFE_TEST_TARGET_ID` (default `hassleoff-failsafe-test`)
+- `HASSLEOFF_ALLOW_INSECURE_HTTP` (default `false`; local development only)
 
 Target protection is opt-in through `hassleOff.protected` or
 `CAPACITY_TARGET_<KEY>_HASSLEOFF_PROTECTED=true`. Unprotected targets retain
@@ -205,6 +263,12 @@ discovery bootstrap, explicit provisioning, and replacement provisioning all
 require an accepted exact lease first. Missing config, authentication failure,
 unreachability, an unarmed watchdog, or a mismatched response produces an
 explicit target failure; NeurOn never silently bypasses the interlock.
+
+For RunPod, `hassleOff.credentialId` identifies the remote in-memory slot. It
+defaults to `providerId` when a reusable provider supplies the RunPod key, or
+to `runpod` for an inline provider. The env-expanded equivalent is
+`CAPACITY_TARGET_<KEY>_HASSLEOFF_CREDENTIAL_ID`. Every external HassleOff
+registration must use the same value.
 
 ## Service Configuration
 
@@ -218,6 +282,10 @@ explicit target failure; NeurOn never silently bypasses the interlock.
 - `HASSLEOFF_MAX_LEASE_MS` (default `300000`)
 - `HASSLEOFF_MAX_MAINTENANCE_HOLD_MS` (default `3600000`)
 - `HASSLEOFF_FAILED_ACTION_RETRY_MS` (default `15000`)
+- `HASSLEOFF_ALLOW_INSECURE_HTTP` (default `false`; permits plaintext protocol
+  calls only for an isolated local stack)
+- `HASSLEOFF_TRUST_PROXY` (default `false`; enable only behind the trusted TLS
+  terminator used to reach the service)
 
 ## Published Container Image
 
@@ -239,6 +307,67 @@ Mount durable storage at `/app/data` (or set another writable
 `HASSLEOFF_SQLITE_PATH`) and inject controller authentication and target
 registrations through the deployment's secret/configuration mechanism. Do not
 bake either value into the image.
+
+## External RunPod Deployment
+
+Deploy HassleOff as its own always-on CPU Pod, not as a process in a protected
+inference Pod and not as a child of the NeurOn container. A practical RunPod
+template uses:
+
+- a pinned `ghcr.io/cvalusek/hassleoff:sha-<full-commit-sha>` image;
+- an inexpensive CPU instance in the preferred data center;
+- HTTP port `8091` exposed through RunPod's
+  [HTTP proxy](https://docs.runpod.io/pods/configuration/expose-ports);
+- a [persistent volume](https://docs.runpod.io/storage/network-volumes)
+  mounted at `/workspace`, with
+  `HASSLEOFF_SQLITE_PATH=/workspace/hassleoff/hassleoff.db`;
+- a unique `HASSLEOFF_CONTROLLER_TOKEN` supplied through RunPod's secret
+  environment handling;
+- `HASSLEOFF_TARGETS_JSON` containing registrations but no credentials; and
+- `HASSLEOFF_TRUST_PROXY=true`, while leaving
+  `HASSLEOFF_ALLOW_INSECURE_HTTP=false`.
+
+The public controller URL is:
+
+```text
+https://<hassleoff-pod-id>-8091.proxy.runpod.net
+```
+
+RunPod's proxy terminates trusted HTTPS and forwards to the container's HTTP
+listener. This avoids distributing or pinning an ad-hoc self-signed
+certificate. The endpoint is publicly reachable, so the high-entropy controller
+token remains mandatory. Expose no direct TCP port for HassleOff.
+
+Use [`hassleoff/examples/targets.runpod.external.example.json`](../../hassleoff/examples/targets.runpod.external.example.json)
+as the registration shape. The current NeurOn deployment config has one
+authoritative `HASSLEOFF_URL`, so choose the data center that best covers its
+protected capacity. Do not run two watchdogs with independent leases for the
+same target. Per-target watchdog routing is not part of this implementation.
+
+Configure NeurOn with the proxy URL and the same controller token:
+
+```env
+HASSLEOFF_URL=https://<hassleoff-pod-id>-8091.proxy.runpod.net
+HASSLEOFF_CONTROLLER_TOKEN=<same-high-entropy-controller-token>
+HASSLEOFF_CONTROLLER_ID=neuron-production
+HASSLEOFF_REQUEST_TIMEOUT_SECONDS=5
+CAPACITY_TARGET_<KEY>_HASSLEOFF_PROTECTED=true
+CAPACITY_TARGET_<KEY>_HASSLEOFF_CREDENTIAL_ID=runpod-main
+```
+
+Do not set `HASSLEOFF_ALLOW_INSECURE_HTTP` on NeurOn or HassleOff for this
+deployment. Start HassleOff and check `/healthz`. Then start or reconcile
+NeurOn, allow it to acquire the exact protected lease, and confirm
+**Admin > HassleOff** shows the credential loaded and the service ready. After
+an armed watchdog restarts, `/readyz` intentionally returns 503 until NeurOn
+resupplies the required memory-only credential.
+
+Because the provider key is deliberately non-durable, a simultaneous NeurOn
+outage and HassleOff restart leaves the watchdog unable to call RunPod until
+NeurOn returns and resupplies the key. HassleOff reports this state as unready
+instead of pretending the stop path is armed. Keep a provider-side fixed
+`stopAfter` deadline where practical as an additional last-resort bound; it is
+not a renewable lease and does not replace HassleOff.
 
 ## Normal Local Compose Operation
 
@@ -277,10 +406,10 @@ Use this enablement order:
    HASSLEOFF_IMAGE=ghcr.io/cvalusek/hassleoff:latest
    HASSLEOFF_SQLITE_PATH=/app/data/hassleoff.db
    HASSLEOFF_TARGETS_FILE_HOST=./hassleoff/targets.local.private.json
-   HASSLEOFF_RUNPOD_API_KEY=<provider-key-referenced-by-apiKeyEnv>
+   HASSLEOFF_ALLOW_INSECURE_HTTP=true
    ```
 
-   A real RunPod registration references the credential by variable name; it
+   A real RunPod registration references only a logical credential slot; it
    never contains the credential itself:
 
    ```json
@@ -290,7 +419,7 @@ Use this enablement order:
      "action": {
        "type": "runpod-stop",
        "podId": "the-exact-provider-resource-id",
-       "apiKeyEnv": "HASSLEOFF_RUNPOD_API_KEY"
+       "credentialId": "runpod-main"
      }
    }
    ```
@@ -318,6 +447,7 @@ Use this enablement order:
 
    ```env
    CAPACITY_TARGET_<KEY>_HASSLEOFF_PROTECTED=true
+   CAPACITY_TARGET_<KEY>_HASSLEOFF_CREDENTIAL_ID=runpod-main
    CAPACITY_TARGET_<KEY>_HASSLEOFF_LEASE_DURATION_SECONDS=120
    CAPACITY_TARGET_<KEY>_HASSLEOFF_SHUTDOWN_ON_STALE_TRIP_TEST=false
    CAPACITY_TARGET_<KEY>_HASSLEOFF_TRIP_TEST_MAX_AGE_SECONDS=86400

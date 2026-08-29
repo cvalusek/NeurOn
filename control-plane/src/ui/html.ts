@@ -19,6 +19,7 @@ export interface HassleOffSafetyView {
   ready?: boolean;
   armed?: boolean;
   registrationIssues: string[];
+  credentialIssues: string[];
   diagnostic?: string;
   lastSuccessfulFailSafeTestAt?: string;
   lastSuccessfulFailSafeTestAuditEventId?: number;
@@ -39,6 +40,10 @@ export interface HassleOffSafetyView {
     registrationActionType?: string;
     registrationTestOnly?: boolean;
     registrationArmed?: boolean;
+    credentialRequired?: boolean;
+    credentialAvailable?: boolean;
+    credentialId?: string;
+    credentialStorage?: "memory" | "environment" | "none";
   }>;
   csrfToken?: string;
   success?: string;
@@ -2334,6 +2339,9 @@ export function hassleOffSafetyPage(user: AuthenticatedUser, view: HassleOffSafe
           ${capacityTarget.registrationActionType ? `<span class="pill">${escapeHtml(capacityTarget.registrationActionType)}</span>` : ""}
           ${capacityTarget.registrationTestOnly ? `<span class="pill">testOnly</span>` : ""}
           ${capacityTarget.registrationArmed ? `<span class="pill healthy">armed</span>` : ""}
+          ${capacityTarget.credentialRequired ? `<span class="pill ${capacityTarget.credentialAvailable ? "healthy" : "failed"}">credential: ${capacityTarget.credentialAvailable ? "loaded" : "missing"}</span>` : ""}
+          ${capacityTarget.credentialId ? `<span class="muted">slot <code>${escapeHtml(capacityTarget.credentialId)}</code></span>` : ""}
+          ${capacityTarget.credentialStorage === "memory" ? `<span class="muted">memory only</span>` : ""}
           ${capacityTarget.leaseDurationSeconds ? `<span class="muted">Lease ${capacityTarget.leaseDurationSeconds}s</span>` : ""}
         </div>
       </section>`).join("")
@@ -2345,6 +2353,7 @@ export function hassleOffSafetyPage(user: AuthenticatedUser, view: HassleOffSafe
     ${view.baseUrl ? `<p><strong>Controller URL:</strong> <code>${escapeHtml(view.baseUrl)}</code></p>` : `<p><strong>Controller URL:</strong> <span class="muted">Not configured</span></p>`}
     ${view.diagnostic ? `<p class="status" role="alert">${escapeHtml(view.diagnostic)}</p>` : ""}
     ${view.registrationIssues.length ? `<div role="alert"><strong>Registration issues</strong><ul>${view.registrationIssues.map((issue) => `<li>${escapeHtml(issue)}</li>`).join("")}</ul></div>` : ""}
+    ${view.credentialIssues.length ? `<div role="alert"><strong>Credential issues</strong><ul>${view.credentialIssues.map((issue) => `<li>${escapeHtml(issue)}</li>`).join("")}</ul></div>` : ""}
   </section>
   <section class="panel">
     <h2>HassleOff fail-safe test</h2>

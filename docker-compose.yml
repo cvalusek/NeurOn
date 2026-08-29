@@ -24,6 +24,7 @@ services:
       - HASSLEOFF_CONTROLLER_ID=${HASSLEOFF_CONTROLLER_ID:-neuron-local}
       - HASSLEOFF_REQUEST_TIMEOUT_SECONDS=${HASSLEOFF_REQUEST_TIMEOUT_SECONDS:-5}
       - HASSLEOFF_FAILSAFE_TEST_TARGET_ID=${HASSLEOFF_FAILSAFE_TEST_TARGET_ID:-hassleoff-failsafe-test}
+      - HASSLEOFF_ALLOW_INSECURE_HTTP=${HASSLEOFF_ALLOW_INSECURE_HTTP:-false}
     healthcheck:
       test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:8090/healthz"]
       interval: 5s
@@ -51,7 +52,7 @@ services:
       - HASSLEOFF_CONTROLLER_TOKEN=${HASSLEOFF_CONTROLLER_TOKEN:-}
       - HASSLEOFF_SQLITE_PATH=${HASSLEOFF_SQLITE_PATH:-/app/data/hassleoff.db}
       - HASSLEOFF_TARGETS_FILE=/app/config/targets.json
-      - HASSLEOFF_RUNPOD_API_KEY=${HASSLEOFF_RUNPOD_API_KEY:-}
+      - HASSLEOFF_ALLOW_INSECURE_HTTP=true
     healthcheck:
       test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:8091/readyz"]
       interval: 5s

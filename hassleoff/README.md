@@ -25,6 +25,12 @@ opt-in `hassleoff` profile and persists `/app/data` in a named volume. Use
 `docker-compose.hassleoff.yml` for an isolated fake-only stack that does not
 read a default `.env` file.
 
+For RunPod protection, use a registration `credentialId`. NeurOn supplies the
+provider key over the authenticated HTTPS protocol immediately before the
+protected lease, and HassleOff holds it only in memory. A restarted watchdog is
+unready until NeurOn resupplies it. New deployments should not inject a RunPod
+API key into the HassleOff container.
+
 ## Published Image
 
 Main-branch builds publish the dedicated image
@@ -43,3 +49,9 @@ Supply the required configuration from the deployment environment rather than
 embedding it in an image or command history. The image entrypoint runs
 `node dist/server.js`, listens on port `8091`, and expects durable data at the
 configured `HASSLEOFF_SQLITE_PATH` (normally a volume under `/app/data`).
+
+For an independent RunPod CPU Pod, expose port `8091` through RunPod's HTTPS
+proxy, set `HASSLEOFF_TRUST_PROXY=true`, leave
+`HASSLEOFF_ALLOW_INSECURE_HTTP=false`, and persist the SQLite path under the
+Pod's durable `/workspace` mount. See the external deployment runbook in the
+control-plane documentation.

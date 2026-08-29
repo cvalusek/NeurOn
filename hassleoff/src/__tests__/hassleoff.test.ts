@@ -1,10 +1,11 @@
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { RegisteredStopActionExecutor } from "../actions.js";
 import { buildHassleOffApp } from "../app.js";
 import { loadHassleOffConfig } from "../config.js";
+import { InMemoryProviderCredentials } from "../credentials.js";
 import type { HassleOffConfig, RegisteredTarget, StopActionExecutor } from "../types.js";
 
 const token = "test-controller-token-123";
@@ -17,6 +18,8 @@ afterEach(() => {
   delete process.env.HASSLEOFF_TARGETS_JSON;
   delete process.env.HASSLEOFF_TARGETS_FILE;
   delete process.env.HASSLEOFF_SQLITE_PATH;
+  delete process.env.HASSLEOFF_ALLOW_INSECURE_HTTP;
+  delete process.env.HASSLEOFF_TRUST_PROXY;
   for (const directory of createdDirectories.splice(0)) rmSync(directory, { recursive: true, force: true });
 });
 
@@ -213,6 +216,133 @@ describe("HassleOff safety path", () => {
     expect(harness.stop).toHaveBeenCalledTimes(1);
     await harness.app.close();
   });
+
+  it("requires HTTPS and an in-memory RunPod credential before accepting a protected lease", async () => {
+    const credentials = new InMemoryProviderCredentials();
+    const providerRequest = vi.fn(async () => new Response("", { status: 200 }));
+    const executor = new RegisteredStopActionExecutor(providerRequest as typeof fetch, credentials);
+    const harness = createHarness([runpodTarget("rented-a", "runpod-main")], {
+      executor,
+      credentials,
+      config: { allowInsecureHttp: false, trustProxy: true }
+    });
+
+    const insecure = await harness.app.inject({
+      method: "PUT",
+      url: "/v1/credentials/runpod/runpod-main",
+      headers: authHeaders(),
+      payload: { protocolVersion: "1", credentialId: "runpod-main", apiKey: "memory-only-secret" }
+    });
+    expect(insecure.statusCode).toBe(426);
+
+    const missing = await harness.app.inject({
+      method: "PUT",
+      url: "/v1/targets/rented-a/lease",
+      headers: { ...authHeaders(), "x-forwarded-proto": "https" },
+      payload: leaseBody(harness.now(), "rented-a", 2_000)
+    });
+    expect(missing.statusCode).toBe(503);
+    expect(missing.json()).toMatchObject({ code: "credential_unavailable" });
+    expect(harness.service.ready).toBe(true);
+
+    const supplied = await harness.app.inject({
+      method: "PUT",
+      url: "/v1/credentials/runpod/runpod-main",
+      headers: { ...authHeaders(), "x-forwarded-proto": "https" },
+      payload: { protocolVersion: "1", credentialId: "runpod-main", apiKey: "memory-only-secret" }
+    });
+    expect(supplied.statusCode).toBe(200);
+    expect(supplied.json()).toMatchObject({ credentialId: "runpod-main", accepted: true, replaced: false });
+    expect(harness.service.ready).toBe(true);
+
+    const accepted = await harness.app.inject({
+      method: "PUT",
+      url: "/v1/targets/rented-a/lease",
+      headers: { ...authHeaders(), "x-forwarded-proto": "https" },
+      payload: leaseBody(harness.now(), "rented-a", 2_000)
+    });
+    expect(accepted.statusCode).toBe(200);
+    harness.advance(2_000);
+    await harness.service.tick();
+
+    expect(providerRequest).toHaveBeenCalledWith(
+      "https://rest.runpod.io/v1/pods/pod-exact/stop",
+      expect.objectContaining({ headers: expect.objectContaining({ authorization: "Bearer memory-only-secret" }) })
+    );
+    expect(JSON.stringify(harness.service.status())).not.toContain("memory-only-secret");
+    expect(JSON.stringify(harness.service.audit())).not.toContain("memory-only-secret");
+    await harness.app.close();
+    expectDatabaseFilesNotToContain(harness.databasePath, "memory-only-secret");
+  });
+
+  it("forgets controller-supplied provider credentials on restart and becomes unready until NeurOn resupplies them", async () => {
+    const firstCredentials = new InMemoryProviderCredentials();
+    const first = createHarness([runpodTarget("rented-a", "runpod-main")], {
+      credentials: firstCredentials,
+      executor: new RegisteredStopActionExecutor(vi.fn(async () => new Response("", { status: 200 })) as typeof fetch, firstCredentials)
+    });
+    await first.app.inject({
+      method: "PUT",
+      url: "/v1/credentials/runpod/runpod-main",
+      headers: authHeaders(),
+      payload: { protocolVersion: "1", credentialId: "runpod-main", apiKey: "rotated-secret" }
+    });
+    expect(first.service.ready).toBe(true);
+    const accepted = await first.app.inject({
+      method: "PUT",
+      url: "/v1/targets/rented-a/lease",
+      headers: authHeaders(),
+      payload: leaseBody(first.now(), "rented-a", 2_000)
+    });
+    expect(accepted.statusCode).toBe(200);
+    await first.app.close();
+
+    const secondCredentials = new InMemoryProviderCredentials();
+    const restarted = createHarness([runpodTarget("rented-a", "runpod-main")], {
+      databasePath: first.databasePath,
+      credentials: secondCredentials,
+      executor: new RegisteredStopActionExecutor(vi.fn(async () => new Response("", { status: 200 })) as typeof fetch, secondCredentials)
+    });
+    expect(restarted.service.ready).toBe(false);
+    expect(restarted.service.status().targets[0].credential).toMatchObject({ storage: "memory", available: false });
+    await restarted.app.close();
+    expectDatabaseFilesNotToContain(restarted.databasePath, "rotated-secret");
+  });
+
+  it("upgrades only the legacy credential source when the durable RunPod action scope is otherwise unchanged", async () => {
+    const legacy = createHarness([{
+      targetId: "rented-a",
+      registrationId: "rented-a-v1",
+      action: { type: "runpod-stop", podId: "pod-exact", apiKeyEnv: "OLD_RUNPOD_KEY" }
+    }]);
+    await legacy.app.close();
+
+    const upgraded = createHarness([runpodTarget("rented-a", "runpod-main")], { databasePath: legacy.databasePath });
+    expect(upgraded.service.status().service.registrationIssues).toEqual([]);
+    expect(upgraded.store.getRegistration("rented-a")?.action).toEqual({
+      type: "runpod-stop",
+      podId: "pod-exact",
+      credentialId: "runpod-main"
+    });
+    expect(upgraded.service.audit("rented-a").some((event) => event.eventType === "registration_credential_mode_upgraded")).toBe(true);
+    await upgraded.app.close();
+  });
+
+  it("continues to reject a credential-mode change that also remaps the protected Pod", async () => {
+    const legacy = createHarness([{
+      targetId: "rented-a",
+      registrationId: "rented-a-v1",
+      action: { type: "runpod-stop", podId: "pod-original", apiKeyEnv: "OLD_RUNPOD_KEY" }
+    }]);
+    await legacy.app.close();
+
+    const changed = createHarness([runpodTarget("rented-a", "runpod-main")], { databasePath: legacy.databasePath });
+    expect(changed.service.status().service.registrationIssues).toEqual([
+      "Registration mismatch for rented-a; the durable registration remains authoritative"
+    ]);
+    expect(changed.store.getRegistration("rented-a")?.action).toMatchObject({ podId: "pod-original", apiKeyEnv: "OLD_RUNPOD_KEY" });
+    await changed.app.close();
+  });
 });
 
 describe("HassleOff target registration configuration", () => {
@@ -255,6 +385,16 @@ describe("HassleOff target registration configuration", () => {
 
     expect(() => loadHassleOffConfig()).toThrow("Set only one of HASSLEOFF_TARGETS_JSON or HASSLEOFF_TARGETS_FILE");
   });
+
+  it("rejects a plaintext RunPod action endpoint", () => {
+    process.env.HASSLEOFF_CONTROLLER_TOKEN = token;
+    process.env.HASSLEOFF_TARGETS_JSON = JSON.stringify([{
+      ...runpodTarget("rented-a", "runpod-main"),
+      action: { ...runpodTarget("rented-a", "runpod-main").action, apiBaseUrl: "http://runpod.invalid/v1" }
+    }]);
+
+    expect(() => loadHassleOffConfig()).toThrow("RunPod action apiBaseUrl must use HTTPS");
+  });
 });
 
 describe("registered provider actions", () => {
@@ -289,7 +429,12 @@ describe("registered provider actions", () => {
 
 function createHarness(
   targets: RegisteredTarget[],
-  options: { databasePath?: string; executor?: StopActionExecutor } = {}
+  options: {
+    databasePath?: string;
+    executor?: StopActionExecutor;
+    credentials?: InMemoryProviderCredentials;
+    config?: Partial<HassleOffConfig>;
+  } = {}
 ) {
   const directory = options.databasePath ? path.dirname(options.databasePath) : mkdtempSync(path.join(tmpdir(), "hassleoff-test-"));
   if (!createdDirectories.includes(directory)) createdDirectories.push(directory);
@@ -307,9 +452,17 @@ function createHarness(
     minLeaseMs: 1_000,
     maxLeaseMs: 10_000,
     maxMaintenanceHoldMs: 10_000,
-    failedActionRetryMs: 1_000
+    failedActionRetryMs: 1_000,
+    allowInsecureHttp: true,
+    trustProxy: false,
+    ...options.config
   };
-  const built = buildHassleOffApp(config, { actionExecutor: executor, clock: () => current, logger: false });
+  const built = buildHassleOffApp(config, {
+    actionExecutor: executor,
+    credentials: options.credentials,
+    clock: () => current,
+    logger: false
+  });
   return {
     ...built,
     databasePath,
@@ -348,6 +501,21 @@ function fakeTarget(targetId: string, testOnly = false): RegisteredTarget {
   return { targetId, registrationId: `${targetId}-v1`, testOnly, action: { type: "fake" } };
 }
 
+function runpodTarget(targetId: string, credentialId: string): RegisteredTarget {
+  return {
+    targetId,
+    registrationId: `${targetId}-v1`,
+    action: { type: "runpod-stop", podId: "pod-exact", credentialId }
+  };
+}
+
 function authHeaders() {
   return { authorization: `Bearer ${token}` };
+}
+
+function expectDatabaseFilesNotToContain(databasePath: string, value: string): void {
+  const databaseName = path.basename(databasePath);
+  for (const file of readdirSync(path.dirname(databasePath)).filter((candidate) => candidate.startsWith(databaseName))) {
+    expect(readFileSync(path.join(path.dirname(databasePath), file)).includes(Buffer.from(value))).toBe(false);
+  }
 }

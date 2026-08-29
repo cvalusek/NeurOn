@@ -2,7 +2,15 @@ export const HASSLEOFF_PROTOCOL_VERSION = "1" as const;
 
 export type TargetActionConfig =
   | { type: "fake" }
-  | { type: "runpod-stop"; podId: string; apiBaseUrl?: string; apiKeyEnv?: string };
+  | {
+      type: "runpod-stop";
+      podId: string;
+      apiBaseUrl?: string;
+      /** Preferred: the controller supplies this credential over the authenticated channel and HassleOff keeps it only in memory. */
+      credentialId?: string;
+      /** @deprecated Compatibility path for existing deployments. Prefer credentialId. */
+      apiKeyEnv?: string;
+    };
 
 export interface RegisteredTarget {
   targetId: string;
@@ -23,6 +31,8 @@ export interface HassleOffConfig {
   maxLeaseMs: number;
   maxMaintenanceHoldMs: number;
   failedActionRetryMs: number;
+  allowInsecureHttp: boolean;
+  trustProxy: boolean;
 }
 
 export interface ControllerLeaseInput {
@@ -92,4 +102,9 @@ export interface StopActionResult {
 
 export interface StopActionExecutor {
   stop(target: RegisteredTarget, context: StopActionContext): Promise<StopActionResult>;
+  credentialStatus?(target: RegisteredTarget): {
+    required: boolean;
+    available: boolean;
+    credentialId?: string;
+  };
 }

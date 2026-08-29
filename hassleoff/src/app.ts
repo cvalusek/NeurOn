@@ -2,6 +2,7 @@ import { timingSafeEqual } from "node:crypto";
 import Fastify from "fastify";
 import { z } from "zod";
 import { RegisteredStopActionExecutor } from "./actions.js";
+import { InMemoryProviderCredentials } from "./credentials.js";
 import { HassleOffRequestError, HassleOffService } from "./HassleOffService.js";
 import { HassleOffStore } from "./store.js";
 import { HASSLEOFF_PROTOCOL_VERSION } from "./types.js";
@@ -37,22 +38,34 @@ const tripTestSchema = z.object({
   targetId: z.string().min(1)
 });
 
+const runPodCredentialSchema = z.object({
+  protocolVersion: z.literal(HASSLEOFF_PROTOCOL_VERSION),
+  credentialId: z.string().min(1),
+  apiKey: z.string().min(1).max(4096)
+});
+
 export function buildHassleOffApp(
   config: HassleOffConfig,
   options: {
     store?: HassleOffStore;
     actionExecutor?: StopActionExecutor;
+    credentials?: InMemoryProviderCredentials;
     clock?: () => Date;
     logger?: boolean;
   } = {}
 ) {
-  const app = Fastify({ logger: options.logger ?? true });
+  const app = Fastify({ logger: options.logger ?? true, trustProxy: config.trustProxy });
   const store = options.store ?? new HassleOffStore(config.databasePath);
-  const service = new HassleOffService(config, store, options.actionExecutor ?? new RegisteredStopActionExecutor(), options.clock);
+  const credentials = options.credentials ?? new InMemoryProviderCredentials();
+  const actionExecutor = options.actionExecutor ?? new RegisteredStopActionExecutor(fetch, credentials);
+  const service = new HassleOffService(config, store, actionExecutor, credentials, options.clock);
   let interval: NodeJS.Timeout | undefined;
 
   app.addHook("preHandler", async (request, reply) => {
     if (request.url === "/healthz" || request.url === "/readyz") return;
+    if (!config.allowInsecureHttp && request.url.startsWith("/v1") && request.protocol !== "https") {
+      return reply.code(426).send({ error: "HassleOff protocol calls require HTTPS", code: "secure_transport_required" });
+    }
     if (!authenticated(request.headers.authorization, config.controllerToken)) {
       return reply.code(401).send({ error: "HassleOff controller authentication required" });
     }
@@ -64,7 +77,8 @@ export function buildHassleOffApp(
     return reply.code(service.ready ? 200 : 503).send({
       ok: service.ready,
       armed: service.armed,
-      registrationIssues: status.service.registrationIssues
+      registrationIssues: status.service.registrationIssues,
+      credentialIssues: status.service.credentialIssues
     });
   });
 
@@ -73,6 +87,11 @@ export function buildHassleOffApp(
     const query = z.object({ targetId: z.string().optional(), limit: z.coerce.number().int().min(1).max(500).optional() }).parse(request.query);
     return { protocolVersion: HASSLEOFF_PROTOCOL_VERSION, audit: service.audit(query.targetId, query.limit) };
   });
+
+  app.put("/v1/credentials/runpod/:credentialId", async (request, reply) => handle(reply, () => {
+    const { credentialId } = z.object({ credentialId: z.string().min(1) }).parse(request.params);
+    return service.acceptRunPodCredential(credentialId, runPodCredentialSchema.parse(request.body));
+  }));
 
   app.put("/v1/targets/:targetId/lease", async (request, reply) => handle(reply, () => {
     const { targetId } = z.object({ targetId: z.string().min(1) }).parse(request.params);
@@ -97,6 +116,7 @@ export function buildHassleOffApp(
 
   app.addHook("onClose", async () => {
     if (interval) clearInterval(interval);
+    credentials.clear();
     store.close();
   });
 
@@ -107,14 +127,14 @@ export function buildHassleOffApp(
     return interval;
   };
 
-  return { app, service, store, startWatchdog };
+  return { app, service, store, credentials, startWatchdog };
 }
 
 async function handle(reply: { code: (statusCode: number) => { send: (body: unknown) => unknown } }, action: () => unknown | Promise<unknown>) {
   try {
     return await action();
   } catch (error) {
-    if (error instanceof HassleOffRequestError) return reply.code(error.statusCode).send({ error: error.message });
+    if (error instanceof HassleOffRequestError) return reply.code(error.statusCode).send({ error: error.message, code: error.code });
     if (error instanceof z.ZodError) return reply.code(400).send({ error: error.issues.map((issue) => issue.message).join("; ") });
     const message = error instanceof Error ? error.message : String(error);
     return reply.code(500).send({ error: message });

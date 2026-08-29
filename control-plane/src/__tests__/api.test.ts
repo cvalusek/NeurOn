@@ -228,7 +228,8 @@ describe("maintenance mode", () => {
         controllerToken: "not-used",
         controllerId: "neuron-test",
         requestTimeoutSeconds: 1,
-        failSafeTestTargetId: "test"
+        failSafeTestTargetId: "test",
+        allowInsecureHttp: true
       }
     }, models);
     const auth = { authorization: `Basic ${Buffer.from("actual:local-test-secret").toString("base64")}` };
@@ -1450,7 +1451,8 @@ describe("HassleOff admin safety UI", () => {
       controllerToken: "controller-token-never-in-browser",
       controllerId: "neuron-test",
       requestTimeoutSeconds: 2,
-      failSafeTestTargetId: "hassleoff-failsafe-test"
+      failSafeTestTargetId: "hassleoff-failsafe-test",
+      allowInsecureHttp: true
     }
   };
   const auth = { authorization: `Basic ${Buffer.from("actual:local-test-secret").toString("base64")}` };

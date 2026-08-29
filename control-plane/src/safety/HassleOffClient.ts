@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import type { CapacityTarget, HassleOffClientConfig } from "../domain/types.js";
 
 const protocolVersion = "1";
@@ -15,6 +15,12 @@ export interface HassleOffTargetStatus {
   actionType: "fake" | "runpod-stop" | string;
   testOnly: boolean;
   armed: boolean;
+  credential?: {
+    required: boolean;
+    available: boolean;
+    credentialId?: string;
+    storage: "memory" | "environment" | "none";
+  };
   lease?: {
     acceptedUntil?: string;
     expired?: boolean;
@@ -34,6 +40,7 @@ export interface HassleOffStatus {
     armed: boolean;
     ready: boolean;
     registrationIssues?: string[];
+    credentialIssues?: string[];
   };
   lastFullTripTestSucceededAt?: string;
   tripTests?: Array<{ targetId: string; lastSucceededAt: string; auditEventId: number }>;
@@ -50,12 +57,18 @@ export interface HassleOffFailSafeTestResult {
 export class HassleOffClient {
   private readonly leases = new Map<string, LeaseClientState>();
   private readonly shutdownRequestIds = new Map<string, string>();
+  private readonly credentialDigests = new Map<string, string>();
 
   constructor(
     private readonly config: HassleOffClientConfig,
     private readonly fetchImplementation: typeof fetch = fetch,
     private readonly clock: () => Date = () => new Date()
-  ) {}
+  ) {
+    const url = new URL(config.baseUrl);
+    if (url.protocol !== "https:" && !config.allowInsecureHttp) {
+      throw new Error("HassleOff requires an HTTPS URL unless HASSLEOFF_ALLOW_INSECURE_HTTP is explicitly enabled");
+    }
+  }
 
   get baseUrl(): string {
     return this.config.baseUrl;
@@ -116,16 +129,8 @@ export class HassleOffClient {
     this.leases.set(target.id, state);
     const durationSeconds = target.hassleOff.leaseDurationSeconds ?? 120;
     const expiresAt = new Date(issuedAt.getTime() + durationSeconds * 1000);
-    const response = await this.request<{
-      protocolVersion: string;
-      accepted: boolean;
-      armed: boolean;
-      targetArmed: boolean;
-      targetId: string;
-      leaseId: string;
-      sequence: number;
-      acceptedUntil: string;
-    }>(`/v1/targets/${encodeURIComponent(target.id)}/lease`, {
+    const leasePath = `/v1/targets/${encodeURIComponent(target.id)}/lease`;
+    const leaseRequest = {
       method: "PUT",
       body: JSON.stringify({
         protocolVersion,
@@ -136,7 +141,25 @@ export class HassleOffClient {
         issuedAt: issuedAt.toISOString(),
         expiresAt: expiresAt.toISOString()
       })
-    }, `HassleOff interlock blocked target ${target.id}`);
+    };
+    await this.syncRunPodCredential(target);
+    let response: {
+      protocolVersion: string;
+      accepted: boolean;
+      armed: boolean;
+      targetArmed: boolean;
+      targetId: string;
+      leaseId: string;
+      sequence: number;
+      acceptedUntil: string;
+    };
+    try {
+      response = await this.request(leasePath, leaseRequest, `HassleOff interlock blocked target ${target.id}`);
+    } catch (error) {
+      if (!(error instanceof HassleOffResponseError) || error.code !== "credential_unavailable") throw error;
+      await this.syncRunPodCredential(target, true);
+      response = await this.request(leasePath, leaseRequest, `HassleOff interlock blocked target ${target.id}`);
+    }
     const acceptedUntil = new Date(response.acceptedUntil);
     if (
       response.protocolVersion !== protocolVersion ||
@@ -196,12 +219,44 @@ export class HassleOffClient {
     return status;
   }
 
+  private async syncRunPodCredential(target: CapacityTarget, force = false): Promise<void> {
+    if (target.provider !== "runpod" || !target.runpod) return;
+    const apiKeyEnvironment = target.runpod.apiKeyEnv ?? "RUNPOD_API_KEY";
+    const apiKey = target.runpod.apiKey ?? process.env[apiKeyEnvironment];
+    if (!apiKey) throw new Error(`HassleOff interlock blocked target ${target.id}: RunPod API key is unavailable from ${apiKeyEnvironment}`);
+    const credentialId = target.hassleOff?.credentialId ?? target.providerId ?? target.provider;
+    const digest = createHash("sha256").update(apiKey).digest("base64url");
+    if (!force && this.credentialDigests.get(credentialId) === digest) return;
+    try {
+      const response = await this.request<{
+        protocolVersion: string;
+        credentialId: string;
+        accepted: boolean;
+      }>(`/v1/credentials/runpod/${encodeURIComponent(credentialId)}`, {
+        method: "PUT",
+        body: JSON.stringify({ protocolVersion, credentialId, apiKey })
+      }, `HassleOff credential exchange failed for target ${target.id}`);
+      if (response.protocolVersion !== protocolVersion || response.credentialId !== credentialId || response.accepted !== true) {
+        throw new Error(`HassleOff credential exchange returned a mismatched result for target ${target.id}`);
+      }
+      this.credentialDigests.set(credentialId, digest);
+    } catch (error) {
+      if (error instanceof HassleOffResponseError && error.code === "credential_not_registered") {
+        // Existing registrations that still use apiKeyEnv remain compatible during rollout.
+        this.credentialDigests.set(credentialId, digest);
+        return;
+      }
+      throw error;
+    }
+  }
+
   private async request<T>(path: string, init: RequestInit, context: string): Promise<T> {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), this.config.requestTimeoutSeconds * 1000);
     try {
       const response = await this.fetchImplementation(`${this.config.baseUrl.replace(/\/$/, "")}${path}`, {
         ...init,
+        redirect: "error",
         signal: controller.signal,
         headers: {
           "content-type": "application/json",
@@ -210,15 +265,25 @@ export class HassleOffClient {
         }
       });
       const text = await response.text();
-      const body = text ? JSON.parse(text) as { error?: string } & T : undefined;
-      if (!response.ok) throw new Error(body?.error ?? `HTTP ${response.status}`);
+      const body = text ? JSON.parse(text) as { error?: string; code?: string } & T : undefined;
+      if (!response.ok) throw new HassleOffResponseError(body?.error ?? `HTTP ${response.status}`, response.status, body?.code);
       if (!body) throw new Error("empty response");
       return body;
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
+      if (error instanceof HassleOffResponseError) {
+        throw new HassleOffResponseError(`${context}: ${message}`, error.statusCode, error.code);
+      }
       throw new Error(`${context}: ${message}`);
     } finally {
       clearTimeout(timeout);
     }
+  }
+}
+
+class HassleOffResponseError extends Error {
+  constructor(message: string, readonly statusCode: number, readonly code?: string) {
+    super(message);
+    this.name = "HassleOffResponseError";
   }
 }

@@ -1,11 +1,14 @@
 import type { CapacityProvider } from "../domain/interfaces.js";
 import type { CapacityProviderDefinition, CapacityProviderResource, CapacityProviderStatus, CapacityTarget, TargetCostEstimateConfig } from "../domain/types.js";
+import { effectiveTarget } from "../capacity/CompositeCapacityProvider.js";
+import type { ProviderCatalog } from "../services/ProviderCatalog.js";
 import type { HassleOffClient } from "./HassleOffClient.js";
 
 export class HassleOffCapacityProvider implements CapacityProvider {
   constructor(
     private readonly delegate: CapacityProvider,
-    private readonly client?: HassleOffClient
+    private readonly client?: HassleOffClient,
+    private readonly providerCatalog?: ProviderCatalog
   ) {}
 
   async provisionTarget(target: CapacityTarget): Promise<Partial<CapacityTarget> | void> {
@@ -59,6 +62,9 @@ export class HassleOffCapacityProvider implements CapacityProvider {
         `HassleOff interlock blocked target ${target.id}: configure HASSLEOFF_URL and HASSLEOFF_CONTROLLER_TOKEN`
       );
     }
-    await this.client.acceptExactTargetLease(target);
+    const clientTarget = this.providerCatalog
+      ? effectiveTarget(target, this.providerCatalog.providerForTarget(target))
+      : target;
+    await this.client.acceptExactTargetLease(clientTarget);
   }
 }

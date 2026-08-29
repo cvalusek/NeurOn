@@ -15,6 +15,7 @@ import { InMemoryTargetStatusRepository } from "../repository/InMemoryTargetStat
 import { HassleOffCapacityProvider } from "../safety/HassleOffCapacityProvider.js";
 import { HassleOffClient } from "../safety/HassleOffClient.js";
 import { ModelCatalog } from "../services/ModelCatalog.js";
+import { ProviderCatalog } from "../services/ProviderCatalog.js";
 import { TargetService } from "../services/TargetService.js";
 
 const protectedTarget: CapacityTarget = {
@@ -33,7 +34,8 @@ const clientConfig: HassleOffClientConfig = {
   controllerToken: "controller-secret-token",
   controllerId: "neuron-test",
   requestTimeoutSeconds: 2,
-  failSafeTestTargetId: "hassleoff-failsafe-test"
+  failSafeTestTargetId: "hassleoff-failsafe-test",
+  allowInsecureHttp: false
 };
 
 const managedEnv = [
@@ -42,6 +44,7 @@ const managedEnv = [
   "CAPACITY_TARGET_GPU_DISPLAY_NAME",
   "CAPACITY_TARGET_GPU_PROVIDER",
   "CAPACITY_TARGET_GPU_HASSLEOFF_PROTECTED",
+  "CAPACITY_TARGET_GPU_HASSLEOFF_CREDENTIAL_ID",
   "CAPACITY_TARGET_GPU_HASSLEOFF_LEASE_DURATION_SECONDS",
   "CAPACITY_TARGET_GPU_HASSLEOFF_SHUTDOWN_ON_STALE_TRIP_TEST",
   "CAPACITY_TARGET_GPU_HASSLEOFF_TRIP_TEST_MAX_AGE_SECONDS",
@@ -49,7 +52,8 @@ const managedEnv = [
   "HASSLEOFF_URL",
   "HASSLEOFF_CONTROLLER_TOKEN",
   "HASSLEOFF_CONTROLLER_ID",
-  "HASSLEOFF_FAILSAFE_TEST_TARGET_ID"
+  "HASSLEOFF_FAILSAFE_TEST_TARGET_ID",
+  "HASSLEOFF_ALLOW_INSECURE_HTTP"
 ];
 
 afterEach(() => {
@@ -95,6 +99,101 @@ describe("NeurOn HassleOff start interlock", () => {
     expect(provider.provisionTarget).toHaveBeenCalledTimes(1);
     expect(requests).toHaveLength(2);
     expect(requests.every((request) => request.url.endsWith("/v1/targets/rented-a/lease") && request.body.targetId === "rented-a")).toBe(true);
+  });
+
+  it("pushes a provider-level RunPod key into the registered in-memory slot before accepting the lease", async () => {
+    const provider = providerSpy();
+    const requests: Array<{ url: string; body: Record<string, unknown> }> = [];
+    const fetchImplementation = vi.fn(async (url: string, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      requests.push({ url, body });
+      if (url.includes("/v1/credentials/runpod/")) {
+        return jsonResponse({ protocolVersion: "1", credentialId: body.credentialId, accepted: true });
+      }
+      return jsonResponse({
+        protocolVersion: "1",
+        accepted: true,
+        armed: true,
+        targetArmed: true,
+        targetId: body.targetId,
+        leaseId: body.leaseId,
+        sequence: body.sequence,
+        acceptedUntil: new Date(Date.now() + 60_000).toISOString()
+      });
+    });
+    const catalog = new ProviderCatalog([{
+      id: "runpod-main",
+      displayName: "RunPod Main",
+      type: "runpod",
+      config: { runpod: { apiKey: "controller-held-runpod-key" } }
+    }]);
+    const interlocked = new HassleOffCapacityProvider(
+      provider,
+      new HassleOffClient(clientConfig, fetchImplementation as typeof fetch),
+      catalog
+    );
+    const target: CapacityTarget = {
+      ...protectedTarget,
+      providerId: "runpod-main",
+      runpod: { podId: "pod-exact" },
+      hassleOff: { ...protectedTarget.hassleOff!, credentialId: "runpod-main" }
+    };
+
+    await interlocked.ensureTargetOn(target);
+    await interlocked.ensureTargetOn(target);
+
+    expect(requests.filter((request) => request.url.includes("/v1/credentials/runpod/"))).toHaveLength(1);
+    expect(requests[0]).toMatchObject({
+      url: "https://hassleoff.example.test/v1/credentials/runpod/runpod-main",
+      body: { credentialId: "runpod-main", apiKey: "controller-held-runpod-key" }
+    });
+    expect(requests.filter((request) => request.url.endsWith("/v1/targets/rented-a/lease"))).toHaveLength(2);
+    expect(provider.ensureTargetOn).toHaveBeenCalledTimes(2);
+  });
+
+  it("resupplies a cached RunPod key once when a restarted watchdog reports that memory is empty", async () => {
+    let leaseAttempts = 0;
+    const credentialRequests: string[] = [];
+    const fetchImplementation = vi.fn(async (url: string, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      if (url.includes("/v1/credentials/runpod/")) {
+        credentialRequests.push(String(body.apiKey));
+        return jsonResponse({ protocolVersion: "1", credentialId: body.credentialId, accepted: true });
+      }
+      leaseAttempts += 1;
+      if (leaseAttempts === 2) return jsonResponse({ error: "missing", code: "credential_unavailable" }, 503);
+      return jsonResponse({
+        protocolVersion: "1",
+        accepted: true,
+        armed: true,
+        targetArmed: true,
+        targetId: body.targetId,
+        leaseId: body.leaseId,
+        sequence: body.sequence,
+        acceptedUntil: new Date(Date.now() + 60_000).toISOString()
+      });
+    });
+    const target: CapacityTarget = {
+      ...protectedTarget,
+      runpod: { podId: "pod-exact", apiKey: "controller-held-runpod-key" },
+      hassleOff: { ...protectedTarget.hassleOff!, credentialId: "runpod-main" }
+    };
+    const client = new HassleOffClient(clientConfig, fetchImplementation as typeof fetch);
+
+    await client.acceptExactTargetLease(target);
+    await client.acceptExactTargetLease(target);
+
+    expect(credentialRequests).toEqual(["controller-held-runpod-key", "controller-held-runpod-key"]);
+    expect(leaseAttempts).toBe(3);
+  });
+
+  it("rejects plain HTTP watchdog endpoints unless an operator explicitly enables the local-development exception", () => {
+    expect(() => new HassleOffClient({ ...clientConfig, baseUrl: "http://hassleoff.example.test" })).toThrow("requires an HTTPS URL");
+    expect(() => new HassleOffClient({
+      ...clientConfig,
+      baseUrl: "http://hassleoff.internal:8091",
+      allowInsecureHttp: true
+    })).not.toThrow();
   });
 
   it("refuses a mismatched lease response", async () => {
@@ -430,6 +529,7 @@ describe("safety configuration", () => {
     process.env.HASSLEOFF_CONTROLLER_TOKEN = "controller-token";
     process.env.HASSLEOFF_CONTROLLER_ID = "neuron-prod";
     process.env.HASSLEOFF_FAILSAFE_TEST_TARGET_ID = "hassleoff-failsafe-test";
+    process.env.HASSLEOFF_ALLOW_INSECURE_HTTP = "true";
     process.env.CAPACITY_TARGETS_JSON = JSON.stringify([{
       id: "rented-a",
       displayName: "Rented A",
@@ -437,6 +537,7 @@ describe("safety configuration", () => {
       modelIds: [],
       hassleOff: {
         protected: true,
+        credentialId: "runpod-main",
         leaseDurationSeconds: 90,
         staleTripTestShutdown: { enabled: true, maxAgeSeconds: 7_200 }
       },
@@ -446,7 +547,8 @@ describe("safety configuration", () => {
     expect(jsonConfig.config.hassleOff).toMatchObject({
       baseUrl: "https://hassleoff.example.test",
       controllerId: "neuron-prod",
-      failSafeTestTargetId: "hassleoff-failsafe-test"
+      failSafeTestTargetId: "hassleoff-failsafe-test",
+      allowInsecureHttp: true
     });
     expect(jsonConfig.config.capacityTargets[0]).toMatchObject({
       hassleOff: { protected: true, leaseDurationSeconds: 90, staleTripTestShutdown: { enabled: true, maxAgeSeconds: 7_200 } },
@@ -458,13 +560,14 @@ describe("safety configuration", () => {
     process.env.CAPACITY_TARGET_GPU_DISPLAY_NAME = "GPU";
     process.env.CAPACITY_TARGET_GPU_PROVIDER = "runpod";
     process.env.CAPACITY_TARGET_GPU_HASSLEOFF_PROTECTED = "true";
+    process.env.CAPACITY_TARGET_GPU_HASSLEOFF_CREDENTIAL_ID = "runpod-main";
     process.env.CAPACITY_TARGET_GPU_HASSLEOFF_LEASE_DURATION_SECONDS = "120";
     process.env.CAPACITY_TARGET_GPU_HASSLEOFF_SHUTDOWN_ON_STALE_TRIP_TEST = "true";
     process.env.CAPACITY_TARGET_GPU_HASSLEOFF_TRIP_TEST_MAX_AGE_SECONDS = "3600";
     process.env.CAPACITY_TARGET_GPU_REPROVISION_ON_RECOVERABLE_UNAVAILABLE = "true";
     const envConfig = await loadConfig();
     expect(envConfig.config.capacityTargets[0]).toMatchObject({
-      hassleOff: { protected: true, leaseDurationSeconds: 120, staleTripTestShutdown: { enabled: true, maxAgeSeconds: 3_600 } },
+      hassleOff: { protected: true, credentialId: "runpod-main", leaseDurationSeconds: 120, staleTripTestShutdown: { enabled: true, maxAgeSeconds: 3_600 } },
       activationPolicy: { reprovisionOnRecoverableUnavailable: true }
     });
   });

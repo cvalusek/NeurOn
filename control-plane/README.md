@@ -158,6 +158,7 @@ Environment variables:
 | `HASSLEOFF_CONTROLLER_ID` | `neuron` | Stable deployment identity in leases |
 | `HASSLEOFF_REQUEST_TIMEOUT_SECONDS` | `5` | Timeout for server-side HassleOff calls |
 | `HASSLEOFF_FAILSAFE_TEST_TARGET_ID` | `hassleoff-failsafe-test` | Exact synthetic `testOnly` fake registration exposed in the admin safety UI |
+| `HASSLEOFF_ALLOW_INSECURE_HTTP` | `false` | Local-only exception for plaintext HassleOff protocol calls; remote watchdogs require HTTPS |
 
 Model choices are configuration-first. Put the user-facing choices in each
 target's `models` array with display names, aliases, backend model IDs, context,

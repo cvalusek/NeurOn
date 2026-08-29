@@ -157,6 +157,7 @@ RUNTIME_PROFILES_JSON=[{"id":"prefer-nightly","name":"PreFer Nightly","type":"do
 - `HASSLEOFF_CONTROLLER_ID`
 - `HASSLEOFF_REQUEST_TIMEOUT_SECONDS`
 - `HASSLEOFF_FAILSAFE_TEST_TARGET_ID`
+- `HASSLEOFF_ALLOW_INSECURE_HTTP` (local development only; defaults to false)
 
 The defaults favor responsive scheduling and status feedback while keeping
 provider calls bounded:
@@ -438,13 +439,18 @@ Opt a rented target into the HassleOff start/provision interlock:
 
 ```env
 CAPACITY_TARGET_MULTIPLE_MOE_96GB_HASSLEOFF_PROTECTED=true
+CAPACITY_TARGET_MULTIPLE_MOE_96GB_HASSLEOFF_CREDENTIAL_ID=runpod-main
 CAPACITY_TARGET_MULTIPLE_MOE_96GB_HASSLEOFF_LEASE_DURATION_SECONDS=120
 ```
 
 Existing targets remain unprotected unless this flag is explicitly true. A
 protected start fails explicitly when the configured HassleOff instance cannot
-accept the exact target lease. Optional stale-test shutdown routing is also
-off by default:
+accept the exact target lease. For RunPod, the credential ID names an in-memory
+slot registered on HassleOff. It defaults to the reusable `providerId`, or
+`runpod` for inline target config. NeurOn sends the effective provider key to
+that slot over HTTPS before the lease; HassleOff never writes the value to its
+SQLite database. Keep `HASSLEOFF_ALLOW_INSECURE_HTTP` unset for any remote
+watchdog. Optional stale-test shutdown routing is also off by default:
 
 ```env
 CAPACITY_TARGET_MULTIPLE_MOE_96GB_HASSLEOFF_SHUTDOWN_ON_STALE_TRIP_TEST=true
