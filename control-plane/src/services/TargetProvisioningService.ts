@@ -31,7 +31,23 @@ export class TargetProvisioningService {
   async beginProvision(target: CapacityTarget): Promise<TargetProvisioningJob | undefined> {
     const job = await this.repository.getForTarget(target.id);
     if (!job) return undefined;
+    if (job.status !== "draft") {
+      throw new Error(`Provisioning job for ${target.id} is ${job.status}; only a reviewed draft can create provider capacity`);
+    }
     return this.transition(job.id, "running");
+  }
+
+  async recordProvisionedResources(target: CapacityTarget, patch: Partial<CapacityTarget> | void): Promise<TargetProvisioningJob | undefined> {
+    const job = await this.repository.getForTarget(target.id);
+    if (!job) return undefined;
+    if (job.status !== "running") {
+      throw new Error(`Provisioning job for ${target.id} is ${job.status}; resources can only be recorded for a running job`);
+    }
+    return this.repository.update(job.id, {
+      targetDraft: mergeProvisioningTarget(target, patch),
+      createdResources: mergeResources(job.createdResources, resourcesFromProvisioningPatch(job.providerType, patch)),
+      updatedAt: new Date()
+    });
   }
 
   async completeProvision(target: CapacityTarget, patch: Partial<CapacityTarget> | void): Promise<TargetProvisioningJob | undefined> {
@@ -40,7 +56,7 @@ export class TargetProvisioningService {
     const resources = mergeResources(job.createdResources, resourcesFromProvisioningPatch(job.providerType, patch));
     return this.repository.update(job.id, {
       status: "completed",
-      targetDraft: { ...target, ...(patch ?? {}) },
+      targetDraft: mergeProvisioningTarget(target, patch),
       createdResources: resources,
       updatedAt: new Date(),
       errorMessage: undefined
@@ -81,6 +97,9 @@ function resourcesFromProvisioningPatch(providerType: string, patch: Partial<Cap
   if (providerType === "runpod" && patch.runpod?.podId) {
     return [{ providerType, resourceType: "runpod-pod", resourceId: patch.runpod.podId, cleanupState: "pending" }];
   }
+  if (providerType === "aws-ec2" && patch.aws?.instanceId) {
+    return [{ providerType, resourceType: "aws-ec2-instance", resourceId: patch.aws.instanceId, cleanupState: "pending" }];
+  }
   return [];
 }
 
@@ -88,4 +107,17 @@ function mergeResources(left: TargetProvisioningResource[], right: TargetProvisi
   const resources = new Map<string, TargetProvisioningResource>();
   for (const resource of [...left, ...right]) resources.set(`${resource.resourceType}:${resource.resourceId}`, resource);
   return Array.from(resources.values());
+}
+
+function mergeProvisioningTarget(target: CapacityTarget, patch: Partial<CapacityTarget> | void): CapacityTarget {
+  if (!patch) return target;
+  return {
+    ...target,
+    ...patch,
+    aws: patch.aws ? { ...(target.aws ?? {}), ...patch.aws } : target.aws,
+    docker: patch.docker ? { ...(target.docker ?? {}), ...patch.docker } : target.docker,
+    dockerCompose: patch.dockerCompose ? { ...(target.dockerCompose ?? {}), ...patch.dockerCompose } : target.dockerCompose,
+    runpod: patch.runpod ? { ...(target.runpod ?? {}), ...patch.runpod } : target.runpod,
+    neuron: patch.neuron ? { ...(target.neuron ?? {}), ...patch.neuron } : target.neuron
+  };
 }

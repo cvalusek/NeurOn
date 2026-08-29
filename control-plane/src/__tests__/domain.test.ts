@@ -41,6 +41,20 @@ function harness() {
 }
 
 describe("reservation behavior", () => {
+  it("lets one internal system identity reuse and manage only its own synthetic reservations", async () => {
+    const { reservations, repository } = harness();
+    const advisor = { id: "system:profile-advisor", username: "profile-advisor", isAdmin: true, permissions: ["*"], sessionVersion: 0 };
+    const audio = { id: "system:assistant-tts", username: "assistant-tts", isAdmin: true, permissions: ["*"], sessionVersion: 0 };
+    const created = await reservations.createForUser(advisor, { modelIds: ["qwen"], durationMinutes: 5, synthetic: true });
+
+    await expect(reservations.listActiveOwned(advisor)).resolves.toMatchObject([{ id: created.id }]);
+    await expect(reservations.listActiveOwned(audio)).resolves.toHaveLength(0);
+    await reservations.extend(created.id, advisor, 10, { fromNow: true });
+    await reservations.markDone(created.id, advisor);
+
+    expect(await repository.get(created.id)).toMatchObject({ status: "done", synthetic: true, userId: undefined, username: "profile-advisor" });
+  });
+
   it("expires old reservations", async () => {
     const { repository } = harness();
     await repository.create({ username: "clint", modelIds: ["qwen"], targetIds: [target.id], createdAt: new Date(0), expiresAt: new Date(1), status: "active" });

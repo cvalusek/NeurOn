@@ -226,9 +226,34 @@ responses get one short retry when the request deadline permits. Assistant tool
 calls do not bypass normal authorization, maintenance mode, validation, or user
 confirmation.
 
+### Assistant audio
+
+The same independent Assistant screen can bind speech-to-text, text-to-speech,
+and real-time voice to separate target/model deployments. The drawer shows
+**Mic** beside Send when dictation is configured, **Listen** on every user and
+Assistant message when spoken replies are configured, and **Live voice** for a
+separate PersonaPlex conversation surface. Enter still sends text; dictated text
+is inserted for review before sending.
+
+Each audio role owns one reusable visible synthetic reservation. A cold target
+uses the configured startup window; a target already observed healthy uses the
+warm response timeout. The browser never receives provider credentials or the
+direct runtime URL. Ordinary audio calls are proxied by NeurOn, and real-time
+24 kHz mono PCM16 is relayed through a bounded WebSocket-to-chunked-HTTP adapter.
+
+Built-in CustomVoice speakers can be selected directly. Reference cloning stores
+one RIFF/WAVE recording and its exact transcript in private durable Assistant
+configuration. The decoded reference is capped at 5 MiB, read APIs redact its
+base64 bytes, and migration verification hashes values without logging them.
+PersonaPlex uses its separately versioned fixed voice IDs until PreFer publishes
+useful machine-readable built-in voice discovery.
+
 ## PreFer boundary
 
-A PreFer release manifest is not required. PreFer may later publish exact
-artifact, quantization, context, and benchmark measurements in this schema, but
-NeurOn continues to own durable model data, local cost, direct measurements,
-filtering, ranking, and user confirmation.
+Profile selection never depends on a PreFer release inventory. Existing targets
+remain configuration/discovery-driven. The explicit **Provision new** flow can
+load PreFer's schema-versioned inventory at a full immutable source commit to
+resolve engine, provider hardware, runtime configuration, image, environment,
+and models before capacity creation. It does not import intelligence or measured
+performance into NeurOn: durable model facts, local cost, direct measurements,
+filtering, ranking, and user confirmation remain NeurOn-owned.

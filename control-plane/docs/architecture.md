@@ -217,6 +217,15 @@ into AWS, Docker, LiteLLM, or a concrete repository from unrelated code.
   empty or malformed tool result without loosening tool validation. Reversible profile
   controls can be filled immediately; profile saves, reservation starts, and
   capacity-affecting admin proposals remain separate UI-confirmed actions.
+- `AssistantAudioService`: binds independently selected STT, TTS, and
+  PersonaPlex deployments to per-role synthetic reservations. It proxies normal
+  audio responses and provides the bounded WebSocket-to-upstream chunked/SSE
+  bridge for full-duplex voice without exposing provider endpoints or
+  credentials to the browser.
+- `RuntimeCatalogService`: loads a plugin-owned release inventory at a full
+  immutable commit, validates its schema/fingerprint, filters provider-compatible
+  hardware, and resolves one durable runtime deployment plan before any
+  provisioning call.
 - `Reconciler`: computes desired target state from aggregate reservations and
   applies that state through a capacity provider. When a target is no longer
   continuously healthy it clears the process-local model-warmup cache, so the
@@ -324,6 +333,12 @@ PostgreSQL uses one bounded shared pool.
 Ordered transactional schema changes are recorded in
 `neuron_schema_migrations`; the data-transfer ledger is separate so an exact
 SQLite import can be verified without confusing it with schema upgrades.
+
+Assistant configuration includes private reference-voice bytes and independent
+audio deployment bindings. PostgreSQL schema v9 stores that data in
+`assistant_config.audio_config`; read APIs return only redacted reference
+metadata. Resolved runtime deployment plans remain inside durable target JSON,
+so catalog changes never rewrite an existing target implicitly.
 
 Only one application storage writer may own the deployment. A storage operation
 lock coordinates application startup with explicit backup/migration commands,

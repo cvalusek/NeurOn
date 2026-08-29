@@ -11,7 +11,7 @@ describePostgres("PostgreSQL schema and repositories", () => {
     try {
       await migratePostgresSchema(database.pool);
       await migratePostgresSchema(database.pool);
-      expect(await readPostgresSchemaState(database.pool)).toEqual({ currentVersion: POSTGRES_SCHEMA_VERSION, appliedVersions: [1, 2, 3, 4, 5, 6, 7, 8] });
+      expect(await readPostgresSchemaState(database.pool)).toEqual({ currentVersion: POSTGRES_SCHEMA_VERSION, appliedVersions: [1, 2, 3, 4, 5, 6, 7, 8, 9] });
 
       const first = await createReservationRepository({ driver: "postgres", connectionString: database.connectionString, maxConnections: 3 });
       const createdAt = new Date("2026-07-01T12:30:00-05:00");
@@ -114,7 +114,12 @@ describePostgres("PostgreSQL schema and repositories", () => {
       await first.modelMetadata.upsertCapability({ modelId: "model-1", intelligence: 88, domains: { coding: 93 }, quantization: { format: "Q6", qualityRetentionPercent: 98 }, provenance: { source: "manual", version: "2026-08" } }, createdAt);
       await first.modelMetadata.upsertDeployment({ targetId: "target-1", modelId: "model-1", performance: { decodeTokensPerSecond: 40, prefillTokensPerSecond: 900, sampleCount: 3 } }, endedAt);
       await first.modelFavorites.add({ userId: "usr-clint", username: "clint", targetId: "target-1", modelId: "model-1", createdAt });
-      await first.assistantConfig.save({ targetId: "target-1", modelId: "model-1", reservationMinutes: 12, keepaliveMinutes: 5, requestTimeoutSeconds: 90, additionalInstructions: "Use local pool names.", updatedAt: endedAt });
+      const assistantAudio = {
+        stt: { targetId: "target-1", modelId: "model-1" },
+        tts: { targetId: "target-1", modelId: "model-1", voice: { mode: "packaged" as const, voiceId: "Vivian", instructions: "Concise" } },
+        realtime: { targetId: "target-1", modelId: "model-1", voiceId: "NATF2", instructions: "Help with capacity.", sampleRate: 24_000 }
+      };
+      await first.assistantConfig.save({ targetId: "target-1", modelId: "model-1", reservationMinutes: 12, keepaliveMinutes: 5, requestTimeoutSeconds: 90, additionalInstructions: "Use local pool names.", audio: assistantAudio, updatedAt: endedAt });
       await first.close();
 
       const second = await createReservationRepository({ driver: "postgres", connectionString: database.connectionString, maxConnections: 3 });
@@ -132,7 +137,7 @@ describePostgres("PostgreSQL schema and repositories", () => {
       expect(await second.modelMetadata.listCapabilities()).toMatchObject([{ modelId: "model-1", intelligence: 88, domains: { coding: 93 }, quantization: { format: "Q6", qualityRetentionPercent: 98 }, updatedAt: createdAt }]);
       expect(await second.modelMetadata.listDeployments()).toMatchObject([{ targetId: "target-1", modelId: "model-1", performance: { decodeTokensPerSecond: 40 }, updatedAt: endedAt }]);
       expect(await second.modelFavorites.listForUser("usr-clint")).toEqual([{ userId: "usr-clint", username: "clint", targetId: "target-1", modelId: "model-1", createdAt }]);
-      expect(await second.assistantConfig.get()).toEqual({ id: "default", targetId: "target-1", modelId: "model-1", reservationMinutes: 12, keepaliveMinutes: 5, requestTimeoutSeconds: 90, additionalInstructions: "Use local pool names.", updatedAt: endedAt });
+      expect(await second.assistantConfig.get()).toEqual({ id: "default", targetId: "target-1", modelId: "model-1", reservationMinutes: 12, keepaliveMinutes: 5, requestTimeoutSeconds: 90, additionalInstructions: "Use local pool names.", audio: assistantAudio, updatedAt: endedAt });
       await second.close();
     } finally {
       await database.cleanup();
@@ -181,7 +186,7 @@ describePostgres("PostgreSQL schema and repositories", () => {
       await database.pool.query("alter table reservation_profiles drop column team_id");
       await database.pool.query("delete from neuron_schema_migrations where version in (7, 8)");
 
-      expect(await migratePostgresSchema(database.pool)).toEqual({ currentVersion: POSTGRES_SCHEMA_VERSION, appliedVersions: [1, 2, 3, 4, 5, 6, 7, 8] });
+      expect(await migratePostgresSchema(database.pool)).toEqual({ currentVersion: POSTGRES_SCHEMA_VERSION, appliedVersions: [1, 2, 3, 4, 5, 6, 7, 8, 9] });
       const upgraded = await createReservationRepository({ driver: "postgres", connectionString: database.connectionString, maxConnections: 3 });
       expect(await upgraded.reservationProfiles.get("profile-v6")).toMatchObject({ userId: user.id, sharingScope: "personal", teamId: undefined, name: "Personal" });
       await upgraded.close();
@@ -316,7 +321,7 @@ describePostgres("PostgreSQL schema and repositories", () => {
     const database = await createPostgresTestSchema();
     try {
       await migratePostgresSchema(database.pool);
-      await database.pool.query("delete from neuron_schema_migrations where version in (4, 5)");
+      await database.pool.query("delete from neuron_schema_migrations where version in (4, 5, 9)");
       await database.pool.query("drop table assistant_config");
       await database.pool.query(
         "insert into capacity_targets (id, target_json) values ($1, $2::jsonb)",
@@ -343,18 +348,19 @@ describePostgres("PostgreSQL schema and repositories", () => {
           request_timeout_seconds, updated_at
         ) values ('default', 'advisor-target', 'advisor-model', 12, 5, 90, '2026-08-15T12:00:00Z')
       `);
-      await database.pool.query("delete from neuron_schema_migrations where version = 5");
+      await database.pool.query("delete from neuron_schema_migrations where version in (5, 9)");
       await database.pool.query("alter table assistant_config drop column additional_instructions");
+      await database.pool.query("alter table assistant_config drop column audio_config");
 
       const state = await migratePostgresSchema(database.pool);
 
-      expect(state).toEqual({ currentVersion: POSTGRES_SCHEMA_VERSION, appliedVersions: [1, 2, 3, 4, 5, 6, 7, 8] });
-      const assistant = await database.pool.query<{ target_id: string; model_id: string; additional_instructions: string | null }>(`
-        select target_id, model_id, additional_instructions
+      expect(state).toEqual({ currentVersion: POSTGRES_SCHEMA_VERSION, appliedVersions: [1, 2, 3, 4, 5, 6, 7, 8, 9] });
+      const assistant = await database.pool.query<{ target_id: string; model_id: string; additional_instructions: string | null; audio_config: unknown }>(`
+        select target_id, model_id, additional_instructions, audio_config
         from assistant_config
         where id = 'default'
       `);
-      expect(assistant.rows).toEqual([{ target_id: "advisor-target", model_id: "advisor-model", additional_instructions: null }]);
+      expect(assistant.rows).toEqual([{ target_id: "advisor-target", model_id: "advisor-model", additional_instructions: null, audio_config: null }]);
     } finally {
       await database.cleanup();
     }

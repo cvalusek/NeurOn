@@ -1,8 +1,8 @@
 import { DescribeAutoScalingGroupsCommand, SetDesiredCapacityCommand } from "@aws-sdk/client-auto-scaling";
-import { DescribeInstancesCommand, DescribeSpotPriceHistoryCommand, StartInstancesCommand, StopInstancesCommand } from "@aws-sdk/client-ec2";
+import { DescribeInstancesCommand, DescribeLaunchTemplateVersionsCommand, DescribeSpotPriceHistoryCommand, RunInstancesCommand, StartInstancesCommand, StopInstancesCommand } from "@aws-sdk/client-ec2";
 import { DescribeServicesCommand, UpdateServiceCommand } from "@aws-sdk/client-ecs";
 import { GetProductsCommand } from "@aws-sdk/client-pricing";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { AwsEc2CapacityProvider } from "../capacity/AwsEc2CapacityProvider.js";
 import { AwsEcsAsgCapacityProvider } from "../capacity/AwsEcsAsgCapacityProvider.js";
 import type { CapacityTarget } from "../domain/types.js";
@@ -28,6 +28,108 @@ const ecsTarget: CapacityTarget = {
 };
 
 describe("AWS EC2 provider", () => {
+  it("provisions from one exact launch-template version and replaces only the marked PreFer environment block", async () => {
+    const commands: unknown[] = [];
+    const userData = `#!/bin/bash
+echo before
+# BEGIN NEURON MANAGED PREFER DEPLOYMENT
+OLD_PRESET=remove-me
+# END NEURON MANAGED PREFER DEPLOYMENT
+echo after`;
+    const provider = new AwsEc2CapacityProvider("us-east-2", {
+      ec2: {
+        send: async (command) => {
+          commands.push(command);
+          if (command instanceof DescribeLaunchTemplateVersionsCommand) {
+            return { LaunchTemplateVersions: [{ LaunchTemplateData: { UserData: Buffer.from(userData, "utf8").toString("base64") } }] };
+          }
+          if (command instanceof RunInstancesCommand) return { Instances: [{ InstanceId: "i-created" }] };
+          return {};
+        }
+      }
+    });
+    const update = await provider.provisionTarget({
+      id: "audio-gpu",
+      displayName: "Audio GPU",
+      provider: "aws-ec2",
+      modelIds: ["personaplex"],
+      models: [{ id: "personaplex" }],
+      runtimeDeployment: {
+        pluginId: "prefer",
+        pluginVersion: "8e7430a3faa43c8319edd276556ad8a05ca3e54b",
+        profileId: "prefer-audio",
+        engine: "audio.cpp",
+        catalogSchemaVersion: "prefer.audio-deployment-inventory.v1",
+        catalogFingerprint: "fingerprint",
+        deploymentId: "aws/g6e/personaplex",
+        providerType: "aws-ec2",
+        image: "ghcr.io/cvalusek/prefer:audio-cuda12-sha-8e7430a",
+        port: 8080,
+        healthPath: "/health",
+        apiPath: "/v1",
+        environment: { AUDIO_PRESET: "/configs/personaplex.ini", LITERAL_SHELL_TEXT: "$(must-not-run) `also-not-run`" },
+        hardware: { providerSku: "g6e.xlarge" },
+        models: [{ id: "personaplex" }]
+      },
+      aws: {
+        runtimePort: 8080,
+        provisioning: {
+          launchTemplateId: "lt-123",
+          launchTemplateVersion: "7",
+          deploymentEnvironment: { NEURON_SITE: "work" }
+        }
+      }
+    });
+
+    expect(commands[0]).toBeInstanceOf(DescribeLaunchTemplateVersionsCommand);
+    expect(commandInput(commands[0])).toEqual({ LaunchTemplateId: "lt-123", Versions: ["7"] });
+    expect(commands[1]).toBeInstanceOf(RunInstancesCommand);
+    expect(commandInput(commands[1])).toMatchObject({
+      LaunchTemplate: { LaunchTemplateId: "lt-123", Version: "7" },
+      InstanceType: "g6e.xlarge",
+      MinCount: 1,
+      MaxCount: 1,
+      TagSpecifications: [{ ResourceType: "instance", Tags: [{ Key: "Name", Value: "Audio GPU" }] }]
+    });
+    const launchedUserData = Buffer.from((commandInput(commands[1]) as { UserData: string }).UserData, "base64").toString("utf8");
+    expect(launchedUserData).toContain("echo before");
+    expect(launchedUserData).toContain("echo after");
+    expect(launchedUserData).toContain('AUDIO_PRESET="/configs/personaplex.ini"');
+    expect(launchedUserData).toContain('AWS_REGION="us-east-2"');
+    expect(launchedUserData).toContain('NEURON_SITE="work"');
+    expect(launchedUserData).toContain('PREFER_IMAGE="ghcr.io/cvalusek/prefer:audio-cuda12-sha-8e7430a"');
+    expect(launchedUserData).toContain('LITERAL_SHELL_TEXT="\\$(must-not-run) \\`also-not-run\\`"');
+    expect(launchedUserData).not.toContain("OLD_PRESET");
+    expect(launchedUserData.match(/BEGIN NEURON MANAGED/gu)).toHaveLength(1);
+    expect(update).toEqual({ aws: { instanceId: "i-created", runtimePort: 8080, runtimeProtocol: undefined, healthPath: undefined, apiPath: undefined } });
+  });
+
+  it("refuses to launch when the template's managed block is absent or ambiguous", async () => {
+    const run = vi.fn();
+    const provider = new AwsEc2CapacityProvider("us-east-1", {
+      ec2: {
+        send: async (command) => {
+          if (command instanceof DescribeLaunchTemplateVersionsCommand) return { LaunchTemplateVersions: [{ LaunchTemplateData: { UserData: Buffer.from("#!/bin/bash\necho unmanaged", "utf8").toString("base64") } }] };
+          run(command);
+          return { Instances: [{ InstanceId: "must-not-exist" }] };
+        }
+      }
+    });
+    await expect(provider.provisionTarget({
+      id: "audio-gpu",
+      displayName: "Audio GPU",
+      provider: "aws-ec2",
+      modelIds: ["personaplex"],
+      runtimeDeployment: {
+        pluginId: "prefer", pluginVersion: "8e7430a", profileId: "prefer-audio", engine: "audio.cpp",
+        catalogSchemaVersion: "prefer.audio-deployment-inventory.v1", catalogFingerprint: "fingerprint", deploymentId: "aws/g6e/personaplex",
+        providerType: "aws-ec2", image: "image", port: 8080, healthPath: "/health", apiPath: "/v1", environment: {}, models: [{ id: "personaplex" }]
+      },
+      aws: { provisioning: { launchTemplateName: "prefer-gpu" } }
+    })).rejects.toThrow(/must contain exactly one ordered/);
+    expect(run).not.toHaveBeenCalled();
+  });
+
   it("starts and stops the configured instance", async () => {
     const commands: unknown[] = [];
     const provider = new AwsEc2CapacityProvider("us-east-1", {

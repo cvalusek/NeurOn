@@ -115,7 +115,7 @@ describe("model selection guidance", () => {
       expect(modelPage.body).not.toContain("Profile assistant backend");
       const assistantPage = await app.inject({ method: "GET", url: "/admin/assistant", headers: auth });
       expect(assistantPage.body).toContain("Save assistant settings");
-      expect(assistantPage.body).toContain("Reservation duration");
+      expect(assistantPage.body).toContain("Startup window");
       expect(assistantPage.body).toContain("Keepalive");
       expect(assistantPage.body).toContain("Additional system guidance");
       expect(assistantPage.body).toContain("Use our internal team terminology.");
@@ -125,6 +125,29 @@ describe("model selection guidance", () => {
       expect(assistantPage.body).not.toContain("data-assistant-config-status");
       expect(modelPage.body).toContain("Confirm save profile");
       expect(modelPage.body).toContain("Confirm start reservation");
+      const scripts = Array.from(assistantPage.body.matchAll(/<script(?:\s[^>]*)?>([\s\S]*?)<\/script>/gu), (match) => match[1] ?? "");
+      expect(scripts.length).toBeGreaterThan(0);
+      for (const script of scripts) expect(() => new Function(script)).not.toThrow();
+
+      const referenceWav = Buffer.concat([Buffer.from("RIFF", "ascii"), Buffer.alloc(4), Buffer.from("WAVE", "ascii")]).toString("base64");
+      const audioSaved = await app.inject({ method: "PUT", url: "/api/admin/assistant-config", headers: auth, payload: {
+        targetId: "t1", modelId: "m1", reservationMinutes: 12, keepaliveMinutes: 5, requestTimeoutSeconds: 90,
+        audio: {
+          stt: { targetId: "t1", modelId: "m1" },
+          tts: { targetId: "t1", modelId: "m1", voice: { mode: "reference", reference: { fileName: "voice.wav", mimeType: "audio/wav", dataBase64: referenceWav, referenceText: "Reference words" } } },
+          realtime: { targetId: "t1", modelId: "m1", voiceId: "NATF2", instructions: "Be concise.", sampleRate: 24000 }
+        }
+      } });
+      expect(audioSaved.statusCode).toBe(200);
+      const publicConfig = (await app.inject({ method: "GET", url: "/api/admin/assistant-config", headers: auth })).json();
+      expect(publicConfig).toMatchObject({ backend: { audio: { tts: { voice: { mode: "reference", reference: { fileName: "voice.wav", decodedBytes: 12 } } } } } });
+      expect(JSON.stringify(publicConfig)).not.toContain(referenceWav);
+      expect((await app.inject({ method: "GET", url: "/api/profile-advisor/status", headers: auth })).json()).toMatchObject({ audio: { stt: true, tts: true, realtime: true } });
+      const invalidDictation = await app.inject({ method: "POST", url: "/api/profile-advisor/audio/transcriptions", headers: { ...auth, "content-type": "audio/wav" }, payload: Buffer.from("not a wav") });
+      expect(invalidDictation.statusCode).toBe(400);
+      expect(invalidDictation.json().error).toMatch(/RIFF\/WAVE/);
+      const invalidSpeech = await app.inject({ method: "POST", url: "/api/profile-advisor/audio/speech", headers: auth, payload: { text: "" } });
+      expect(invalidSpeech.statusCode).toBe(400);
 
       expect((await app.inject({ method: "PUT", url: "/api/admin/assistant-config", headers: auth, payload: { targetId: null, modelId: null, reservationMinutes: 12, keepaliveMinutes: 5, requestTimeoutSeconds: 90 } })).statusCode).toBe(200);
       expect((await app.inject({ method: "GET", url: "/api/profile-advisor/status", headers: auth })).json().enabled).toBe(false);
@@ -1100,6 +1123,134 @@ describe("API authentication context", () => {
 
     expect(missingInstance.statusCode).toBe(302);
     expect(missingInstance.headers.location).toContain("AWS%20EC2%20instance%20ID%20is%20required");
+  });
+
+  it("resolves catalog provisioning choices into an immutable target draft without provisioning capacity", async () => {
+    process.env.USE_FAKE_PROVIDER = "true";
+    const revision = "8e7430a3faa43c8319edd276556ad8a05ca3e54b";
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
+      schema_version: "prefer.audio-deployment-inventory.v1",
+      catalog_fingerprint: "99c6b5256b18b00f5198374280a370a3ac0ec318c8d663b4402e8785d5a17fa2",
+      deployments: [{
+        id: "runpod/a40/1x/assistant",
+        runtime: "audio.cpp",
+        backend: "cuda",
+        image_tag: "audio-cuda12",
+        provider: "runpod",
+        description: "Related ASR and TTS routes for a conventional listen-and-speak assistant",
+        hardware: {
+          gpu_name: "A40",
+          provider_gpu_type_id: "NVIDIA A40",
+          gpu_count: 1,
+          vram_gb_each: 48,
+          advertised_hourly_usd_per_gpu: 0.44
+        },
+        container: { internal_port: 8080, health_path: "/health" },
+        environment: { AUDIO_SERVER_CONFIG: "/server-configs/runpod/a40/1x/assistant.json" },
+        capabilities: ["asr", "tts"],
+        models: [
+          { key: "qwen3-asr-0.6b-q8", request_model_id: "qwen3-asr-0.6b", task: "asr", mode: "streaming", precision: "Q8_0" },
+          { key: "qwen3-tts-1.7b-customvoice-bf16", request_model_id: "qwen3-tts-1.7b-customvoice", task: "tts", mode: "offline", precision: "BF16" }
+        ]
+      }]
+    }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const { app } = await buildApp({
+      ...config,
+      runtimeProfiles: [{
+        id: "prefer-audio",
+        name: "PreFer audio.cpp",
+        type: "docker",
+        port: 8080,
+        health: "/health",
+        api: "/v1",
+        catalog: {
+          pluginId: "prefer",
+          engine: "audio.cpp",
+          schemaVersion: "prefer.audio-deployment-inventory.v1",
+          repository: "cvalusek/PreFer",
+          inventoryPath: "docker/audio-cpp/deployment-inventory.generated.json",
+          imageRepository: "ghcr.io/cvalusek/prefer"
+        }
+      }],
+      capacityProviders: [
+        ...config.capacityProviders,
+        { id: "runpod-provision", displayName: "RunPod Provisioning", type: "runpod", provisioning: { enabled: true }, config: {} }
+      ]
+    }, models);
+    const auth = { authorization: `Basic ${Buffer.from("actual:local-test-secret").toString("base64")}` };
+    try {
+      const options = await app.inject({
+        method: "GET",
+        url: `/api/admin/runtime-catalog?profileId=prefer-audio&providerId=runpod-provision&revision=${revision}`,
+        headers: auth
+      });
+      expect(options.statusCode).toBe(200);
+      expect(options.json()).toMatchObject({
+        revision,
+        profile: { id: "prefer-audio", engine: "audio.cpp" },
+        options: [expect.objectContaining({ id: "runpod/a40/1x/assistant", modelCount: 2 })]
+      });
+
+      const created = await app.inject({
+        method: "POST",
+        url: "/admin/targets",
+        headers: { ...auth, "content-type": "application/x-www-form-urlencoded" },
+        payload: new URLSearchParams({
+          id: "audio-assistant",
+          displayName: "Audio assistant",
+          connectionMode: "provision",
+          providerId: "runpod-provision",
+          runtimeProfileId: "prefer-audio",
+          runtimeCatalogRevision: revision,
+          runtimeDeploymentId: "runpod/a40/1x/assistant",
+          runpodCloudType: "SECURE",
+          runpodVolumeGb: "100",
+          runpodContainerDiskGb: "50"
+        }).toString()
+      });
+      expect(created.statusCode).toBe(302);
+      expect(created.headers.location).toBe("/admin/targets?created=audio-assistant&provision=true");
+      const target = (await app.inject({ method: "GET", url: "/api/admin/targets", headers: auth })).json().capacityTargets
+        .find((candidate: { id: string }) => candidate.id === "audio-assistant");
+      expect(target).toMatchObject({
+        provider: "runpod",
+        providerId: "runpod-provision",
+        modelIds: ["qwen3-asr-0.6b", "qwen3-tts-1.7b-customvoice"],
+        hostingMode: "multi-model",
+        needsProvisioning: true
+      });
+      const page = await app.inject({ method: "GET", url: created.headers.location!, headers: auth });
+      expect(page.body).toContain("Review the resolved plan, then explicitly provision it");
+      expect(page.body).toContain('data-provision-target="audio-assistant"');
+      const updated = await app.inject({
+        method: "POST",
+        url: "/admin/targets/audio-assistant/update",
+        headers: { ...auth, "content-type": "application/x-www-form-urlencoded" },
+        payload: new URLSearchParams({
+          id: "audio-assistant",
+          displayName: "Audio assistant",
+          providerId: "runpod-provision",
+          runtimeProfileId: "prefer-audio",
+          modelIds: "qwen3-asr-0.6b",
+          runpodPodId: "pod-provisioned",
+          runpodRuntimePort: "8080"
+        }).toString()
+      });
+      expect(updated.statusCode).toBe(302);
+      const updatedTarget = (await app.inject({ method: "GET", url: "/api/admin/targets", headers: auth })).json().capacityTargets
+        .find((candidate: { id: string }) => candidate.id === "audio-assistant");
+      expect(updatedTarget).toMatchObject({
+        modelIds: ["qwen3-asr-0.6b"],
+        hostingMode: "dedicated",
+        needsProvisioning: false,
+        directHostUrl: "https://pod-provisioned-8080.proxy.runpod.net/"
+      });
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    } finally {
+      await app.close();
+      vi.unstubAllGlobals();
+    }
   });
 
   it("serves admin auth management and creates persisted GitHub methods", async () => {

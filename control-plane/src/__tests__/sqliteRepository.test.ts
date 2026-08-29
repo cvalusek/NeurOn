@@ -280,11 +280,16 @@ describe("SqliteAssistantConfigRepository", () => {
     await targets.create({ id: "advisor-target", displayName: "Advisor", provider: "docker", modelIds: ["advisor-model"] });
     targets.close();
     const updatedAt = new Date("2026-08-15T12:00:00.000Z");
+    const audio = {
+      stt: { targetId: "advisor-target", modelId: "advisor-model" },
+      tts: { targetId: "advisor-target", modelId: "advisor-model", voice: { mode: "packaged" as const, voiceId: "Vivian", instructions: "Concise" } },
+      realtime: { targetId: "advisor-target", modelId: "advisor-model", voiceId: "NATF2", instructions: "Help with capacity.", sampleRate: 24_000 }
+    };
     const first = new SqliteAssistantConfigRepository(databasePath);
-    await first.save({ targetId: "advisor-target", modelId: "advisor-model", reservationMinutes: 15, keepaliveMinutes: 5, requestTimeoutSeconds: 120, additionalInstructions: "Prefer concise local guidance.", updatedAt });
+    await first.save({ targetId: "advisor-target", modelId: "advisor-model", reservationMinutes: 15, keepaliveMinutes: 5, requestTimeoutSeconds: 120, additionalInstructions: "Prefer concise local guidance.", audio, updatedAt });
     first.close();
     const second = new SqliteAssistantConfigRepository(databasePath);
-    expect(await second.get()).toEqual({ id: "default", targetId: "advisor-target", modelId: "advisor-model", reservationMinutes: 15, keepaliveMinutes: 5, requestTimeoutSeconds: 120, additionalInstructions: "Prefer concise local guidance.", updatedAt });
+    expect(await second.get()).toEqual({ id: "default", targetId: "advisor-target", modelId: "advisor-model", reservationMinutes: 15, keepaliveMinutes: 5, requestTimeoutSeconds: 120, additionalInstructions: "Prefer concise local guidance.", audio, updatedAt });
     second.close();
   });
 
@@ -322,8 +327,8 @@ describe("SqliteAssistantConfigRepository", () => {
 
     const assistant = new SqliteAssistantConfigRepository(databasePath);
     expect(await assistant.get()).toMatchObject({ targetId: "target-1", modelId: "model-1", additionalInstructions: undefined });
-    await assistant.save({ targetId: "target-1", modelId: "model-1", reservationMinutes: 15, keepaliveMinutes: 5, requestTimeoutSeconds: 120, additionalInstructions: "Local guidance" });
-    expect(await assistant.get()).toMatchObject({ additionalInstructions: "Local guidance" });
+    await assistant.save({ targetId: "target-1", modelId: "model-1", reservationMinutes: 15, keepaliveMinutes: 5, requestTimeoutSeconds: 120, additionalInstructions: "Local guidance", audio: { stt: { targetId: "target-1", modelId: "model-1" } } });
+    expect(await assistant.get()).toMatchObject({ additionalInstructions: "Local guidance", audio: { stt: { targetId: "target-1", modelId: "model-1" } } });
     assistant.close();
   });
 });

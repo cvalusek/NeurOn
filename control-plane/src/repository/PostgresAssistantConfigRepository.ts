@@ -1,6 +1,7 @@
 import type pg from "pg";
 import type { AssistantConfigRepository } from "../domain/interfaces.js";
 import type { AssistantConfig } from "../domain/types.js";
+import { parseAssistantAudioConfig } from "../services/assistantAudioConfig.js";
 import { cloneAssistantConfig } from "./assistantConfigUtils.js";
 
 interface AssistantRow {
@@ -11,6 +12,7 @@ interface AssistantRow {
   keepalive_minutes: number;
   request_timeout_seconds: number;
   additional_instructions: string | null;
+  audio_config: AssistantConfig["audio"] | null;
   updated_at: Date | string;
 }
 
@@ -23,10 +25,10 @@ export class PostgresAssistantConfigRepository implements AssistantConfigReposit
   }
 
   async save(input: Omit<AssistantConfig, "id" | "updatedAt"> & { updatedAt?: Date }): Promise<AssistantConfig> {
-    const config: AssistantConfig = { ...input, id: "default", updatedAt: input.updatedAt ?? new Date() };
+    const config: AssistantConfig = { ...input, audio: parseAssistantAudioConfig(input.audio), id: "default", updatedAt: input.updatedAt ?? new Date() };
     await this.pool.query(`
-      insert into assistant_config (id, target_id, model_id, reservation_minutes, keepalive_minutes, request_timeout_seconds, additional_instructions, updated_at)
-      values ('default', $1, $2, $3, $4, $5, $6, $7)
+      insert into assistant_config (id, target_id, model_id, reservation_minutes, keepalive_minutes, request_timeout_seconds, additional_instructions, audio_config, updated_at)
+      values ('default', $1, $2, $3, $4, $5, $6, $7::jsonb, $8)
       on conflict(id) do update set
         target_id=excluded.target_id,
         model_id=excluded.model_id,
@@ -34,8 +36,9 @@ export class PostgresAssistantConfigRepository implements AssistantConfigReposit
         keepalive_minutes=excluded.keepalive_minutes,
         request_timeout_seconds=excluded.request_timeout_seconds,
         additional_instructions=excluded.additional_instructions,
+        audio_config=excluded.audio_config,
         updated_at=excluded.updated_at
-    `, [config.targetId, config.modelId, config.reservationMinutes, config.keepaliveMinutes, config.requestTimeoutSeconds, config.additionalInstructions ?? null, config.updatedAt]);
+    `, [config.targetId, config.modelId, config.reservationMinutes, config.keepaliveMinutes, config.requestTimeoutSeconds, config.additionalInstructions ?? null, config.audio ? JSON.stringify(config.audio) : null, config.updatedAt]);
     return cloneAssistantConfig(config);
   }
 
@@ -54,6 +57,7 @@ function fromRow(row: AssistantRow): AssistantConfig {
     keepaliveMinutes: row.keepalive_minutes,
     requestTimeoutSeconds: row.request_timeout_seconds,
     additionalInstructions: row.additional_instructions ?? undefined,
+    audio: parseAssistantAudioConfig(row.audio_config),
     updatedAt: new Date(row.updated_at)
   };
 }

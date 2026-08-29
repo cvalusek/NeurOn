@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import type pg from "pg";
 
-export const POSTGRES_SCHEMA_VERSION = 8;
+export const POSTGRES_SCHEMA_VERSION = 9;
 
 export const POSTGRES_DATA_TABLES = [
   "reservations",
@@ -424,6 +424,10 @@ const schemaVersionEightSql = `
     );
 `;
 
+const schemaVersionNineSql = `
+  alter table assistant_config add column if not exists audio_config jsonb;
+`;
+
 const migrations = [
   { version: 1, name: "initial-centralized-schema", sql: schemaVersionOneSql },
   { version: 2, name: "reservation-target-selections", sql: schemaVersionTwoSql },
@@ -432,7 +436,8 @@ const migrations = [
   { version: 5, name: "assistant-operator-instructions", sql: schemaVersionFiveSql },
   { version: 6, name: "durable-users-roles-and-teams", sql: schemaVersionSixSql },
   { version: 7, name: "shared-team-profiles", sql: schemaVersionSevenSql },
-  { version: 8, name: "profile-sharing-scopes", sql: schemaVersionEightSql }
+  { version: 8, name: "profile-sharing-scopes", sql: schemaVersionEightSql },
+  { version: 9, name: "assistant-audio-configuration", sql: schemaVersionNineSql }
 ] as const;
 
 const expectedColumns: Record<string, Record<string, { type: string; nullable: boolean }>> = {
@@ -471,7 +476,7 @@ const expectedColumns: Record<string, Record<string, { type: string; nullable: b
   model_favorites: { user_id: required("text"), username: required("text"), target_id: required("text"), model_id: required("text"), created_at: required("timestamptz") },
   assistant_config: {
     id: required("text"), target_id: required("text"), model_id: required("text"), reservation_minutes: required("int4"),
-    keepalive_minutes: required("int4"), request_timeout_seconds: required("int4"), additional_instructions: optional("text"), updated_at: required("timestamptz")
+    keepalive_minutes: required("int4"), request_timeout_seconds: required("int4"), additional_instructions: optional("text"), audio_config: optional("jsonb"), updated_at: required("timestamptz")
   },
   users: {
     id: required("text"), username: required("text"), normalized_username: required("text"), display_name: optional("text"), status: required("text"),
@@ -637,6 +642,7 @@ async function validateExistingPostgresTablesForMigration(queryable: pg.PoolClie
     "reservations.target_selections",
     "capacity_providers.provisioning_enabled",
     "assistant_config.additional_instructions",
+    "assistant_config.audio_config",
     "reservations.user_id",
     "reservation_profiles.user_id",
     "reservation_profiles.sharing_scope",

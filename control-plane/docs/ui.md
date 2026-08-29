@@ -107,7 +107,14 @@ points to and pulses the ordinary link before following it, while form actions
 highlight the controls they change. Save-profile and start-reservation are
 separate tool proposals with separate UI confirmations; admin rediscovery
 proposals are confirmed as well. The builder remains complete without an
-assistant backend or PreFer release manifest.
+assistant backend or PreFer release inventory.
+
+When Assistant audio is configured, **Mic** beside Send records dictation and
+inserts the transcript for review, **Listen** appears on every chat message,
+and **Live voice** opens a separate PersonaPlex conversation panel. The live
+panel shows waking, listening, speaking, finishing, error, and timing states and
+can be cancelled independently of the text conversation. Audio controls remain
+hidden when their deployment is not configured.
 
 The reserve action is held in a bottom action bar alongside the current cost
 estimate so it remains visually connected to the form after profile review.
@@ -234,6 +241,12 @@ to the database before Admin can edit them. **Discover models now** explicitly
 refreshes the cache, benchmarks an activated runtime, and may activate a stopped
 target. **Rediscover all** runs targets one by one. AWS EC2 resource discovery
 hides instances already assigned to a NeurOn target by default.
+
+**Add target** first chooses **Connect existing** or **Provision new**. Existing
+mode asks only for a provider resource and lets discovery fill runtime facts.
+Provision mode chooses a catalog-backed Runtime, full PreFer commit, hardware or
+instance, and then one runtime configuration. Creating the target stores a draft
+without contacting the provider; a separate visible action provisions it.
 
 ## Connect
 

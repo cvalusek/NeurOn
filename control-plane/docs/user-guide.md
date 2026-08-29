@@ -35,8 +35,9 @@ order. Use **Help me choose** when the model list is unfamiliar:
   context does not pass the filter.
 - Add required technical flags such as vision or tool use, a cost ceiling, or
   a dedicated versus multi-model host requirement only when it is mandatory.
-  Targets without an explicit hosting classification appear as Unclassified;
-  NeurOn does not guess their mode from how many catalog entries they expose.
+  Hosting mode is derived from the target's known catalog: one model is
+  dedicated, several models are multi-model, and no known models remains
+  unclassified until discovery.
 - Add any scored strengths you care about, such as coding or reasoning. They
   refine Intelligence ranking but do not filter models out.
 - Move the **Good**, **Fast**, and **Cheap** point to express preferences among
@@ -57,6 +58,13 @@ the ordinary link before following it, so the same workflow remains available
 without the Assistant. It remembers recent turns and compacts older ones during
 longer conversations. Administrators can toggle a privacy-safe diagnostic panel
 for timing, retries, history size, and page-context updates.
+
+When an administrator has selected compatible audio deployments, **Mic**
+records a short dictation and inserts its transcription for review, and every
+chat message offers **Listen** for an on-demand spoken reply. **Live voice**
+opens a separate PersonaPlex session with continuous microphone and audio
+streaming. Ending or closing that panel cancels the live upstream request; it
+does not leave a hidden recording session running.
 
 ![The collapsible NeurOn assistant alongside the profile builder](images/profile-assistant.png)
 

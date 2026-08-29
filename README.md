@@ -47,15 +47,16 @@ external runtime project and target configuration.
 | --- | --- | --- |
 | Docker container | Starts/stops a named container | Optional, explicit admin provisioning when an image is configured |
 | Docker Compose | Starts/stops an existing service | No image builds or model downloads |
-| AWS EC2 | Starts/stops **one pre-created instance** | Not implemented; NeurOn does not create EC2, AMIs, VPCs, security groups, roles, or volumes |
+| AWS EC2 | Starts/stops one bound instance | Optional, explicit creation from a provider-owned Launch Template and a pinned runtime catalog; NeurOn does not create AMIs, templates, networks, roles, or volumes |
 | AWS ECS/ASG | Changes desired counts on existing ECS/ASG resources | Does not create clusters, services, ASGs, launch templates, or AMIs |
 | RunPod | Starts/stops an existing Pod | Optional, explicit admin provisioning when enabled |
 | Upstream NeurOn | Holds/releases an upstream reservation | No upstream provisioning |
 
 Provider details and least-privilege examples are in
-[Providers](control-plane/docs/providers.md). In particular, the EC2 adapter is
-a lifecycle controller for an instance the operator already built; it is not an
-EC2 deployment integration.
+[Providers](control-plane/docs/providers.md). Existing EC2 instances remain the
+smallest configuration. Explicit provisioning reuses an operator-owned Launch
+Template, overrides only the catalog-selected instance type and one marked
+user-data environment block, and persists the returned instance binding.
 
 ## Quick start
 

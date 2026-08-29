@@ -67,10 +67,11 @@ rather than storing secret material directly.
 
 ## AWS EC2
 
-The AWS EC2 provider starts and stops a pre-created EC2 instance. It is the
-simplest AWS lifecycle option when an operator wants to own instance creation,
-AMI selection, security groups, EBS volumes, instance profile, and runtime
-bootstrap outside NeurOn.
+The AWS EC2 provider starts and stops one bound EC2 instance. The binding can
+come from an existing instance or from an explicit NeurOn provisioning action
+that reuses an operator-owned Launch Template. In both cases the operator owns
+AMI selection, security groups, EBS volumes, instance profile, networking, and
+the runtime boot contract outside NeurOn.
 
 For a target desired on:
 
@@ -84,14 +85,16 @@ For a target desired off:
 
 - Stop the configured EC2 instance.
 
-The provider does not create instances, AMIs, launch templates, networking,
-instance profiles, or volumes yet. Provisioning should be added as an explicit
-admin action only, because AMI IDs vary by region and runtime projects own the
-image and model-loading details.
+The provider never creates AMIs, Launch Templates, networking, instance
+profiles, or volumes. When provisioning is enabled, it can run exactly one
+instance from a configured template/version after resolving a pinned runtime
+catalog choice. It overrides only the selected instance type and one
+marker-bounded user-data environment block. See [Provisioning](provisioning.md)
+for that fail-closed contract.
 
-In the Admin UI, create an `aws-ec2` provider with provisioning disabled. Its
-instance Name-tag pattern defaults to `*.prefer.*`; set an explicit pattern to
-narrow that convention, or `*` to intentionally search every named instance
+For existing instances, create an `aws-ec2` provider with provisioning disabled.
+Its instance Name-tag pattern defaults to `*.prefer.*`; set an explicit pattern
+to narrow that convention, or `*` to intentionally search every named instance
 visible to the task role. When creating a target, **Find EC2 instances** lists
 matching pending, running, stopping, and stopped instances that are not already
 assigned to a NeurOn target, then fills the chosen instance ID. The admin API
@@ -199,29 +202,20 @@ Price List requests use its `us-east-1` API endpoint while filtering products
 for the workload region. Neither pricing action is required when all EC2
 targets have manual hourly-cost overrides.
 
-### Future IAM for Provisioning
+### IAM For Explicit Provisioning
 
-When EC2 provisioning is implemented, the policy will need to cover instance
-creation and cleanup in addition to lifecycle. Keep it separate from the
-minimal start/stop role and constrain it with tags such as
-`ManagedBy=NeurOn`, allowed AMI ARNs, subnet/security group ARNs, and the
-specific instance profile NeurOn may pass.
+Keep creation permission separate from the minimal start/stop role. NeurOn
+needs `ec2:DescribeLaunchTemplateVersions` and `ec2:RunInstances`; the selected
+template may require tightly scoped `iam:PassRole` for its existing instance
+profile. Constrain `RunInstances` with the allowed Launch Template, AMI,
+instance type, subnet/security groups, and target Name-tag policy supported by
+the deployment. NeurOn does not call `TerminateInstances`, create tags outside
+the RunInstances request, or create/edit the template and its dependencies.
 
-Likely additional actions:
-
-- `ec2:RunInstances`
-- `ec2:CreateTags`
-- `ec2:TerminateInstances`
-- `ec2:DescribeImages`
-- `ec2:DescribeInstanceTypes`
-- `ec2:DescribeSubnets`
-- `ec2:DescribeSecurityGroups`
-- `ec2:DescribeVpcs`
-- `iam:PassRole` for the runtime instance profile only
-
-Provisioning config should require a region-appropriate AMI ID or SSM parameter
-reference, instance type, subnet, security groups, IAM instance profile, storage
-shape, and bootstrap/user-data owned by the runtime project.
+The provider configuration selects exactly one Launch Template ID or name,
+optional version, optional custom managed user-data markers, and optional
+nonsecret deployment-environment defaults. Secrets belong in the instance role
+or deployment secret mechanism, not this provider record.
 
 ## AWS ECS/ASG
 
@@ -266,6 +260,10 @@ The task role needs, at a high level:
 The RunPod provider uses the RunPod REST API. It can start and stop an existing
 Pod by ID, read Pod status, and provision a Pod from a configured create
 request body when resource creation is enabled on the provider.
+The preferred new-target path resolves a pinned PreFer catalog first, then adds
+RunPod-owned cloud, disk, volume, and interruptibility choices. The draft stores
+the exact image, GPU type/count, environment, runtime paths, and models; only a
+separate explicit provision action calls `POST /v1/pods`.
 Health checks are optional for RunPod targets. NeurOn can use RunPod Pod status
 as the capacity signal. Discovery uses `apiUrl` when configured, or
 infers RunPod's proxy URL from Pod ID and runtime port.

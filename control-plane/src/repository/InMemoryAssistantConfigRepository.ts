@@ -1,5 +1,6 @@
 import type { AssistantConfigRepository } from "../domain/interfaces.js";
 import type { AssistantConfig } from "../domain/types.js";
+import { parseAssistantAudioConfig } from "../services/assistantAudioConfig.js";
 import { cloneAssistantConfig } from "./assistantConfigUtils.js";
 
 export class InMemoryAssistantConfigRepository implements AssistantConfigRepository {
@@ -10,7 +11,7 @@ export class InMemoryAssistantConfigRepository implements AssistantConfigReposit
   }
 
   async save(input: Omit<AssistantConfig, "id" | "updatedAt"> & { updatedAt?: Date }): Promise<AssistantConfig> {
-    this.config = { ...input, id: "default", updatedAt: input.updatedAt ?? new Date() };
+    this.config = { ...input, audio: parseAssistantAudioConfig(input.audio), id: "default", updatedAt: input.updatedAt ?? new Date() };
     return cloneAssistantConfig(this.config);
   }
 

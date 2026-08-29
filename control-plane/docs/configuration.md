@@ -38,7 +38,11 @@ CAPACITY_PROVIDER_RUNPOD_MAIN_PROVISIONING_ENABLED=false
 
 Provider-specific env-expanded fields include:
 
-- AWS EC2: `CAPACITY_PROVIDER_<KEY>_AWS_EC2_INSTANCE_NAME_PATTERN`
+- AWS EC2: `CAPACITY_PROVIDER_<KEY>_AWS_EC2_INSTANCE_NAME_PATTERN`,
+  `..._LAUNCH_TEMPLATE_ID` or `..._LAUNCH_TEMPLATE_NAME`,
+  `..._LAUNCH_TEMPLATE_VERSION`, paired `..._USER_DATA_BEGIN_MARKER` /
+  `..._USER_DATA_END_MARKER`, and nonsecret deployment values declared with
+  `..._DEPLOYMENT_ENV_KEYS` plus `..._DEPLOYMENT_ENV_<KEY>`
 - RunPod: `CAPACITY_PROVIDER_<KEY>_RUNPOD_API_KEY_ENV`,
   `CAPACITY_PROVIDER_<KEY>_RUNPOD_API_BASE_URL`
 - NeurOn: `CAPACITY_PROVIDER_<KEY>_NEURON_API_BASE_URL`,
@@ -66,7 +70,7 @@ terms. The built-in profile is:
 ```json
 {
   "id": "prefer",
-  "name": "PreFer",
+  "name": "PreFer llama.cpp",
   "type": "docker",
   "image": "ghcr.io/cvalusek/prefer:latest",
   "volumes": {
@@ -80,9 +84,15 @@ For Docker-style runtimes, `port` defaults to `8080`, `health` defaults to
 Providers translate those generic profile fields into their own provisioning
 requests. For example, RunPod derives its Pod image from the profile `image`
 rather than requiring RunPod-specific profile config.
-The PreFer profile also declares that `/models` is backed by the
+The PreFer llama.cpp profile also declares that `/models` is backed by the
 `prefer-model-cache` volume. Docker provisioning currently creates containers
 with all GPUs available by default.
+
+The second built-in runtime, `prefer-audio`, describes PreFer audio.cpp on port
+8080 with `/models` and `/voices` volumes. Both built-ins include a plugin-owned
+release-catalog descriptor. Existing targets may ignore it. **Provision new**
+requires a full 40-character source commit, then stores the exact resolved
+catalog plan with the target before calling RunPod or AWS.
 
 Runtime profiles can declare variants. A variant is a named flavor of the base
 profile that layers a small set of overrides onto it. Variants use the same
@@ -526,6 +536,14 @@ system guidance. Reservation duration is the maximum cold-start wait. The
 response timeout applies only after the target is healthy. Runtime credentials
 continue to use the selected target's existing secret reference.
 
+The same singleton record can independently select deployments for dictation,
+spoken replies, and real-time PersonaPlex voice. These are application settings,
+not environment variables and not target/model metadata. Reference-voice WAV
+bytes are private durable data; GET responses expose only safe file metadata and
+decoded size. PostgreSQL schema v9 adds nullable
+`assistant_config.audio_config`; SQLite adds the equivalent column
+idempotently.
+
 Asking the assistant creates or refreshes a synthetic system reservation for
 that deployment and waits for the normal reconciler and health path. The model
 may fill a browser draft immediately, but save, start-reservation, rediscovery,
@@ -574,6 +592,22 @@ CAPACITY_PROVIDER_AWS_MAIN_AWS_EC2_INSTANCE_NAME_PATTERN=*.prefer.*
 When omitted, EC2 discovery uses `*.prefer.*`. Set an explicit provider pattern
 to narrow the naming convention further, or `*` to intentionally list every
 named instance visible to the task role.
+
+For explicit EC2 provisioning, enable the provider and select one existing
+Launch Template. Provider-level environment values must be nonsecret:
+
+```env
+CAPACITY_PROVIDER_AWS_MAIN_PROVISIONING_ENABLED=true
+CAPACITY_PROVIDER_AWS_MAIN_AWS_EC2_LAUNCH_TEMPLATE_NAME=prefer-runtime
+CAPACITY_PROVIDER_AWS_MAIN_AWS_EC2_LAUNCH_TEMPLATE_VERSION=$Default
+CAPACITY_PROVIDER_AWS_MAIN_AWS_EC2_DEPLOYMENT_ENV_KEYS=PREFER_CHANNEL
+CAPACITY_PROVIDER_AWS_MAIN_AWS_EC2_DEPLOYMENT_ENV_PREFER_CHANNEL=stable
+```
+
+The template user data must contain the default marker pair documented in
+[Provisioning](provisioning.md), or both custom marker variables must be set.
+NeurOn rejects a provisioning-enabled EC2 provider without a template and
+rejects secret-bearing deployment-environment keys.
 
 Use `aws-ecs` or `aws-ecs-asg` when NeurOn should control an ECS service backed
 by an Auto Scaling Group:
@@ -635,10 +669,11 @@ supplied as JSON:
 CAPACITY_TARGET_RUNPOD_RUNPOD_CREATE_JSON={"name":"prefer","imageName":"ghcr.io/cvalusek/prefer:latest"}
 ```
 
-Targets created through the provider UI use runtime profiles instead. The
-provisioning job is persisted so creation can be resumed or inspected after
-restart. Providers do not create resources during ordinary target start unless
-that behavior is added later as an explicit policy.
+Targets created through the preferred UI path use a pinned release catalog
+instead of the moving profile image. The runtime, full source commit, hardware,
+configuration, commit-tagged image, environment, and models are resolved into a
+persisted target and draft job before the separate provision action. Providers
+do not create resources during ordinary target start.
 
 When the global `LITELLM_API_BASE_URL` and `LITELLM_API_KEY` are configured,
 each successful runtime model discovery also synchronizes the target credential

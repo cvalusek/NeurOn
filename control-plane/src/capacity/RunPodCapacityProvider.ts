@@ -13,8 +13,7 @@ export class RunPodCapacityProvider implements CapacityProvider {
       body: JSON.stringify(runpod.create)
     });
     if (!pod.id) throw new Error("RunPod create Pod response did not include an id");
-    runpod.podId = pod.id;
-    return { runpod: { ...runpod } };
+    return { runpod: { ...runpod, podId: pod.id } };
   }
 
   async ensureTargetOn(target: CapacityTarget): Promise<void> {
@@ -34,11 +33,12 @@ export class RunPodCapacityProvider implements CapacityProvider {
     if (!runpod.podId) return { observed: "stopped", message: "RunPod Pod is not provisioned" };
     const pod = await this.request<RunPodPod>(runpod, `/pods/${runpod.podId}`, { method: "GET" });
     const desiredStatus = pod.desiredStatus;
-    if (desiredStatus === "RUNNING") return { observed: "healthy", message: "RunPod Pod desired status is RUNNING", details: pod as Record<string, unknown> };
+    const runtime = runPodRuntime(target, pod.id ?? runpod.podId);
+    if (desiredStatus === "RUNNING") return { observed: "healthy", message: "RunPod Pod desired status is RUNNING", details: pod as Record<string, unknown>, runtime };
     if (desiredStatus === "EXITED" || desiredStatus === "TERMINATED") {
       return { observed: "stopped", message: `RunPod Pod desired status is ${desiredStatus}`, details: pod as Record<string, unknown> };
     }
-    return { observed: "starting", message: `RunPod Pod desired status is ${desiredStatus ?? "unknown"}`, details: pod as Record<string, unknown> };
+    return { observed: "starting", message: `RunPod Pod desired status is ${desiredStatus ?? "unknown"}`, details: pod as Record<string, unknown>, runtime };
   }
 
   async getTargetCostEstimate(target: CapacityTarget): Promise<TargetCostEstimateConfig | undefined> {
@@ -63,8 +63,7 @@ export class RunPodCapacityProvider implements CapacityProvider {
       }
     });
     if (!response.ok) {
-      const body = await response.text().catch(() => "");
-      throw new Error(`RunPod API returned ${response.status}${body ? `: ${body}` : ""}`);
+      throw new Error(`RunPod API returned ${response.status}`);
     }
     const text = await response.text();
     return (text ? JSON.parse(text) : undefined) as T;
@@ -100,6 +99,21 @@ function apiKey(runpod: RunPodTargetConfig): string {
 
 function hourlyCostFromPod(pod: RunPodPod): number | undefined {
   return firstPositiveNumber(pod.adjustedCostPerHr, pod.costPerHr, pod.machine?.costPerHr);
+}
+
+function runPodRuntime(target: CapacityTarget, podId: string): CapacityProviderStatus["runtime"] {
+  const port = target.runpod?.runtimePort ?? target.runtimeDeployment?.port ?? 8080;
+  if (!/^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/iu.test(podId) || `${podId}-${port}`.length > 63) return undefined;
+  const origin = `https://${podId}-${port}.proxy.runpod.net`;
+  return {
+    apiUrl: `${origin}${normalizedPath(target.runtimeDeployment?.apiPath, "/v1")}`,
+    healthUrl: `${origin}${normalizedPath(target.runtimeDeployment?.healthPath, "/health")}`
+  };
+}
+
+function normalizedPath(value: string | undefined, fallback: string): string {
+  const selected = value?.trim() || fallback;
+  return selected.startsWith("/") ? selected : `/${selected}`;
 }
 
 function firstPositiveNumber(...values: Array<number | string | undefined>): number | undefined {

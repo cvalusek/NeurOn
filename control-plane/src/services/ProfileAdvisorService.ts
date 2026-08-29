@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { withProviderRuntimeEndpoints } from "../capacity/providerRuntime.js";
 import type { AssistantConfigRepository, CapacityProvider, TargetStatusRepository } from "../domain/interfaces.js";
-import type { AssistantConfig, AuthenticatedUser, CapacityTarget, ModelDefinition, ReservationProfileSelection } from "../domain/types.js";
+import type { AssistantAudioConfig, AssistantConfig, AuthenticatedUser, CapacityTarget, ModelDefinition, ReservationProfileSelection } from "../domain/types.js";
 import type { ModelCatalog } from "./ModelCatalog.js";
 import type { ModelDeploymentSelectionView, ModelSelectionRequirements } from "./ModelSelectionService.js";
 import type { ReservationService } from "./ReservationService.js";
@@ -207,7 +207,7 @@ export class ProfileAdvisorService {
     try { return Boolean(await this.configuration()); } catch { return false; }
   }
 
-  async saveConfiguration(input?: { targetId: string; modelId: string; reservationMinutes: number; keepaliveMinutes: number; requestTimeoutSeconds: number; additionalInstructions?: string }): Promise<AssistantConfig | undefined> {
+  async saveConfiguration(input?: { targetId: string; modelId: string; reservationMinutes: number; keepaliveMinutes: number; requestTimeoutSeconds: number; additionalInstructions?: string; audio?: AssistantAudioConfig }): Promise<AssistantConfig | undefined> {
     if (!input) {
       await this.options.assistantConfig.clear();
       return undefined;
@@ -217,7 +217,9 @@ export class ProfileAdvisorService {
     if (!target || !model) throw new Error("Assistant target/model deployment not found");
     const additionalInstructions = input.additionalInstructions?.trim() || undefined;
     if (additionalInstructions && additionalInstructions.length > 8_000) throw new Error("Assistant system guidance must be 8,000 characters or fewer");
-    return this.options.assistantConfig.save({ ...input, modelId: model.id, additionalInstructions });
+    const existing = await this.options.assistantConfig.get();
+    const audio = Object.prototype.hasOwnProperty.call(input, "audio") ? input.audio : existing?.audio;
+    return this.options.assistantConfig.save({ ...input, modelId: model.id, additionalInstructions, audio });
   }
 
   async startInterpret(request: string, context: ProfileAssistantContext, user: AuthenticatedUser, conversation: ProfileAssistantConversationInput = {}): Promise<ProfileAssistantRequestStatus> {

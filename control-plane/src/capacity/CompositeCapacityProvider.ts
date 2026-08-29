@@ -86,6 +86,12 @@ export function effectiveTarget(target: CapacityTarget, provider: CapacityProvid
       ...(target.runpod ?? {})
     };
   }
+  if (provider.type === "aws-ec2" && provider.config?.awsEc2) {
+    next.aws = {
+      ...(target.aws ?? {}),
+      provisioning: { ...provider.config.awsEc2 }
+    };
+  }
   if (provider.type === "neuron" && provider.config?.neuron) {
     next.neuronProvider = provider.config.neuron;
   }

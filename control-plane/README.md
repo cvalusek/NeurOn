@@ -94,8 +94,10 @@ The examples directory includes:
 For Docker targets, NeurOn starts and stops the configured container. If an
 image is configured and the container is missing, an admin can explicitly
 provision it by pulling the image and creating the named container when the
-provider allows resource creation. The default PreFer profile mounts
-the `prefer-model-cache` volume at `/models` for local model files.
+provider allows resource creation. The built-in PreFer llama.cpp profile mounts
+the `prefer-model-cache` volume at `/models`. A second PreFer audio.cpp runtime
+profile covers speech recognition, speech generation, voice cloning, and
+real-time PersonaPlex deployments.
 Use the admin Discover action to temporarily start the runtime, read
 `/v1/models`, add those runtime models as selectable choices, and stop the
 target again.
@@ -169,11 +171,15 @@ filters by context, cost, required technical capabilities, and dedicated versus
 multi-model hosting. Users can optionally open the Good/Fast/Cheap triangle
 wizard to rank eligible choices by Intelligence, Speed, and Cost. Scored
 strengths refine Intelligence; quality-retention estimates remain display-only.
-Hosting mode is explicit: unclassified targets remain visible and are not
-guessed from their model count. The collapsible Assistant keeps bounded
+Hosting mode is derived from the target's current model catalog: one model is a
+dedicated host, multiple models are a multi-model host, and undiscovered targets
+remain unclassified. The collapsible Assistant keeps bounded
 conversation history across pages, sends screen-state deltas behind a stable
 cache-friendly operating prompt, and exposes privacy-safe diagnostics to admins.
-No PreFer manifest is required.
+Model selection never depends on a PreFer manifest. Explicit provider
+provisioning can instead load a pinned PreFer deployment inventory to resolve
+engine, hardware, runtime configuration, models, environment, and a
+commit-tagged image before creating a draft.
 See [Guided Model Selection](docs/model-selection.md).
 
 When a target becomes healthy, NeurOn polls the target's OpenAI-compatible
@@ -280,6 +286,13 @@ Scope start/stop to the specific instance ARNs NeurOn may control. EC2 targets
 use `aws.instanceId` and do not use an Auto Scaling Group. Instance discovery
 does not add another permission beyond `ec2:DescribeInstances`. The pricing
 permissions are optional when targets use manual hourly-cost overrides.
+
+An AWS EC2 provider that is explicitly allowed to provision also needs
+`ec2:DescribeLaunchTemplateVersions`, `ec2:RunInstances`, and the permissions
+already encoded by the chosen Launch Template (including narrowly scoped
+`iam:PassRole` when its instance profile requires it). NeurOn does not create or
+edit that template. See [Provisioning](docs/provisioning.md) for the managed
+user-data marker contract.
 
 For AWS ECS/ASG targets, the task role needs:
 

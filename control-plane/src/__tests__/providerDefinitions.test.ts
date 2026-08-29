@@ -31,6 +31,13 @@ const managedEnv = [
   "CAPACITY_PROVIDER_AWS_MAIN_DISPLAY_NAME",
   "CAPACITY_PROVIDER_AWS_MAIN_TYPE",
   "CAPACITY_PROVIDER_AWS_MAIN_AWS_EC2_INSTANCE_NAME_PATTERN",
+  "CAPACITY_PROVIDER_AWS_MAIN_PROVISIONING_ENABLED",
+  "CAPACITY_PROVIDER_AWS_MAIN_AWS_EC2_LAUNCH_TEMPLATE_NAME",
+  "CAPACITY_PROVIDER_AWS_MAIN_AWS_EC2_LAUNCH_TEMPLATE_VERSION",
+  "CAPACITY_PROVIDER_AWS_MAIN_AWS_EC2_USER_DATA_BEGIN_MARKER",
+  "CAPACITY_PROVIDER_AWS_MAIN_AWS_EC2_USER_DATA_END_MARKER",
+  "CAPACITY_PROVIDER_AWS_MAIN_AWS_EC2_DEPLOYMENT_ENV_KEYS",
+  "CAPACITY_PROVIDER_AWS_MAIN_AWS_EC2_DEPLOYMENT_ENV_PREFER_CHANNEL",
   "RUNTIME_PROFILES_JSON",
   "RECONCILER_INTERVAL_SECONDS",
   "RESERVATION_STATUS_POLL_SECONDS",
@@ -465,20 +472,42 @@ describe("provider definitions", () => {
     });
   });
 
-  it("loads the AWS EC2 provider instance discovery pattern from expanded environment config", async () => {
+  it("loads AWS EC2 discovery and Launch Template provisioning from expanded environment config", async () => {
     process.env.CAPACITY_PROVIDER_KEYS = "AWS_MAIN";
     process.env.CAPACITY_PROVIDER_AWS_MAIN_ID = "aws-main";
     process.env.CAPACITY_PROVIDER_AWS_MAIN_DISPLAY_NAME = "AWS Main";
     process.env.CAPACITY_PROVIDER_AWS_MAIN_TYPE = "aws-ec2";
     process.env.CAPACITY_PROVIDER_AWS_MAIN_AWS_EC2_INSTANCE_NAME_PATTERN = "*.prefer.*";
+    process.env.CAPACITY_PROVIDER_AWS_MAIN_PROVISIONING_ENABLED = "true";
+    process.env.CAPACITY_PROVIDER_AWS_MAIN_AWS_EC2_LAUNCH_TEMPLATE_NAME = "prefer-runtime";
+    process.env.CAPACITY_PROVIDER_AWS_MAIN_AWS_EC2_LAUNCH_TEMPLATE_VERSION = "7";
+    process.env.CAPACITY_PROVIDER_AWS_MAIN_AWS_EC2_USER_DATA_BEGIN_MARKER = "# BEGIN NEURON";
+    process.env.CAPACITY_PROVIDER_AWS_MAIN_AWS_EC2_USER_DATA_END_MARKER = "# END NEURON";
+    process.env.CAPACITY_PROVIDER_AWS_MAIN_AWS_EC2_DEPLOYMENT_ENV_KEYS = "PREFER_CHANNEL";
+    process.env.CAPACITY_PROVIDER_AWS_MAIN_AWS_EC2_DEPLOYMENT_ENV_PREFER_CHANNEL = "stable";
 
     const { config } = await loadConfig();
 
     expect(config.capacityProviders).toMatchObject([{
       id: "aws-main",
       type: "aws-ec2",
-      config: { awsEc2: { instanceNamePattern: "*.prefer.*" } }
+      provisioning: { enabled: true },
+      config: { awsEc2: {
+        instanceNamePattern: "*.prefer.*",
+        launchTemplateName: "prefer-runtime",
+        launchTemplateVersion: "7",
+        userDataBeginMarker: "# BEGIN NEURON",
+        userDataEndMarker: "# END NEURON",
+        deploymentEnvironment: { PREFER_CHANNEL: "stable" }
+      } }
     }]);
+  });
+
+  it("fails closed when EC2 provisioning has no template or stores a secret-bearing deployment key", async () => {
+    process.env.CAPACITY_PROVIDERS_JSON = JSON.stringify([{ id: "aws-main", displayName: "AWS Main", type: "aws-ec2", provisioning: { enabled: true }, config: { awsEc2: {} } }]);
+    await expect(loadConfig()).rejects.toThrow(/launch template/);
+    process.env.CAPACITY_PROVIDERS_JSON = JSON.stringify([{ id: "aws-main", displayName: "AWS Main", type: "aws-ec2", provisioning: { enabled: true }, config: { awsEc2: { launchTemplateId: "lt-123", deploymentEnvironment: { API_TOKEN: "do-not-store" } } } }]);
+    await expect(loadConfig()).rejects.toThrow(/Secret-bearing/);
   });
 
   it("resolves AWS EC2 target validation through a provider ID", async () => {
@@ -556,10 +585,19 @@ describe("provider definitions", () => {
 
     expect(config.runtimeProfiles).toContainEqual({
       id: "prefer",
-      name: "PreFer",
+      name: "PreFer llama.cpp",
       type: "docker",
       image: "ghcr.io/cvalusek/prefer:latest",
       volumes: { "/models": "prefer-model-cache" },
+      description: "OpenAI-compatible text and vision model hosting from a pinned PreFer release catalog.",
+      catalog: {
+        pluginId: "prefer",
+        engine: "llama.cpp",
+        repository: "cvalusek/PreFer",
+        inventoryPath: "docker/llama-cpp/deployment-inventory.generated.json",
+        schemaVersion: "prefer.deployment-inventory.v1",
+        imageRepository: "ghcr.io/cvalusek/prefer"
+      },
       variants: [
         {
           id: "standard",
@@ -591,6 +629,26 @@ describe("provider definitions", () => {
           env: { LLAMA_ARG_MODELS_PRESET: "/presets/smol.ini" }
         }
       ]
+    });
+    expect(config.runtimeProfiles).toContainEqual({
+      id: "prefer-audio",
+      name: "PreFer audio.cpp",
+      description: "Speech recognition, speech generation, and real-time voice runtimes from a pinned PreFer release catalog.",
+      type: "docker",
+      image: "ghcr.io/cvalusek/prefer:audio-cuda12",
+      port: 8080,
+      health: "/health",
+      api: "/v1",
+      discovery: true,
+      volumes: { "/models": "prefer-audio-model-cache", "/voices": "prefer-audio-voices" },
+      catalog: {
+        pluginId: "prefer",
+        engine: "audio.cpp",
+        repository: "cvalusek/PreFer",
+        inventoryPath: "docker/audio-cpp/deployment-inventory.generated.json",
+        schemaVersion: "prefer.audio-deployment-inventory.v1",
+        imageRepository: "ghcr.io/cvalusek/prefer"
+      }
     });
     expect(config.runtimeProfiles).toContainEqual({
       id: "prefer-nightly",

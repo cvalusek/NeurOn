@@ -44,6 +44,25 @@ describe("RunPodCapacityProvider", () => {
       { url: "https://rest.runpod.io/v1/pods/pod-123/stop", method: "POST" }
     ]);
     expect(status.observed).toBe("healthy");
+    expect(status.runtime).toEqual({
+      apiUrl: "https://pod-123-8080.proxy.runpod.net/v1",
+      healthUrl: "https://pod-123-8080.proxy.runpod.net/health"
+    });
+  });
+
+  it("does not construct a runtime host from a malformed provider Pod id", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({
+        ok: true,
+        text: async () => JSON.stringify({ id: "pod.example.invalid", desiredStatus: "RUNNING" })
+      }))
+    );
+
+    const status = await new RunPodCapacityProvider().getTargetStatus(target);
+
+    expect(status.observed).toBe("healthy");
+    expect(status.runtime).toBeUndefined();
   });
 
   it("creates a Pod when provisioning a target", async () => {
@@ -65,9 +84,10 @@ describe("RunPodCapacityProvider", () => {
       }
     };
 
-    await new RunPodCapacityProvider().provisionTarget(provisionTarget);
+    const update = await new RunPodCapacityProvider().provisionTarget(provisionTarget);
 
-    expect(provisionTarget.runpod?.podId).toBe("created-pod");
+    expect(update?.runpod?.podId).toBe("created-pod");
+    expect(provisionTarget.runpod?.podId).toBeUndefined();
   });
 
   it("reads adjusted hourly cost from the RunPod Pod detail response", async () => {

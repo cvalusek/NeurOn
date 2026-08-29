@@ -63,12 +63,12 @@ export class ReservationService {
   async getOwned(id: string, user: AuthenticatedUser): Promise<Reservation> {
     const reservation = await this.repository.get(id);
     if (!reservation) throw new Error("Reservation not found");
-    if (reservation.userId !== user.id && !(this.identities ? this.identities.hasPermission(user, "reservations.manage_any") : user.isAdmin)) throw new Error("Reservation not found");
+    if (!reservationOwnedBy(reservation, user) && !(this.identities ? this.identities.hasPermission(user, "reservations.manage_any") : user.isAdmin)) throw new Error("Reservation not found");
     return reservation;
   }
 
   async listActiveOwned(user: AuthenticatedUser, now = new Date()): Promise<Reservation[]> {
-    return (await this.repository.listActive(now)).filter((reservation) => reservation.userId === user.id);
+    return (await this.repository.listActive(now)).filter((reservation) => reservationOwnedBy(reservation, user));
   }
 
   async markDone(id: string, user: AuthenticatedUser): Promise<Reservation> {
@@ -180,6 +180,16 @@ export class ReservationService {
       this.activeDemandMutations -= 1;
     };
   }
+}
+
+function reservationOwnedBy(reservation: Reservation, user: AuthenticatedUser): boolean {
+  if (reservation.userId === user.id) return true;
+  return Boolean(
+    reservation.synthetic
+    && user.id.startsWith("system:")
+    && user.permissions.includes("*")
+    && reservation.username === user.username
+  );
 }
 
 function inputWithResolvedDefaults(profile: ReservationProfile | undefined, input: { modelIds?: string[]; targetIds?: string[]; durationMinutes?: number; keepaliveMinutes?: number; synthetic?: boolean }) {

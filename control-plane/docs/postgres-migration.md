@@ -10,7 +10,7 @@ NeurOn supports one control-plane database owner at a time. Never run SQLite
 and PostgreSQL application writers concurrently. HassleOff owns a separate
 SQLite database; this procedure does not read, stop, migrate, or restart it.
 
-PostgreSQL schema version 8 is managed by the transactional
+PostgreSQL schema version 9 is managed by the transactional
 `neuron_schema_migrations` ledger. The application uses one bounded shared pool
 for all repositories. The explicit transfer command records a completed source
 identity in `neuron_data_migrations`; an exact rerun verifies and exits as a
@@ -30,14 +30,17 @@ without changing owned record IDs; every backfilled user receives Member and
 is never implicitly promoted to Owner. Version 7 adds an optional team foreign
 key to reservation profiles. Version 8 adds the explicit `personal`, `everyone`,
 or `team` scope, backfills assigned profiles as team-shared, and leaves every
-other existing profile personal.
+other existing profile personal. Version 9 adds independent dictation, spoken
+reply, and real-time voice deployment bindings plus private reference-voice
+configuration to the singleton Assistant record. Read APIs redact the encoded
+WAV bytes.
 
 The explicit SQLite transfer contract is source schema version 4. It includes
 all identity entities and ownership links when present, accepts legacy
 pre-identity databases for safe backfill, validates target-selection JSON, and
 includes every transferred value in privacy-safe semantic fingerprints. The
 startup validator permits only columns owned by known migrations, so an older
-supported PostgreSQL deployment upgrades through version 8 automatically
+supported PostgreSQL deployment upgrades through version 9 automatically
 without operator SQL.
 
 ## Durable scope
@@ -51,7 +54,8 @@ The command transfers:
    and target model-discovery records;
 4. model capability records, exact target-model deployment records, and user
    model favorites;
-5. singleton assistant configuration;
+5. singleton assistant configuration, including independent audio bindings and
+   private reference-voice configuration when present;
 6. target activations and their reservation cost-allocation links; and
 7. users, external identities, local credential hashes, global/team roles and
    assignments, teams and hierarchy closure, memberships, invitations,

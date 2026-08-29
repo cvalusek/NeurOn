@@ -197,6 +197,21 @@ polls so an ALB connection does not need to remain open for the whole cold
 start.
 Never commit runtime credentials or private/licensed model facts.
 
+Dictation, spoken replies, and PersonaPlex live voice use separate bindings in
+the same durable Assistant record and separate visible synthetic reservations.
+Reference WAV bytes are private state: back them up with the control-plane
+database, never print them, and expect admin GET responses to return only safe
+metadata. Real-time browser sessions are bounded to ten minutes and are aborted
+when the WebSocket closes; they are not resumed across NeurOn restarts.
+
+Catalog-backed provisioning is an explicit two-step operation. Creating a draft
+may download a public pinned release inventory but does not call RunPod or AWS.
+Review the resolved target before selecting **Provision target**. EC2 creation
+depends on the provider's existing Launch Template and exact managed user-data
+marker block; test template boot logic independently before enabling creation.
+Provisioning jobs record returned resources but do not currently provide EC2
+termination cleanup.
+
 ## Control-Plane Shutdown
 
 On `SIGINT` or `SIGTERM`, NeurOn stops and unreferences the reconciler and

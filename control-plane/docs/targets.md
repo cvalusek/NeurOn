@@ -55,13 +55,14 @@ global in this release. See [Identity and Access](identity-access.md).
 
 ## Runtime Profiles
 
-Runtime profiles describe provisionable runtime defaults without provider
-specific payloads. The built-in PreFer profile is:
+Runtime profiles are plugin-owned descriptions of runnable software. They keep
+portable runtime defaults and release-catalog behavior outside provider
+payloads. NeurOn includes two PreFer runtimes:
 
 ```json
 {
   "id": "prefer",
-  "name": "PreFer",
+  "name": "PreFer llama.cpp",
   "type": "docker",
   "image": "ghcr.io/cvalusek/prefer:latest",
   "volumes": {
@@ -70,6 +71,13 @@ specific payloads. The built-in PreFer profile is:
 }
 ```
 
+`prefer-audio` describes PreFer audio.cpp with model and voice volumes. Both
+profiles define a release inventory that turns a full 40-character PreFer
+source commit into a finite, provider-compatible deployment catalog. NeurOn
+validates the catalog schema and fingerprint, then stores the exact release,
+deployment, image, environment, hardware, and model set on the target. A future
+catalog update never silently changes an existing target.
+
 For Docker-style profiles, `port`, `health`, `api`, and `discovery` have
 defaults: `8080`, `/health`, `/v1`, and `true`. The `volumes` map is keyed by
 runtime container path, with the backing volume name as the value. Provider
@@ -77,16 +85,30 @@ adapters translate that portable shape into provider-specific mount syntax.
 Docker provisioning currently creates containers with all GPUs available by
 default.
 
-The target creation UI keeps the common PreFer case small: choose the runtime
-profile and enter a model volume name. The selected profile supplies the
-container path.
+The target creation UI begins with the operator's intent:
+
+- **Connect existing** records an already-running endpoint and relies on
+  discovery for facts the runtime can report.
+- **Provision new** selects a provider, runtime, full source commit,
+  provider-compatible hardware/instance, and one catalog deployment. Saving
+  creates an immutable draft; a second, explicitly confirmed action creates
+  billable provider capacity.
+
+RunPod receives the catalog image, GPU/card, storage, port, and environment
+plan. AWS receives the catalog instance type and a provider-owned Launch
+Template; NeurOn changes only the marked deployment environment block in that
+template's user data. See [Provisioning](provisioning.md) and
+[PreFer integration](prefer.md).
+
+![Target setup beginning with existing capacity or a pinned provisioned release](images/target-provisioning.png)
 
 Runtime profiles can also define variants. A variant is a named flavor of the
 base profile. The target creation UI exposes variants when the selected profile
 declares them and applies the variant's overrides before creating provider
 specific target config.
 
-Variants are intentionally smaller than arbitrary target customization. They
-are for profile-owned choices such as a test-friendly PreFer preset. Per-target
-operator settings, provider-specific creation options, and secret handling still
-belong in explicit target or provider configuration.
+Variants are intentionally smaller than the release catalog. They preserve
+deliberate compatibility presets for connected/manual deployments; they are not
+a production inventory or a substitute for a pinned catalog selection.
+Per-target operator settings, provider-specific creation options, and secret
+handling still belong in explicit target or provider configuration.

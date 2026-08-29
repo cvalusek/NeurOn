@@ -1,186 +1,139 @@
 ---
 type: Reference
 title: PreFer
-description: How NeurOn configures, provisions, and reserves PreFer runtimes.
-tags: [prefer, docker, runtime-profiles, presets, plugins]
-timestamp: 2026-06-30T00:00:00Z
+description: How NeurOn connects and provisions PreFer llama.cpp and audio.cpp runtimes.
+tags: [prefer, runtimes, provisioning, audio, plugins]
+timestamp: 2026-08-29T00:00:00Z
 ---
 
 # PreFer
 
-PreFer is an external llama.cpp runtime project. NeurOn treats it as a
-capacity target and does not own its model-download scripts, preset tuning, or
-container internals. Keep PreFer-specific inference behavior in the PreFer
-project; keep NeurOn focused on reservations, lifecycle control, discovery, and
-operator-facing configuration.
+PreFer is an external runtime project. NeurOn owns reservation intent,
+lifecycle control, discovery, and operator configuration; PreFer owns images,
+model artifacts, engine configuration, and runtime tuning. NeurOn must not copy
+PreFer presets or download logic into this repository.
 
-The current built-in NeurOn runtime profile points at:
+NeurOn ships two built-in runtime descriptors:
 
-```json
-{
-  "id": "prefer",
-  "name": "PreFer",
-  "type": "docker",
-  "image": "ghcr.io/cvalusek/prefer:latest",
-  "volumes": {
-    "/models": "prefer-model-cache"
-  }
-}
+- **PreFer llama.cpp** for OpenAI-compatible text and vision models.
+- **PreFer audio.cpp** for transcription, speech generation, voice authoring,
+  music generation, and full-duplex PersonaPlex sessions.
+
+The TypeScript schema still calls these `RuntimeProfile` records for backward
+compatibility. The UI calls them **Runtime** because they are not user
+reservation profiles. A future plugin can contribute the same generic
+descriptor and catalog contract without changing target persistence.
+
+## Connect Existing Or Provision New
+
+**Connect existing** records a provider resource that already exists. The
+operator supplies the resource identity and endpoint facts that cannot be
+discovered. Runtime model discovery fills the current model catalog from the
+activated host. No release inventory is required for this path.
+
+**Provision new** is a separate, explicit admin workflow:
+
+1. Choose a provisioning-enabled RunPod or AWS EC2 provider.
+2. Choose the PreFer runtime engine.
+3. Enter the full 40-character PreFer source commit.
+4. Load the provider-compatible hardware or instance choices.
+5. Choose one runtime configuration.
+6. Create a persisted target and provisioning draft, then explicitly confirm
+   provider creation.
+
+NeurOn retrieves the catalog from the exact source commit:
+
+```text
+https://raw.githubusercontent.com/cvalusek/PreFer/<full-commit>/docker/llama-cpp/deployment-inventory.generated.json
+https://raw.githubusercontent.com/cvalusek/PreFer/<full-commit>/docker/audio-cpp/deployment-inventory.generated.json
 ```
 
-That profile supplies Docker image and volume defaults for targets created in
-the admin UI. A target still owns its concrete container name, model metadata,
-traffic prefixes, runtime URLs, and any PreFer environment overrides.
+The accepted schemas are `prefer.deployment-inventory.v1` and
+`prefer.audio-deployment-inventory.v1`. The catalog is cached for 24 hours by
+runtime and full commit. `catalog_fingerprint` is stored as a compatibility and
+cache identity; it is not treated as a whole-file checksum.
 
-## Docker Target
+Before any provider call, NeurOn persists the resolved plugin ID, full source
+commit, schema and fingerprint, deployment ID, provider type, image, runtime
+port and paths, environment, hardware, and model list. Later catalog changes
+cannot silently change that target.
 
-Use the Docker provider when NeurOn should control a named PreFer container:
+The published image conventions are:
 
-```json
-[
-  {
-    "id": "prefer-local",
-    "displayName": "PreFer Local",
-    "provider": "docker",
-    "trafficModelPrefixes": ["prefer/"],
-    "docker": {
-      "containerName": "prefer",
-      "image": "ghcr.io/cvalusek/prefer:latest",
-      "ports": ["8080:8080"],
-      "volumes": ["prefer-model-cache:/models"]
-    },
-    "healthUrl": "http://host.docker.internal:8080/health",
-    "apiUrl": "http://host.docker.internal:8080/v1"
-  }
-]
+```text
+ghcr.io/cvalusek/prefer:llama-cuda-sha-<7-character-commit>
+ghcr.io/cvalusek/prefer:audio-cuda12-sha-<7-character-commit>
 ```
 
-When the container already exists, NeurOn only needs the container name and
-runtime URLs to start, stop, inspect, and discover models. Include `image`,
-`ports`, `volumes`, and environment only when admins should be able to
-provision the missing container from NeurOn.
+Moving `latest`, `llama-cuda`, and `audio-cuda12` tags are never used for a
+catalog-backed provisioning draft. The full source commit remains stored beside
+the derived release tag. NeurOn does not currently resolve the tag to an OCI
+index digest; operators that require content-addressed image policy should
+enforce or record that digest in their registry/deployment layer until the
+catalog publishes it directly.
 
-Docker provisioning is explicit. The reconciler does not create missing PreFer
-containers as part of ordinary reservation start.
+## Audio Catalog And Assistant
 
-## Presets
+The audio catalog provides deployment hardware, server configuration,
+environment, residency, capabilities, staged bytes, and exact model choices.
+NeurOn maps advertised tasks to target-model technical flags:
 
-PreFer normally selects a preset itself from the runtime environment, such as
-detected GPU VRAM. Most NeurOn targets should not set a preset at all; they
-should let PreFer own that decision.
+- `asr` → speech to text
+- `tts` → text to speech
+- `s2s` → real-time speech
+- `vdes` → voice design
+- `gen` → audio generation
 
-Named presets are still useful when an operator deliberately wants to pin a
-specific runtime shape. PreFer selects named presets through environment
-variables. Do not pass preset names as Docker command arguments from NeurOn
-config.
+These flags describe endpoint capability. Intelligence and quantization quality
+remain canonical model facts; measured performance remains specific to the
+target/model deployment.
 
-For automated browser tests and very small local smoke tests, pin the tiny
-`smol.ini` preset:
+At **Admin > Assistant**, an operator can select independent existing
+deployments for chat guidance, dictation, spoken replies, and live voice. The
+configuration is stored in the singleton `assistant_config` record, never on a
+target or model. Every operation creates or refreshes a visible per-role
+synthetic reservation and waits through the ordinary reconciler.
 
-```json
-{
-  "docker": {
-    "containerName": "prefer-smol",
-    "image": "ghcr.io/cvalusek/prefer:latest",
-    "ports": ["8080:8080"],
-    "volumes": ["prefer-model-cache:/models"],
-    "environment": {
-      "LLAMA_ARG_MODELS_PRESET": "/presets/smol.ini"
-    }
-  }
-}
-```
+Dictation records a short browser WAV and sends it to the selected
+`/v1/audio/transcriptions` model. Spoken replies call `/v1/audio/speech`. A
+reference voice is stored as a private standard-base64 RIFF/WAVE value with its
+exact transcript; decoded size is capped at 5 MiB and admin read APIs redact the
+bytes. Clean 24 kHz mono PCM16 WAV around 3–10 seconds is recommended.
 
-The repository includes `examples/capacity-targets.prefer-smol.json` as a
-browser-test fixture. It is useful for verifying NeurOn's UI and reservation
-flow quickly without requiring real GPU sizing or encoding production model
-policy into NeurOn.
+Live voice uses a separate PersonaPlex panel. The browser sends 24 kHz mono
+PCM16 to a bounded NeurOn WebSocket. NeurOn holds one upstream chunked POST,
+parses SSE independently of HTTP chunks, forwards audio deltas as binary
+WebSocket frames, and aborts upstream work when the browser closes. NeurOn does
+not expose runtime endpoints or credentials to browser JavaScript.
 
-`LLAMA_ARG_MODELS_MAX`, `PRESTAGE_MODELS`, `HF_TOKEN`, and other PreFer runtime
-settings should also be passed as Docker environment when a target needs them.
-Secret values should come from the deployment environment rather than being
-stored directly in committed target examples.
+The current built-in CustomVoice and PersonaPlex voice IDs are versioned in
+NeurOn because the pinned runtime's `/v1/audio/voices` response does not yet
+enumerate those packaged voices usefully. Update the lists only with a verified
+PreFer/audio.cpp contract.
 
-## Models And Discovery
+## Existing Docker Targets And Variants
 
-Model choices are owned by target configuration or runtime discovery:
+For a container that already exists, NeurOn needs only its name and reachable
+runtime URLs. Image, ports, volumes, and environment are present only when an
+admin should be able to provision a missing local container explicitly.
 
-- Use explicit `models` when operators want stable cards, aliases, and context
-  labels in the NeurOn UI.
-- Omit configured models when the target should discover models from PreFer's
-  OpenAI-compatible `/v1/models` endpoint.
-- Use `trafficModelPrefixes`, such as `prefer/`, when LiteLLM traffic logs use
-  prefixed model names.
+The llama.cpp runtime retains named variants for deliberate compatibility and
+small local tests. `standard` leaves runtime selection to PreFer;
+`deepseek-v4-flash`, `glm-5.2`, `glm-5.2-reap`, and `smol` set the corresponding
+`LLAMA_ARG_MODELS_PRESET`. These variants are not a production model catalog.
+Production model choices come from target configuration, resolved provisioning
+plans, or runtime discovery.
 
-NeurOn should not infer a production model catalog by reading PreFer preset
-files. Preset files and model-download logic belong to the PreFer project.
+## Plugin Boundary
 
-## Admin UI
+The runtime descriptor and release-catalog adapter are the plugin seam:
 
-The current admin UI can create a PreFer Docker target from the built-in runtime
-profile. The form intentionally captures only generic fields:
+- the runtime/plugin contributes its identity, catalog URL shape, schema,
+  engine, image repository, and provider-neutral deployment choices;
+- the provider owns credentials and creation controls such as RunPod disk/cloud
+  choices or an AWS Launch Template; and
+- NeurOn persists the resolved target, performs explicit provisioning, then
+  discovers the live runtime to confirm what is actually serving.
 
-- provider
-- runtime profile
-- runtime profile variant
-- target ID and display name
-- Docker container name
-- model volume name
-- runtime URL and model overrides
-
-The built-in PreFer profile exposes these variants:
-
-- `Standard`: does not set a preset, allowing PreFer to auto-select from the
-  runtime environment.
-- `DeepSeek V4 Flash`: sets
-  `LLAMA_ARG_MODELS_PRESET=/presets/deepseek-v4-flash.ini`.
-- `GLM 5.2`: sets `LLAMA_ARG_MODELS_PRESET=/presets/glm-5.2.ini`.
-- `GLM 5.2 REAP`: sets
-  `LLAMA_ARG_MODELS_PRESET=/presets/glm-5.2-reap.ini`.
-- `Smol`: sets `LLAMA_ARG_MODELS_PRESET=/presets/smol.ini` for automated UI
-  tests and tiny local smoke checks.
-
-For other named presets or deeper runtime customization today, declare the
-target JSON/env config with Docker environment values, or add the environment
-to whatever provider integration owns the runtime.
-
-## Variants And Customizations
-
-Profile variants are flavors of a runtime profile. For PreFer, `standard` is
-the normal flavor and named-preset variants pin specific runtime shapes. A
-variant does not replace the base profile; it layers a small, explicit set of
-runtime choices onto it.
-
-Variants are only one part of the customization story. Real deployments also
-need a way to express runtime and provider-specific knobs such as environment
-variables, model cache settings, port choices, concurrency, secrets, and
-provider creation options. The long-term design should separate:
-
-- base runtime profile defaults
-- selectable profile variants
-- operator customizations for a specific target
-- provider-specific provisioning details
-
-Until the broader customization design exists, NeurOn should keep customizations
-explicit in target configuration and keep variants limited to profile-owned
-overrides.
-
-## Plugin Direction
-
-The preferred long-term shape is a PreFer-owned NeurOn plugin that is loaded by
-default in deployments that want PreFer ergonomics. That plugin can contribute
-PreFer-specific knowledge without making NeurOn core responsible for the
-runtime catalog.
-
-Expected plugin responsibilities:
-
-- publish the default PreFer runtime profile
-- publish additional profile variants
-- expose preset choices through variant or customization controls
-- map a selected preset to Docker or provider-specific environment variables
-- provide model metadata, aliases, and context labels for known presets
-- keep PreFer preset names and model policy versioned with the PreFer project
-
-Until that plugin exists, NeurOn core should keep PreFer support generic:
-runtime profiles, Docker environment, target model config, runtime discovery,
-and explicit provisioning.
+This keeps provider variation out of PreFer presets and keeps runtime-specific
+model policy out of NeurOn core.

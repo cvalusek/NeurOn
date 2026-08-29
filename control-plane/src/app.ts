@@ -2,6 +2,7 @@ import cookie from "@fastify/cookie";
 import formbody from "@fastify/formbody";
 import swagger from "@fastify/swagger";
 import swaggerUi from "@fastify/swagger-ui";
+import websocket from "@fastify/websocket";
 import Fastify from "fastify";
 import { IdentityAuthProvider } from "./auth/IdentityAuthProvider.js";
 import { AuthSecretResolver } from "./auth/AuthSecretResolver.js";
@@ -35,11 +36,14 @@ import { UsageAnalyticsService } from "./services/UsageAnalyticsService.js";
 import { IdentityService } from "./services/IdentityService.js";
 import { ModelBenchmarkService } from "./services/ModelBenchmarkService.js";
 import { ProfileAdvisorService } from "./services/ProfileAdvisorService.js";
+import { AssistantAudioService } from "./services/AssistantAudioService.js";
+import { ASSISTANT_STT_MAX_BYTES } from "./services/assistantAudioConfig.js";
 import { ProviderCatalog } from "./services/ProviderCatalog.js";
 import { ProviderService } from "./services/ProviderService.js";
 import { CostEstimationService } from "./services/CostEstimationService.js";
 import { ReservationService } from "./services/ReservationService.js";
 import { ReservationProfileService } from "./services/ReservationProfileService.js";
+import { RuntimeCatalogService } from "./services/RuntimeCatalogService.js";
 import { RuntimeModelDiscovery, shouldBootstrapRuntimeModels, type StartupRuntimeModelDiscoveryOutcome } from "./services/RuntimeModelDiscovery.js";
 import { TargetOperationCoordinator } from "./services/TargetOperationCoordinator.js";
 import { TargetProvisioningService } from "./services/TargetProvisioningService.js";
@@ -61,6 +65,7 @@ export interface BuildAppOptions {
 
 export async function buildApp(config: AppConfig, models: ModelDefinition[], options: BuildAppOptions = {}) {
   const app = Fastify({ logger: true });
+  await app.register(websocket, { options: { maxPayload: 1024 * 1024, perMessageDeflate: false } });
   const maintenanceControl = options.maintenanceControl
     ?? (config.maintenanceControl ? MaintenanceControl.fromConfig(config) : MaintenanceControl.transient(Boolean(config.maintenanceMode)));
   const reservationRepository = await createReservationRepository(config.storage);
@@ -95,6 +100,7 @@ export async function buildApp(config: AppConfig, models: ModelDefinition[], opt
     }
   });
   const targetProvisioningService = new TargetProvisioningService(reservationRepository.targetProvisioningJobs);
+  const runtimeCatalogs = new RuntimeCatalogService();
   const reservations = reservationRepository.repository;
   const statuses = new InMemoryTargetStatusRepository();
   const providerAdapter =
@@ -201,6 +207,13 @@ export async function buildApp(config: AppConfig, models: ModelDefinition[], opt
       return modelSelection.listDeployments(costs).filter((deployment) => targetIds.has(deployment.targetId));
     }
   });
+  const assistantAudio = new AssistantAudioService({
+    assistantConfig: reservationRepository.assistantConfig,
+    catalog,
+    reservationService,
+    statuses,
+    capacityProvider
+  });
   targetOperations.setDemandController({
     hasDemand: (targetId) => reconciler.hasDemand(targetId),
     reconcileTarget: (targetId) => reconciler.reconcileTarget(targetId)
@@ -230,6 +243,7 @@ export async function buildApp(config: AppConfig, models: ModelDefinition[], opt
 
   await app.register(cookie);
   await app.register(formbody);
+  app.addContentTypeParser(["audio/wav", "audio/x-wav"], { parseAs: "buffer", bodyLimit: ASSISTANT_STT_MAX_BYTES }, (_request, body, done) => done(null, body));
   await app.register(swagger, {
     openapi: {
       openapi: "3.0.3",
@@ -305,6 +319,7 @@ export async function buildApp(config: AppConfig, models: ModelDefinition[], opt
     { storageDriver: config.storage.driver, maintenanceMode: Boolean(config.maintenanceMode) },
     modelSelection,
     profileAdvisor,
+    assistantAudio,
     modelFavorites,
     usageAnalytics,
     identityService
@@ -333,7 +348,8 @@ export async function buildApp(config: AppConfig, models: ModelDefinition[], opt
     modelFavorites,
     usageAnalytics,
     identityService,
-    maintenanceControl
+    maintenanceControl,
+    runtimeCatalogs
   );
 
   const bootstrapRuntimeModels = async (): Promise<StartupRuntimeModelDiscoveryOutcome[]> => {

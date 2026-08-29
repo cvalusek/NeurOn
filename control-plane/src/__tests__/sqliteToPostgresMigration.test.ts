@@ -87,7 +87,15 @@ describePostgres("SQLite to PostgreSQL migration", () => {
       expect(await migrated.modelMetadata.listCapabilities()).toMatchObject([{ modelId: "model-migrate", intelligence: 89, domains: { coding: 94 }, quantization: { format: "Q6", qualityRetentionPercent: 98.4 } }]);
       expect(await migrated.modelMetadata.listDeployments()).toMatchObject([{ targetId: "target-migrate", modelId: "model-migrate", performance: { decodeTokensPerSecond: 33 } }]);
       expect(await migrated.modelFavorites.listForUser("usr-clint")).toMatchObject([{ targetId: "target-migrate", modelId: "model-migrate" }]);
-      expect(await migrated.assistantConfig.get()).toMatchObject({ targetId: "target-migrate", modelId: "model-migrate", reservationMinutes: 12, keepaliveMinutes: 5, requestTimeoutSeconds: 90, additionalInstructions: "Use migration fixture terminology." });
+      expect(await migrated.assistantConfig.get()).toMatchObject({
+        targetId: "target-migrate", modelId: "model-migrate", reservationMinutes: 12, keepaliveMinutes: 5, requestTimeoutSeconds: 90,
+        additionalInstructions: "Use migration fixture terminology.",
+        audio: {
+          stt: { targetId: "target-migrate", modelId: "model-migrate" },
+          tts: { targetId: "target-migrate", modelId: "model-migrate", voice: { mode: "reference", reference: { fileName: "voice.wav", referenceText: "Reference words" } } },
+          realtime: { targetId: "target-migrate", modelId: "model-migrate", voiceId: "NATF2", instructions: "Help with capacity.", sampleRate: 24_000 }
+        }
+      });
       expect(await migrated.identities.getUser("usr-clint")).toMatchObject({ username: "clint", status: "active" });
       expect(await migrated.identities.getLocalPasswordHash("usr-clint")).toBe("scrypt$fixture-password-hash");
       expect(await migrated.identities.findIdentity("oidc", "work", "oidc-clint")).toMatchObject({ userId: "usr-clint", email: "clint@example.test" });
@@ -314,7 +322,17 @@ async function createPopulatedSqlite(): Promise<{ sqlitePath: string; reservatio
   await handle.modelMetadata.upsertCapability({ modelId: "model-migrate", intelligence: 89, domains: { coding: 94 }, quantization: { format: "Q6", qualityRetentionPercent: 98.4 }, provenance: { source: "manual", version: "fixture-v1" } }, createdAt);
   await handle.modelMetadata.upsertDeployment({ targetId: "target-migrate", modelId: "model-migrate", performance: { decodeTokensPerSecond: 33, prefillTokensPerSecond: 700, sampleCount: 3 }, provenance: { source: "NeurOn direct benchmark", version: "neuron-speed-v2-50k" } }, endedAt);
   await handle.modelFavorites.add({ userId: "usr-clint", username: "clint", targetId: "target-migrate", modelId: "model-migrate", createdAt });
-  await handle.assistantConfig.save({ targetId: "target-migrate", modelId: "model-migrate", reservationMinutes: 12, keepaliveMinutes: 5, requestTimeoutSeconds: 90, additionalInstructions: "Use migration fixture terminology.", updatedAt: endedAt });
+  const referenceWav = Buffer.concat([Buffer.from("RIFF", "ascii"), Buffer.alloc(4), Buffer.from("WAVE", "ascii")]).toString("base64");
+  await handle.assistantConfig.save({
+    targetId: "target-migrate", modelId: "model-migrate", reservationMinutes: 12, keepaliveMinutes: 5, requestTimeoutSeconds: 90,
+    additionalInstructions: "Use migration fixture terminology.",
+    audio: {
+      stt: { targetId: "target-migrate", modelId: "model-migrate" },
+      tts: { targetId: "target-migrate", modelId: "model-migrate", voice: { mode: "reference", reference: { fileName: "voice.wav", mimeType: "audio/wav", dataBase64: referenceWav, referenceText: "Reference words" } } },
+      realtime: { targetId: "target-migrate", modelId: "model-migrate", voiceId: "NATF2", instructions: "Help with capacity.", sampleRate: 24_000 }
+    },
+    updatedAt: endedAt
+  });
   await handle.close();
   const sqlite = new Database(sqlitePath);
   const adminPermissions = JSON.parse((sqlite.prepare("select permissions from roles where id='role_admin'").get() as { permissions: string }).permissions) as string[];

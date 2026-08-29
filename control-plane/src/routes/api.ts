@@ -13,6 +13,8 @@ import { UsageAnalyticsService } from "../services/UsageAnalyticsService.js";
 import { IdentityService } from "../services/IdentityService.js";
 import { litellmAliases } from "../litellm/modelRouting.js";
 import { ProfileAssistantRequestConflictError, type ProfileAdvisorService, type ProfileAssistantContext } from "../services/ProfileAdvisorService.js";
+import type { AssistantAudioService } from "../services/AssistantAudioService.js";
+import { assistantAudioUpdateSchema, mergeAssistantAudioUpdate } from "../services/assistantAudioConfig.js";
 import { ReservationService } from "../services/ReservationService.js";
 import { ReservationProfileService } from "../services/ReservationProfileService.js";
 import { RuntimeModelDiscovery } from "../services/RuntimeModelDiscovery.js";
@@ -102,6 +104,7 @@ export function registerApiRoutes(
   healthInfo: { storageDriver: string; maintenanceMode: boolean },
   modelSelection: ModelSelectionService,
   profileAdvisor: ProfileAdvisorService,
+  assistantAudio: AssistantAudioService,
   modelFavorites: ModelFavoriteService,
   usageAnalytics: UsageAnalyticsService,
   identityService: IdentityService
@@ -284,9 +287,11 @@ export function registerApiRoutes(
   app.get("/api/profile-advisor/status", async () => {
     try {
       const backend = await profileAdvisor.configuration();
+      const audio = await assistantAudio.status();
       return {
         enabled: Boolean(backend) && !healthInfo.maintenanceMode,
         reason: healthInfo.maintenanceMode ? "maintenance_mode" : backend ? undefined : "not_configured",
+        audio: healthInfo.maintenanceMode ? { stt: false, tts: false, realtime: false } : audio,
         backend: backend ? {
           targetId: backend.target.id,
           targetDisplayName: backend.target.displayName,
@@ -297,6 +302,31 @@ export function registerApiRoutes(
     } catch (error) {
       return { enabled: false, error: error instanceof Error ? error.message : "Assistant configuration is invalid" };
     }
+  });
+
+  app.post("/api/profile-advisor/audio/transcriptions", async (request, reply) => {
+    if (healthInfo.maintenanceMode) return reply.code(503).send({ error: "Assistant audio is unavailable while NeurOn is in maintenance mode" });
+    try {
+      requireUser(request);
+      if (!Buffer.isBuffer(request.body)) throw new Error("Send a RIFF/WAVE recording as the request body");
+      return { text: await assistantAudio.transcribe(request.body) };
+    } catch (error) { return sendError(reply, error, assistantAudioStatusCode(error)); }
+  });
+
+  app.post("/api/profile-advisor/audio/speech", async (request, reply) => {
+    if (healthInfo.maintenanceMode) return reply.code(503).send({ error: "Assistant audio is unavailable while NeurOn is in maintenance mode" });
+    try {
+      requireUser(request);
+      const { text } = z.object({ text: z.string().trim().min(1).max(8_000) }).strict().parse(request.body);
+      const audio = await assistantAudio.synthesize(text);
+      return reply.header("content-type", "audio/wav").header("cache-control", "no-store").send(audio);
+    } catch (error) { return sendError(reply, error, assistantAudioStatusCode(error)); }
+  });
+
+  app.get("/api/profile-advisor/audio/realtime", { websocket: true, schema: { hide: true } }, (socket, request) => {
+    if (healthInfo.maintenanceMode) return socket.close(1013, "Assistant audio is unavailable during maintenance");
+    try { assistantAudio.bridgeRealtime(socket, requireUser(request)); }
+    catch { socket.close(1008, "Authentication required"); }
   });
 
   app.post("/api/model-favorites", async (request, reply) => {
@@ -350,7 +380,7 @@ export function registerApiRoutes(
   app.get("/api/admin/assistant-config", async (_request, reply) => {
     try {
       const backend = await profileAdvisor.configuration();
-      return { backend: backend ? { ...backend.config, targetDisplayName: backend.target.displayName } : null };
+      return { backend: backend ? assistantConfigApiView(backend.config, backend.target.displayName) : null };
     } catch (error) { return sendError(reply, error); }
   });
   app.put("/api/admin/assistant-config", async (request, reply) => {
@@ -361,16 +391,22 @@ export function registerApiRoutes(
         reservationMinutes: z.number().int().min(1).max(720),
         keepaliveMinutes: z.number().int().min(1).max(60),
         requestTimeoutSeconds: z.number().int().min(1).max(600),
-        additionalInstructions: z.string().max(8_000).optional()
+        additionalInstructions: z.string().max(8_000).optional(),
+        audio: assistantAudioUpdateSchema.optional()
       }).strict().parse(request.body);
       if ((body.targetId === null) !== (body.modelId === null)) throw new Error("Target and model must both be selected or both be cleared");
+      const current = Object.prototype.hasOwnProperty.call(body, "audio") ? await profileAdvisor.configuration().catch(() => undefined) : undefined;
+      const audio = Object.prototype.hasOwnProperty.call(body, "audio")
+        ? await assistantAudio.validateConfiguration(mergeAssistantAudioUpdate(body.audio ?? {}, current?.config.audio))
+        : undefined;
       const backend = await profileAdvisor.saveConfiguration(body.targetId && body.modelId ? {
         targetId: body.targetId,
         modelId: body.modelId,
         reservationMinutes: body.reservationMinutes,
         keepaliveMinutes: body.keepaliveMinutes,
         requestTimeoutSeconds: body.requestTimeoutSeconds,
-        additionalInstructions: body.additionalInstructions
+        additionalInstructions: body.additionalInstructions,
+        ...(Object.prototype.hasOwnProperty.call(body, "audio") ? { audio } : {})
       } : undefined);
       return { ok: true, backend: backend ? { targetId: backend.targetId, modelId: backend.modelId } : null };
     } catch (error) { return sendError(reply, error); }
@@ -653,23 +689,33 @@ export function registerApiRoutes(
   });
 
   app.post("/api/admin/targets/:id/provision", async (request, reply) => {
+    let capacityCreated = false;
     try {
       const { id } = z.object({ id: z.string() }).parse(request.params);
       const target = catalog.getTarget(id);
       if (!target) throw new Error("Target not found");
-      await targetProvisioningService.beginProvision(target);
-      const patch = await targetOperations.withLifecycleTransition(target.id, () => capacityProvider.provisionTarget(target));
-      const updatedTarget = await targetService.applyProvisioningPatch(id, patch) ?? target;
-      await targetProvisioningService.completeProvision(updatedTarget, patch);
-      const providerStatus = await capacityProvider.getTargetStatus(updatedTarget);
-      statuses.set({ targetId: id, desired: "off", observed: providerStatus.observed, message: providerStatus.message, lastCheckedAt: new Date() });
+      const updatedTarget = await targetOperations.withLifecycleTransition(target.id, async () => {
+        await targetProvisioningService.beginProvision(target);
+        const patch = await capacityProvider.provisionTarget(target);
+        await targetProvisioningService.recordProvisionedResources(target, patch);
+        const updated = await targetService.applyProvisioningPatch(id, patch) ?? target;
+        await targetProvisioningService.completeProvision(updated, patch);
+        capacityCreated = true;
+        return updated;
+      });
+      try {
+        const providerStatus = await capacityProvider.getTargetStatus(updatedTarget);
+        statuses.set({ targetId: id, desired: "off", observed: providerStatus.observed, message: providerStatus.message, lastCheckedAt: new Date() });
+      } catch {
+        statuses.set({ targetId: id, desired: "off", observed: "starting", message: "Provisioning completed; provider status is pending the next reconciler check", lastCheckedAt: new Date() });
+      }
       if (shouldBootstrapRuntimeModels(updatedTarget)) {
         runDiscoveryBootstrapInBackground(updatedTarget, capacityProvider, runtimeModelDiscovery, healthChecker);
       }
       return { ok: true };
     } catch (error) {
       const id = z.object({ id: z.string().optional() }).safeParse(request.params).data?.id;
-      if (id) await targetProvisioningService.failProvision(id, error).catch(() => undefined);
+      if (id && !capacityCreated) await targetProvisioningService.failProvision(id, error).catch(() => undefined);
       return sendError(reply, error);
     }
   });
@@ -726,6 +772,32 @@ export function registerApiRoutes(
   });
 }
 
+function assistantConfigApiView(config: Awaited<ReturnType<ProfileAdvisorService["saveConfiguration"]>> & object, targetDisplayName: string) {
+  const assistant = config as NonNullable<Awaited<ReturnType<ProfileAdvisorService["saveConfiguration"]>>>;
+  const reference = assistant.audio?.tts?.voice.mode === "reference" ? assistant.audio.tts.voice.reference : undefined;
+  return {
+    ...assistant,
+    targetDisplayName,
+    audio: assistant.audio ? {
+      ...assistant.audio,
+      ...(assistant.audio.tts ? {
+        tts: {
+          ...assistant.audio.tts,
+          voice: reference ? {
+            mode: "reference",
+            reference: {
+              fileName: reference.fileName,
+              mimeType: reference.mimeType,
+              referenceText: reference.referenceText,
+              decodedBytes: Buffer.from(reference.dataBase64, "base64").length
+            }
+          } : assistant.audio.tts.voice
+        }
+      } : {})
+    } : undefined
+  };
+}
+
 function runDiscoveryBootstrapInBackground(
   target: CapacityTarget,
   capacityProvider: CapacityProvider,
@@ -739,6 +811,15 @@ function runDiscoveryBootstrapInBackground(
 
 function operationStatusCode(error: unknown): number {
   return error instanceof TargetOperationConflictError ? 409 : 400;
+}
+
+function assistantAudioStatusCode(error: unknown): number {
+  if (error instanceof z.ZodError) return 400;
+  const message = error instanceof Error ? error.message : String(error);
+  if (/request body|between 1 and|must be a nonempty RIFF\/WAVE|exceeds the accepted WAV size/iu.test(message)) return 400;
+  if (/not configured|deployment .* is not available|has no direct API URL/iu.test(message)) return 409;
+  if (/did not become ready|target failed/iu.test(message)) return 503;
+  return 502;
 }
 
 async function reservationEndpoint(request: { params: unknown }, reply: { code: (code: number) => { send: (body: unknown) => unknown } }, service: ReservationService, statuses: TargetStatusRepository, costEstimation: CostEstimationService, catalog: ModelCatalog) {

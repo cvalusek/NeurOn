@@ -1,7 +1,11 @@
 import type { AssistantConfig } from "../domain/types.js";
 
 export function cloneAssistantConfig(config: AssistantConfig): AssistantConfig {
-  return { ...config, updatedAt: new Date(config.updatedAt) };
+  return {
+    ...config,
+    ...(config.audio ? { audio: structuredClone(config.audio) } : {}),
+    updatedAt: new Date(config.updatedAt)
+  };
 }
 
 export function assistantConfigFromLegacyTarget(value: unknown, targetId: string, updatedAt = new Date()): AssistantConfig | undefined {

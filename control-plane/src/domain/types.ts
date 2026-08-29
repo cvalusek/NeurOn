@@ -221,6 +221,19 @@ export interface AwsTargetConfig {
   runtimeProtocol?: "http" | "https";
   healthPath?: string;
   apiPath?: string;
+  /** Effective provider-owned launch settings; CompositeCapacityProvider supplies this at call time. */
+  provisioning?: AwsEc2ProvisioningConfig;
+}
+
+export interface AwsEc2ProvisioningConfig {
+  instanceNamePattern?: string;
+  launchTemplateId?: string;
+  launchTemplateName?: string;
+  launchTemplateVersion?: string;
+  userDataBeginMarker?: string;
+  userDataEndMarker?: string;
+  /** Non-secret values included in the managed deployment.env block. */
+  deploymentEnvironment?: Record<string, string>;
 }
 
 export interface LiteLlmTargetConfig {
@@ -303,6 +316,7 @@ export interface NeuronProviderConfig {
 export interface RuntimeProfile {
   id: string;
   name: string;
+  description?: string;
   type: "docker" | string;
   image?: string;
   port?: number;
@@ -312,6 +326,17 @@ export interface RuntimeProfile {
   env?: Record<string, string>;
   discovery?: boolean;
   variants?: RuntimeProfileVariant[];
+  /** Optional plugin-owned release catalog used only to resolve an explicit provisioning choice. */
+  catalog?: RuntimeProfileCatalog;
+}
+
+export interface RuntimeProfileCatalog {
+  pluginId: string;
+  engine: string;
+  schemaVersion: string;
+  repository: string;
+  inventoryPath: string;
+  imageRepository: string;
 }
 
 export interface RuntimeProfileVariant {
@@ -325,6 +350,33 @@ export interface RuntimeProfileVariant {
   volumes?: Record<string, string>;
   env?: Record<string, string>;
   discovery?: boolean;
+}
+
+/** Immutable, resolved runtime choice stored with a target before a provider creates capacity. */
+export interface RuntimeDeploymentPlan {
+  pluginId: string;
+  pluginVersion: string;
+  profileId: string;
+  engine: string;
+  catalogSchemaVersion: string;
+  catalogFingerprint: string;
+  deploymentId: string;
+  providerType: string;
+  image: string;
+  port: number;
+  healthPath: string;
+  apiPath: string;
+  environment: Record<string, string>;
+  hardware?: {
+    providerSku?: string;
+    providerGpuTypeId?: string;
+    gpuCount?: number;
+    gpuName?: string;
+    vramGbEach?: number;
+    vcpu?: number;
+    advertisedHourlyUsd?: number;
+  };
+  models: ConfiguredModel[];
 }
 
 export type TargetProvisioningJobStatus = "draft" | "running" | "completed" | "failed" | "aborting" | "aborted";
@@ -358,9 +410,7 @@ export interface CapacityProviderDefinition {
     enabled?: boolean;
   };
   config?: {
-    awsEc2?: {
-      instanceNamePattern?: string;
-    };
+    awsEc2?: AwsEc2ProvisioningConfig;
     runpod?: Pick<RunPodTargetConfig, "apiKey" | "apiKeyEnv" | "apiBaseUrl">;
     neuron?: NeuronProviderConfig;
     [key: string]: unknown;
@@ -409,6 +459,8 @@ export interface CapacityTarget {
   /** Lower values become the primary LiteLLM model-group alias; later targets are formal fallbacks. */
   aliasPriority?: number;
   modelsMax?: number;
+  /** Resolved plugin/catalog provenance for a connected or provisioned runtime. */
+  runtimeDeployment?: RuntimeDeploymentPlan;
   aws?: AwsTargetConfig;
   docker?: DockerContainerTargetConfig;
   dockerCompose?: DockerComposeTargetConfig;
@@ -436,7 +488,39 @@ export interface AssistantConfig {
   keepaliveMinutes: number;
   requestTimeoutSeconds: number;
   additionalInstructions?: string;
+  audio?: AssistantAudioConfig;
   updatedAt: Date;
+}
+
+export interface AssistantDeploymentBinding {
+  targetId: string;
+  modelId: string;
+  requestTimeoutSeconds?: number;
+}
+
+export interface AssistantVoiceReference {
+  fileName: string;
+  mimeType: "audio/wav";
+  dataBase64: string;
+  referenceText: string;
+}
+
+export interface AssistantTtsBinding extends AssistantDeploymentBinding {
+  voice:
+    | { mode: "packaged"; voiceId: string; instructions?: string }
+    | { mode: "reference"; reference: AssistantVoiceReference };
+}
+
+export interface AssistantRealtimeBinding extends AssistantDeploymentBinding {
+  voiceId?: string;
+  instructions: string;
+  sampleRate?: number;
+}
+
+export interface AssistantAudioConfig {
+  stt?: AssistantDeploymentBinding;
+  tts?: AssistantTtsBinding;
+  realtime?: AssistantRealtimeBinding;
 }
 
 export interface TargetCostEstimateConfig {

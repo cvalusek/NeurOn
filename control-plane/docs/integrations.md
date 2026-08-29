@@ -124,6 +124,23 @@ Admins configure that backend independently from target and Model data through
 optional trusted local system guidance. That guidance cannot loosen tool
 schemas, ownership, authorization, confirmation, or lifecycle safety rules.
 
+The same Assistant record may select separate existing deployments for
+dictation, spoken replies, and real-time voice. Authenticated browser routes
+are:
+
+```text
+POST /api/profile-advisor/audio/transcriptions
+POST /api/profile-advisor/audio/speech
+WS   /api/profile-advisor/audio/realtime
+```
+
+Dictation accepts a bounded WAV upload and returns text for user review. Spoken
+reply returns a WAV. Real-time voice uses a browser WebSocket adapter so the
+browser never has to implement Audio.cpp's HTTP/1.1 chunked request and SSE
+response on the same connection. Each operation reuses NeurOn's reservation,
+visibility, maintenance, readiness, and credential boundaries. The Assistant
+configuration read surface redacts inline reference-voice bytes.
+
 These assistant tools reuse NeurOn services and validation but are distinct
 from the external MCP transport. MCP remains appropriate for API-key clients;
 the browser assistant needs session identity, current-screen context, and

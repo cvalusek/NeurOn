@@ -1,5 +1,9 @@
 import type { ApiKey, AppConfig, AssistantConfig, AuthMethod, AuthenticatedUser, CapacityTarget, ModelDefinition, ModelSelectionCatalogConfig, RegistrationInvitation, Reservation, ReservationProfile, Role, RuntimeProfile, TargetStatus, Team, TeamMembership, UserAccount, UserIdentity, UserMergePreview } from "../domain/types.js";
-import { DEFAULT_AWS_EC2_INSTANCE_NAME_PATTERN } from "../capacity/AwsEc2CapacityProvider.js";
+import {
+  DEFAULT_AWS_EC2_INSTANCE_NAME_PATTERN,
+  DEFAULT_AWS_EC2_USER_DATA_BEGIN_MARKER,
+  DEFAULT_AWS_EC2_USER_DATA_END_MARKER
+} from "../capacity/AwsEc2CapacityProvider.js";
 import type { AuthMethodView } from "../services/AuthMethodService.js";
 import type { ProviderView } from "../services/ProviderService.js";
 import type { TargetView } from "../services/TargetService.js";
@@ -10,6 +14,11 @@ import { safeGithubRepositoryUrl, type UpdateStatus } from "../services/UpdateCh
 import type { ModelDeploymentSelectionView } from "../services/ModelSelectionService.js";
 import { targetHostingMode } from "../utils/hostingMode.js";
 import { directRuntimeHostUrl } from "../utils/runtimeUrl.js";
+import {
+  ASSISTANT_VOICE_REFERENCE_MAX_BYTES,
+  CUSTOM_VOICE_IDS,
+  PERSONAPLEX_VOICE_IDS
+} from "../services/assistantAudioConfig.js";
 
 export interface HassleOffSafetyView {
   configured: boolean;
@@ -199,7 +208,13 @@ export function layout(title: string, user: AuthenticatedUser | undefined, body:
     .assistant-head button { padding: 5px 9px; background: #334155; }
     .assistant-head-actions { display: flex; gap: 6px; }
     .assistant-messages { display: grid; align-content: start; gap: 9px; padding: 12px; overflow: auto; background: #f7f8f6; }
-    .assistant-message { border: 1px solid #d8ddd7; border-radius: 8px; padding: 9px 10px; background: white; white-space: pre-wrap; }
+    .assistant-message { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 7px; align-items: start; border: 1px solid #d8ddd7; border-radius: 8px; padding: 9px 10px; background: white; }
+    .assistant-message-text { min-width: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+    .assistant-message-actions { display: flex; gap: 4px; }
+    .assistant-message-action { display: inline-grid; place-items: center; min-width: 30px; min-height: 30px; padding: 4px 7px; border: 1px solid #aab4ad; background: white; color: #334155; line-height: 1; }
+    .assistant-message-action[hidden] { display: none; }
+    .assistant-message-action[aria-busy="true"] { color: transparent; position: relative; }
+    .assistant-message-action[aria-busy="true"]::after { content: ""; position: absolute; width: 13px; height: 13px; border: 2px solid #b9ccdf; border-top-color: #0f766e; border-radius: 50%; animation: assistant-spin .8s linear infinite; }
     .assistant-message.user { margin-left: 34px; background: #e7f5f2; border-color: #86b8ad; }
     .assistant-message.system { display: flex; align-items: center; gap: 9px; margin-right: 34px; background: #f0f7ff; border-color: #93b8dc; color: #244a6a; }
     .assistant-message.error { background: #fff1f0; border-color: #d99a96; color: #7a2e2a; }
@@ -211,8 +226,26 @@ export function layout(title: string, user: AuthenticatedUser | undefined, body:
     .assistant-confirm { display: grid; gap: 8px; border: 1px solid #d6a742; border-radius: 8px; padding: 10px; background: #fff8df; }
     .assistant-compose { display: grid; gap: 8px; padding: 12px; border-top: 1px solid #d8ddd7; background: white; }
     .assistant-compose textarea { width: 100%; min-height: 104px; font-family: inherit; }
+    .assistant-compose-actions { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; }
+    .assistant-compose-actions .assistant-send { margin-left: auto; }
+    .assistant-audio-control { display: inline-flex; gap: 6px; align-items: center; border: 1px solid #aab4ad; background: white; color: #334155; }
+    .assistant-audio-control[hidden] { display: none; }
+    .assistant-audio-control[aria-pressed="true"] { border-color: #b42318; background: #fff1f0; color: #912018; }
+    .assistant-realtime-panel { position: absolute; inset: 53px 0 0; z-index: 5; display: grid; grid-template-rows: auto minmax(0, 1fr) auto; background: linear-gradient(160deg, #17202a 0%, #253448 100%); color: white; }
+    .assistant-realtime-panel[hidden] { display: none; }
+    .assistant-realtime-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 14px; border-bottom: 1px solid rgba(255,255,255,.16); }
+    .assistant-realtime-head button, .assistant-realtime-actions button { background: #334155; }
+    .assistant-realtime-stage { display: grid; place-items: center; align-content: center; gap: 18px; padding: 24px; text-align: center; }
+    .assistant-voice-orb { position: relative; width: 116px; height: 116px; border: 1px solid rgba(255,255,255,.45); border-radius: 50%; background: radial-gradient(circle at 38% 32%, #9be4d6, #0f766e 56%, #075f56); box-shadow: 0 0 0 0 rgba(155,228,214,.28); }
+    .assistant-realtime-panel[data-phase="listening"] .assistant-voice-orb, .assistant-realtime-panel[data-phase="speaking"] .assistant-voice-orb { animation: assistant-voice-pulse 1.5s ease-in-out infinite; }
+    .assistant-realtime-panel[data-phase="speaking"] .assistant-voice-orb { background: radial-gradient(circle at 38% 32%, #bfdcff, #477eb5 56%, #244a6a); }
+    .assistant-realtime-status { max-width: 360px; min-height: 44px; color: #dce8e4; }
+    .assistant-realtime-meta { color: #a8bbb4; font-size: 12px; }
+    .assistant-realtime-actions { display: flex; justify-content: center; gap: 9px; padding: 16px; border-top: 1px solid rgba(255,255,255,.16); }
+    .assistant-realtime-actions .danger { background: #b42318; }
     .assistant-compose-hint { font-size: 11px; color: #6b7280; }
     @keyframes assistant-spin { to { transform: rotate(360deg); } }
+    @keyframes assistant-voice-pulse { 50% { transform: scale(1.04); box-shadow: 0 0 0 18px rgba(155,228,214,0); } }
     @keyframes assistant-guide-pulse { from { box-shadow: 0 0 0 2px rgba(217,119,6,.25); background-color: #fff8df; } to { box-shadow: 0 0 0 8px rgba(217,119,6,.08); background-color: #ffe8a3; } }
     .target-price { border-radius: 6px; padding: 5px 8px; background: #17202a; color: white; font-weight: 800; white-space: nowrap; }
     .model-metrics { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 7px; }
@@ -235,7 +268,18 @@ export function layout(title: string, user: AuthenticatedUser | undefined, body:
     .toast.error { border-color: #d99a96; background: #fff1f0; color: #7a2e2a; }
     .toast[hidden] { display: none; }
     .option.does-not-match { border-style: dashed; opacity: 0.72; }
+    .choice-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; }
+    .choice-grid .option { display: flex; gap: 9px; align-items: start; border: 1px solid #cbd3cc; border-radius: 8px; padding: 11px; background: #fbfcfb; cursor: pointer; }
+    .choice-grid .option:has(input:checked) { border-color: #0f766e; background: #e7f5f2; box-shadow: 0 0 0 1px #0f766e; }
+    .choice-grid .option span { display: grid; gap: 4px; }
+    .choice-grid .option small { color: #657266; line-height: 1.35; }
+    .target-mode-picker { margin: 0 0 16px; border: 0; padding: 0; }
+    .target-mode-picker legend { margin-bottom: 8px; font-weight: 750; }
+    .target-provisioning-panel { margin: 14px 0; padding: 14px; border: 1px solid #86b8ad; border-radius: 8px; background: #f4fbf9; }
     .filter-status { margin-top: 8px; }
+    .assistant-config-section h2, .assistant-config-section h3 { margin-top: 0; }
+    .switch-label { display: inline-flex; align-items: center; gap: 7px; border: 1px solid #aab4ad; border-radius: 999px; padding: 7px 10px; background: #fbfcfb; font-weight: 700; white-space: nowrap; }
+    .switch-label:has(input:checked) { border-color: #0f766e; background: #e7f5f2; color: #075f56; }
     .profile-target-toggle { display: flex; gap: 10px; align-items: start; cursor: pointer; }
     .profile-target-toggle > span { display: grid; gap: 2px; }
     .target-status-head, .reservation-card { display: flex; justify-content: space-between; gap: 12px; align-items: start; }
@@ -340,7 +384,17 @@ export function layout(title: string, user: AuthenticatedUser | undefined, body:
     <div class="assistant-head"><strong>NeurOn assistant</strong><span class="assistant-head-actions">${user.isAdmin ? `<button type="button" data-assistant-debug-toggle aria-label="Toggle Assistant diagnostics">Debug</button>` : ""}<button type="button" data-assistant-clear aria-label="Clear assistant chat">Clear</button><button type="button" data-assistant-collapse aria-label="Collapse assistant">Collapse</button></span></div>
     <div class="assistant-messages" data-assistant-messages></div>
     ${user.isAdmin ? `<pre class="assistant-debug" data-assistant-debug hidden>Diagnostics appear after the next request.</pre>` : ""}
-    <form class="assistant-compose" data-assistant-form><textarea maxlength="2000" placeholder="Ask about this screen, configure a profile, or manage a reservation."></textarea><span class="assistant-compose-hint">Enter to send · Shift+Enter for a new line</span><button type="submit">Send</button><span class="muted" data-assistant-status></span></form>
+    <form class="assistant-compose" data-assistant-form>
+      <textarea maxlength="2000" placeholder="Ask about this screen, configure a profile, or manage a reservation."></textarea>
+      <span class="assistant-compose-hint">Enter to send · Shift+Enter for a new line</span>
+      <div class="assistant-compose-actions"><button class="assistant-audio-control" type="button" data-assistant-dictate hidden aria-pressed="false" title="Dictate a message">Mic</button><button class="assistant-audio-control" type="button" data-assistant-realtime hidden title="Start a live voice conversation">Live voice</button><button class="assistant-send" type="submit">Send</button></div>
+      <span class="muted" data-assistant-status></span>
+    </form>
+    <section class="assistant-realtime-panel" data-assistant-realtime-panel data-phase="idle" hidden aria-label="Live voice conversation">
+      <div class="assistant-realtime-head"><div><strong>Live voice</strong><div class="assistant-realtime-meta">24 kHz · mono · private NeurOn relay</div></div><button type="button" data-assistant-realtime-close aria-label="Close live voice">Close</button></div>
+      <div class="assistant-realtime-stage"><div class="assistant-voice-orb" aria-hidden="true"></div><div><strong data-assistant-realtime-label>Ready to begin</strong><p class="assistant-realtime-status" data-assistant-realtime-status>NeurOn will reserve and wake the configured PersonaPlex deployment when you start.</p><div class="assistant-realtime-meta" data-assistant-realtime-timing></div></div></div>
+      <div class="assistant-realtime-actions"><button type="button" data-assistant-realtime-start>Start conversation</button><button class="danger" type="button" data-assistant-realtime-stop hidden>End conversation</button></div>
+    </section>
   </aside>` : ""}
   <script>
     (() => {
@@ -412,7 +466,16 @@ function assistantClientScript(username: string, isAdmin: boolean): string {
       const status = document.querySelector('[data-assistant-status]');
       const textarea = form?.querySelector('textarea');
       const send = form?.querySelector('button[type="submit"]');
-      if (!drawer || !toggle || !form || !messages || !status || !textarea || !send) return;
+      const dictate = form?.querySelector('[data-assistant-dictate]');
+      const realtimeButton = form?.querySelector('[data-assistant-realtime]');
+      const realtimePanel = drawer?.querySelector('[data-assistant-realtime-panel]');
+      const realtimeClose = drawer?.querySelector('[data-assistant-realtime-close]');
+      const realtimeStart = drawer?.querySelector('[data-assistant-realtime-start]');
+      const realtimeStop = drawer?.querySelector('[data-assistant-realtime-stop]');
+      const realtimeLabel = drawer?.querySelector('[data-assistant-realtime-label]');
+      const realtimeStatus = drawer?.querySelector('[data-assistant-realtime-status]');
+      const realtimeTiming = drawer?.querySelector('[data-assistant-realtime-timing]');
+      if (!drawer || !toggle || !form || !messages || !status || !textarea || !send || !dictate || !realtimeButton || !realtimePanel || !realtimeClose || !realtimeStart || !realtimeStop || !realtimeLabel || !realtimeStatus || !realtimeTiming) return;
       const setOpen = open => { drawer.hidden = !open; toggle.setAttribute('aria-expanded', String(open)); toggle.textContent = open ? 'Assistant open' : 'Ask NeurOn'; localStorage.setItem('neuron-assistant-open', open ? '1' : '0'); };
       setOpen(localStorage.getItem('neuron-assistant-open') === '1');
       toggle.addEventListener('click', () => setOpen(drawer.hidden)); collapse.addEventListener('click', () => setOpen(false));
@@ -450,8 +513,29 @@ function assistantClientScript(username: string, isAdmin: boolean): string {
         debugToggle.setAttribute('aria-pressed', String(showDebug));
         debugToggle.addEventListener('click', () => { const show = debugPanel.hidden; debugPanel.hidden = !show; debugToggle.setAttribute('aria-pressed', String(show)); localStorage.setItem('neuron-assistant-debug', show ? '1' : '0'); renderDebug(); });
       }
+      let audioCapabilities = { stt: false, tts: false, realtime: false };
+      let currentPlayback;
+      const stopPlayback = () => { if (!currentPlayback) return; currentPlayback.pause(); currentPlayback.src = ''; currentPlayback = undefined; };
+      const speakMessage = async (text, button) => {
+        if (button.getAttribute('aria-busy') === 'true') return;
+        stopPlayback(); button.setAttribute('aria-busy', 'true'); button.disabled = true;
+        try {
+          const response = await fetch('/api/profile-advisor/audio/speech', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ text }) });
+          if (!response.ok) { const body = await response.json().catch(() => ({})); throw new Error(body.error || 'Spoken reply failed.'); }
+          const url = URL.createObjectURL(await response.blob()); const player = new Audio(url); currentPlayback = player;
+          const release = () => { URL.revokeObjectURL(url); if (currentPlayback === player) currentPlayback = undefined; };
+          player.addEventListener('ended', release, { once: true }); player.addEventListener('error', release, { once: true }); await player.play();
+        } catch (error) { addMessage(error instanceof Error ? error.message : 'Spoken reply failed.', 'error'); }
+        finally { button.removeAttribute('aria-busy'); button.disabled = false; }
+      };
       const addMessage = (text, kind = '', persist = true) => {
-        const node = document.createElement('div'); node.className = 'assistant-message' + (kind ? ' ' + kind : ''); node.textContent = text; messages.appendChild(node); messages.scrollTop = messages.scrollHeight;
+        const node = document.createElement('div'); node.className = 'assistant-message' + (kind ? ' ' + kind : '');
+        const content = document.createElement('span'); content.className = 'assistant-message-text'; content.textContent = text; node.appendChild(content);
+        if (kind === '' || kind === 'user') {
+          const actions = document.createElement('span'); actions.className = 'assistant-message-actions';
+          const listen = document.createElement('button'); listen.type = 'button'; listen.className = 'assistant-message-action'; listen.dataset.assistantListen = ''; listen.title = 'Read this message aloud'; listen.setAttribute('aria-label', 'Read this message aloud'); listen.textContent = 'Listen'; listen.hidden = !audioCapabilities.tts; listen.addEventListener('click', () => void speakMessage(text, listen)); actions.appendChild(listen); node.appendChild(actions);
+        }
+        messages.appendChild(node); messages.scrollTop = messages.scrollHeight;
         if (persist) { history.push({ text, kind }); persistHistory(); }
         return node;
       };
@@ -464,7 +548,7 @@ function assistantClientScript(username: string, isAdmin: boolean): string {
         progressNode.lastElementChild.textContent = text; messages.scrollTop = messages.scrollHeight;
       };
       const clearProgress = () => { progressNode?.remove(); progressNode = undefined; };
-      clear.addEventListener('click', () => { history = []; conversation = { summary: '', history: [], previousContext: undefined }; persistHistory(); persistConversation(); messages.replaceChildren(); progressNode = undefined; sessionStorage.removeItem(actionKey); sessionStorage.removeItem(requestKey); activeRequestId = undefined; setBusy(false); renderDebug(); showWelcome(); });
+      clear.addEventListener('click', () => { stopPlayback(); history = []; conversation = { summary: '', history: [], previousContext: undefined }; persistHistory(); persistConversation(); messages.replaceChildren(); progressNode = undefined; sessionStorage.removeItem(actionKey); sessionStorage.removeItem(requestKey); activeRequestId = undefined; setBusy(false); renderDebug(); showWelcome(); });
       const currentDraft = () => {
         const profile = document.querySelector('#profile-form');
         if (!profile) { try { return JSON.parse(sessionStorage.getItem('neuron-profile-assistant-guidance') || 'null')?.draft; } catch { return undefined; } }
@@ -515,12 +599,99 @@ function assistantClientScript(username: string, isAdmin: boolean): string {
       const handleResult = result => {
         if (!result) return;
         if (result.type === 'answer') { clearPendingAction(); addMessage(result.message); return; }
-        if (result.type === 'configure_profile') { clearPendingAction(); storeDraft(result.guidance); addMessage('I filled a profile draft for ' + result.guidance.useCase + '. Review the highlighted target and model selections before saving.'); if (!document.querySelector('#profile-form')) { const node = addMessage('The draft is ready to open in the profile builder.'); node.append(document.createElement('br'), actionButton('Open profile builder', () => guidedNavigate('/profiles/new?assistant=1', 'Opening the profile builder…'))); } return; }
+        if (result.type === 'configure_profile') { clearPendingAction(); storeDraft(result.guidance); addMessage('I filled a profile draft for ' + result.guidance.useCase + '. Review the highlighted target and model selections before saving.'); if (!document.querySelector('#profile-form')) { const node = addMessage('The draft is ready to open in the profile builder.'); node.querySelector('.assistant-message-text')?.append(document.createElement('br'), actionButton('Open profile builder', () => guidedNavigate('/profiles/new?assistant=1', 'Opening the profile builder…'))); } return; }
         if (result.type === 'save_profile') { storeDraft({ useCase: result.message, responseLength: 'mixed', requirements: { domains: [], technicalCapabilities: [], weights: { intelligence: 1/3, speed: 1/3, cost: 1/3 } }, draft: result.draft }); confirmation(result, 'Confirm save profile', async () => { await teachControl(document.querySelector('#profile-form button[type="submit"]'), 'This is the profile Save button NeurOn is using for the confirmed action.'); const profile = await jsonRequest('/api/reservation-profiles', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(result.draft) }); addMessage('Saved profile ' + profile.name + '. Nothing was started.'); }); return; }
         if (result.type === 'start_reservation') { confirmation(result, 'Confirm start reservation', async () => { await teachControl(document.querySelector('#start-form button[type="submit"]'), 'This is the Reserve capacity button for the confirmed action.'); await jsonRequest('/api/reservations', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ profileId: result.profileId, modelIds: [], targetIds: [], durationMinutes: result.durationMinutes, keepaliveMinutes: result.keepaliveMinutes }) }); addMessage('Reservation created. NeurOn is reconciling the selected capacity.'); }); return; }
         if (result.type === 'open_page' || result.type === 'open_admin_page') { clearPendingAction(); guidedNavigate(result.path, result.message); return; }
         if (result.type === 'rediscover_target') confirmation(result, 'Confirm rediscovery', async () => { await jsonRequest('/api/admin/targets/' + encodeURIComponent(result.targetId) + '/discover', { method: 'POST' }); addMessage('Rediscovery and benchmark completed for ' + result.targetId + '.'); });
       };
+      const audioContextClass = window.AudioContext || window.webkitAudioContext;
+      const resampleAudio = (input, sourceRate, targetRate) => {
+        if (sourceRate === targetRate) return new Float32Array(input);
+        const length = Math.max(1, Math.round(input.length * targetRate / sourceRate)); const output = new Float32Array(length); const ratio = sourceRate / targetRate;
+        for (let index = 0; index < length; index += 1) { const position = index * ratio; const before = Math.min(input.length - 1, Math.floor(position)); const after = Math.min(input.length - 1, before + 1); const mix = position - before; output[index] = input[before] * (1 - mix) + input[after] * mix; }
+        return output;
+      };
+      const pcm16Bytes = samples => { const output = new ArrayBuffer(samples.length * 2); const view = new DataView(output); for (let index = 0; index < samples.length; index += 1) { const value = Math.max(-1, Math.min(1, samples[index])); view.setInt16(index * 2, value < 0 ? value * 32768 : value * 32767, true); } return output; };
+      const wavBytes = (samples, sampleRate) => {
+        const pcm = pcm16Bytes(samples); const output = new ArrayBuffer(44 + pcm.byteLength); const view = new DataView(output); const write = (offset, value) => { for (let index = 0; index < value.length; index += 1) view.setUint8(offset + index, value.charCodeAt(index)); };
+        write(0, 'RIFF'); view.setUint32(4, 36 + pcm.byteLength, true); write(8, 'WAVE'); write(12, 'fmt '); view.setUint32(16, 16, true); view.setUint16(20, 1, true); view.setUint16(22, 1, true); view.setUint32(24, sampleRate, true); view.setUint32(28, sampleRate * 2, true); view.setUint16(32, 2, true); view.setUint16(34, 16, true); write(36, 'data'); view.setUint32(40, pcm.byteLength, true); new Uint8Array(output, 44).set(new Uint8Array(pcm)); return output;
+      };
+      const openCapture = async onAudio => {
+        if (!audioContextClass || !navigator.mediaDevices?.getUserMedia) throw new Error('This browser does not provide microphone audio capture.');
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
+        const context = new audioContextClass(); await context.resume(); const source = context.createMediaStreamSource(stream); const processor = context.createScriptProcessor(4096, 1, 1); const silent = context.createGain(); silent.gain.value = 0;
+        processor.onaudioprocess = event => onAudio(new Float32Array(event.inputBuffer.getChannelData(0)), context.sampleRate); source.connect(processor); processor.connect(silent); silent.connect(context.destination);
+        let stopped = false; return { stop: async () => { if (stopped) return; stopped = true; processor.onaudioprocess = null; processor.disconnect(); source.disconnect(); silent.disconnect(); stream.getTracks().forEach(track => track.stop()); await context.close().catch(() => undefined); } };
+      };
+      let dictationSession;
+      const finishDictation = async (transcribe = true) => {
+        const session = dictationSession; if (!session) return; dictationSession = undefined; clearTimeout(session.timer); dictate.setAttribute('aria-pressed', 'false'); dictate.textContent = 'Mic'; await session.capture.stop();
+        if (!transcribe) return;
+        dictate.disabled = true; status.textContent = 'Transcribing your recording…';
+        try {
+          const input = new Float32Array(session.frames); let offset = 0; for (const chunk of session.chunks) { input.set(chunk, offset); offset += chunk.length; }
+          if (!input.length) throw new Error('No microphone audio was captured.'); const wav = wavBytes(resampleAudio(input, session.sampleRate, 24000), 24000);
+          const response = await fetch('/api/profile-advisor/audio/transcriptions', { method: 'POST', headers: { 'content-type': 'audio/wav' }, body: wav }); const result = await response.json().catch(() => ({})); if (!response.ok) throw new Error(result.error || 'Dictation failed.');
+          textarea.value = [textarea.value.trim(), String(result.text || '').trim()].filter(Boolean).join(textarea.value.trim() ? ' ' : ''); textarea.focus(); status.textContent = 'Dictation added. Review it, then send.';
+        } catch (error) { status.textContent = ''; addMessage(error instanceof Error ? error.message : 'Dictation failed.', 'error'); }
+        finally { dictate.disabled = false; }
+      };
+      const startDictation = async () => {
+        if (dictationSession) return void finishDictation(true);
+        dictate.disabled = true; status.textContent = 'Requesting microphone access…';
+        try {
+          const chunks = []; let frames = 0; let sampleRate = 0; const capture = await openCapture((chunk, rate) => { chunks.push(chunk); frames += chunk.length; sampleRate = rate; });
+          dictationSession = { capture, chunks, get frames() { return frames; }, get sampleRate() { return sampleRate; }, timer: setTimeout(() => void finishDictation(true), 120000) };
+          dictate.disabled = false; dictate.setAttribute('aria-pressed', 'true'); dictate.textContent = 'Stop'; status.textContent = 'Listening… click Stop to transcribe.';
+        } catch (error) { dictate.disabled = false; status.textContent = ''; addMessage(error instanceof Error ? error.message : 'Microphone access failed.', 'error'); }
+      };
+      dictate.addEventListener('click', () => void startDictation());
+      let voiceSession;
+      const setVoicePhase = (phase, label, message) => { realtimePanel.dataset.phase = phase; realtimeLabel.textContent = label; realtimeStatus.textContent = message; };
+      const stopVoiceCapture = async session => { if (!session?.capture) return; const capture = session.capture; session.capture = undefined; await capture.stop(); };
+      const closeVoiceOutput = (session, delay = 0) => { if (!session?.output) return; const output = session.output; session.output = undefined; setTimeout(() => void output.close().catch(() => undefined), delay); };
+      const resetVoiceSession = async (message, cancel = false) => {
+        const session = voiceSession; voiceSession = undefined; if (session) { session.closed = true; clearTimeout(session.timeout); clearTimeout(session.speakingTimer); await stopVoiceCapture(session); if (session.socket.readyState < WebSocket.CLOSING) session.socket.close(cancel ? 1000 : 1000, cancel ? 'Cancelled' : 'Complete'); const remaining = session.output ? Math.max(0, ((session.nextPlaybackAt || session.output.currentTime) - session.output.currentTime) * 1000) : 0; closeVoiceOutput(session, cancel ? 0 : remaining + 250); }
+        realtimeStart.hidden = false; realtimeStart.disabled = false; realtimeStop.hidden = true; realtimeTiming.textContent = ''; setVoicePhase('idle', cancel ? 'Conversation cancelled' : 'Ready to begin', message);
+      };
+      const playVoiceChunk = async (session, value) => {
+        if (session.closed) return;
+        if (!session.output) { session.output = new audioContextClass(); await session.output.resume(); session.nextPlaybackAt = session.output.currentTime; }
+        if (session.closed) return;
+        const bytes = new Uint8Array(value); if (bytes.byteLength < 2) return; const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength); const samples = new Float32Array(Math.floor(bytes.byteLength / 2)); for (let index = 0; index < samples.length; index += 1) samples[index] = view.getInt16(index * 2, true) / 32768;
+        const buffer = session.output.createBuffer(1, samples.length, 24000); buffer.copyToChannel(samples, 0); const source = session.output.createBufferSource(); source.buffer = buffer; source.connect(session.output.destination); const startAt = Math.max(session.output.currentTime + .02, session.nextPlaybackAt || 0); source.start(startAt); session.nextPlaybackAt = startAt + buffer.duration;
+        clearTimeout(session.speakingTimer); setVoicePhase('speaking', 'NeurOn is speaking', 'You can keep talking while PersonaPlex responds.'); session.speakingTimer = setTimeout(() => { if (voiceSession === session) setVoicePhase('listening', 'Listening', 'Speak naturally. End the conversation when you are finished.'); }, Math.max(50, (session.nextPlaybackAt - session.output.currentTime) * 1000));
+      };
+      const beginVoiceCapture = async session => {
+        session.capture = await openCapture((chunk, sampleRate) => { if (voiceSession !== session || session.socket.readyState !== WebSocket.OPEN) return; const pcm = pcm16Bytes(resampleAudio(chunk, sampleRate, 24000)); if (pcm.byteLength) session.socket.send(pcm); });
+        setVoicePhase('listening', 'Listening', 'Speak naturally. PersonaPlex can begin responding before you finish.');
+      };
+      const startVoiceSession = () => {
+        if (voiceSession) return; if (!audioContextClass || !navigator.mediaDevices?.getUserMedia) { setVoicePhase('error', 'Microphone unavailable', 'This browser does not provide the audio features required for live voice.'); return; }
+        realtimeStart.hidden = true; realtimeStop.hidden = false; realtimeTiming.textContent = ''; setVoicePhase('waking', 'Waking the voice model', 'NeurOn is reserving the configured target. This may take up to the startup window.');
+        const scheme = location.protocol === 'https:' ? 'wss:' : 'ws:'; const socket = new WebSocket(scheme + '//' + location.host + '/api/profile-advisor/audio/realtime'); socket.binaryType = 'arraybuffer'; const session = { socket, capture: undefined, output: undefined, nextPlaybackAt: 0, speakingTimer: undefined, playbackQueue: Promise.resolve(), closed: false, timeout: setTimeout(() => void resetVoiceSession('The live voice session reached its ten-minute limit.', true), 600000) }; voiceSession = session;
+        socket.addEventListener('message', event => {
+          if (voiceSession !== session) return;
+          if (typeof event.data !== 'string') { session.playbackQueue = session.playbackQueue.then(() => playVoiceChunk(session, event.data)).catch(error => { if (voiceSession === session) return resetVoiceSession(error instanceof Error ? error.message : 'Live voice playback failed.', true); }); return; }
+          let control; try { control = JSON.parse(event.data); } catch { return void resetVoiceSession('NeurOn received an invalid live-voice control message.', true); }
+          if (control.type === 'status') setVoicePhase('waking', 'Waking the voice model', control.message || 'Waiting for the configured target.');
+          else if (control.type === 'ready') void beginVoiceCapture(session).catch(error => resetVoiceSession(error instanceof Error ? error.message : 'Microphone access failed.', true));
+          else if (control.type === 'timing') { const timing = control.timing || {}; realtimeTiming.textContent = typeof timing.request_start_to_first_audio_ms === 'number' ? 'First audio in ' + Math.round(timing.request_start_to_first_audio_ms) + ' ms' : ''; }
+          else if (control.type === 'error') void resetVoiceSession(control.message || 'The live voice model failed.', true);
+          else if (control.type === 'done') void session.playbackQueue.finally(() => { if (voiceSession === session) return resetVoiceSession('Conversation complete. Start again whenever you are ready.'); });
+        });
+        socket.addEventListener('close', event => { if (voiceSession === session) void resetVoiceSession(event.wasClean ? 'Conversation ended.' : 'The live voice connection closed unexpectedly.', !event.wasClean); });
+        socket.addEventListener('error', () => { if (voiceSession === session) void resetVoiceSession('NeurOn could not open the live voice connection.', true); });
+      };
+      const endVoiceSession = async () => {
+        const session = voiceSession; if (!session) return; await stopVoiceCapture(session); if (session.socket.readyState === WebSocket.OPEN) session.socket.send(JSON.stringify({ type: 'end' })); realtimeStop.hidden = true; setVoicePhase('finishing', 'Finishing the response', 'NeurOn sent the end of your microphone stream and is waiting for PersonaPlex to finish.');
+      };
+      realtimeButton.addEventListener('click', () => { realtimePanel.hidden = false; realtimeStart.focus(); });
+      realtimeStart.addEventListener('click', startVoiceSession); realtimeStop.addEventListener('click', () => void endVoiceSession());
+      realtimeClose.addEventListener('click', () => { if (voiceSession) void resetVoiceSession('Conversation cancelled.', true); realtimePanel.hidden = true; realtimeButton.focus(); });
+      collapse.addEventListener('click', () => { if (voiceSession) void resetVoiceSession('Conversation cancelled.', true); });
+      toggle.addEventListener('click', () => { if (drawer.hidden && voiceSession) void resetVoiceSession('Conversation cancelled.', true); });
       let activeRequestId;
       let assistantEnabled = true;
       const setBusy = busy => { send.disabled = busy || !assistantEnabled; textarea.disabled = busy || !assistantEnabled; };
@@ -547,7 +718,11 @@ function assistantClientScript(username: string, isAdmin: boolean): string {
         catch (error) { clearProgress(); setBusy(false); addMessage(error instanceof Error ? error.message : 'The Assistant failed.', 'error'); }
       });
       textarea.addEventListener('keydown', event => { if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) { event.preventDefault(); form.requestSubmit(); } });
-      fetch('/api/profile-advisor/status').then(response => response.json()).then(data => { if (!data.enabled) { assistantEnabled = false; setBusy(false); status.textContent = data.reason === 'maintenance_mode' ? 'The Assistant is paused while NeurOn is in maintenance mode.' : 'An administrator has not configured the Assistant target and model.'; } }).catch(() => undefined);
+      fetch('/api/profile-advisor/status').then(response => response.json()).then(data => {
+        audioCapabilities = { stt: Boolean(data.audio?.stt), tts: Boolean(data.audio?.tts), realtime: Boolean(data.audio?.realtime) };
+        dictate.hidden = !audioCapabilities.stt; realtimeButton.hidden = !audioCapabilities.realtime; messages.querySelectorAll('[data-assistant-listen]').forEach(button => { button.hidden = !audioCapabilities.tts; });
+        if (!data.enabled) { assistantEnabled = false; setBusy(false); status.textContent = data.reason === 'maintenance_mode' ? 'The Assistant is paused while NeurOn is in maintenance mode.' : 'An administrator has not configured the Assistant target and model.'; }
+      }).catch(() => undefined);
       const pendingGuidance = sessionStorage.getItem('neuron-profile-assistant-guidance'); if (pendingGuidance && document.querySelector('#profile-form')) { try { document.dispatchEvent(new CustomEvent('neuron:apply-profile-guidance', { detail: JSON.parse(pendingGuidance) })); } catch {} }
       const pendingAction = sessionStorage.getItem(actionKey); if (pendingAction) { try { handleResult(JSON.parse(pendingAction)); } catch { clearPendingAction(); } }
       const pendingRequest = sessionStorage.getItem(requestKey); if (pendingRequest) void pollRequest(pendingRequest);
@@ -1602,30 +1777,148 @@ export function modelMetadataPage(user: AuthenticatedUser, deployments: ModelDep
 }
 
 export function assistantConfigPage(user: AuthenticatedUser, deployments: ModelDeploymentSelectionView[], config?: AssistantConfig, error = ""): string {
-  const options = deployments.map((deployment) => `<option value="${escapeHtml(JSON.stringify({ targetId: deployment.targetId, modelId: deployment.modelId }))}" ${config?.targetId === deployment.targetId && config.modelId === deployment.modelId ? "selected" : ""}>${escapeHtml(deployment.targetDisplayName)} · ${escapeHtml(deployment.modelDisplayName)}</option>`).join("");
+  const deploymentValue = (binding?: { targetId: string; modelId: string }) => binding ? JSON.stringify({ targetId: binding.targetId, modelId: binding.modelId }) : "";
+  const deploymentOptions = (selected: string, capability?: string) => deployments
+    .slice()
+    .sort((left, right) => Number(right.technicalCapabilities.some((entry) => entry.label === capability)) - Number(left.technicalCapabilities.some((entry) => entry.label === capability))
+      || left.targetDisplayName.localeCompare(right.targetDisplayName)
+      || left.modelDisplayName.localeCompare(right.modelDisplayName))
+    .map((deployment) => {
+      const value = JSON.stringify({ targetId: deployment.targetId, modelId: deployment.modelId });
+      const capabilities = deployment.technicalCapabilities.map((entry) => entry.title ?? entry.label).join(", ");
+      return `<option value="${escapeHtml(value)}" ${value === selected ? "selected" : ""}>${escapeHtml(deployment.targetDisplayName)} · ${escapeHtml(deployment.modelDisplayName)}${capabilities ? ` — ${escapeHtml(capabilities)}` : ""}</option>`;
+    }).join("");
   const reservationMinutes = config?.reservationMinutes ?? 15;
   const keepaliveMinutes = config?.keepaliveMinutes ?? 15;
   const requestTimeoutSeconds = config?.requestTimeoutSeconds ?? 300;
-  const choices = (kind: string, values: number[], selected: number) => values.map((value) => `<button class="choice" type="button" data-assistant-${kind}="${value}" aria-pressed="${String(value === selected)}">${value} min</button>`).join("");
+  const choices = (kind: string, values: number[], selected: number) => Array.from(new Set([...values, selected])).sort((left, right) => left - right).map((value) => `<button class="choice" type="button" data-assistant-${kind}="${value}" aria-pressed="${String(value === selected)}">${value} min</button>`).join("");
   const timeoutValues = Array.from(new Set([30, 60, 120, 300, 600, requestTimeoutSeconds])).sort((left, right) => left - right);
   const timeoutLabel = (seconds: number) => seconds < 60 ? `${seconds} sec` : `${seconds / 60} min`;
   const timeoutChoices = timeoutValues.map((value) => `<button class="choice" type="button" data-assistant-timeout="${value}" aria-pressed="${String(value === requestTimeoutSeconds)}">${escapeHtml(timeoutLabel(value))}</button>`).join("");
-  return layout("Assistant", user, `${error ? `<p class="status">${escapeHtml(error)}</p>` : ""}<section class="panel"><h1>Assistant</h1><p>Select the existing NeurOn target and model that power the in-application assistant. The configuration is stored independently from targets and model-selection data.</p><p class="muted">The selected deployment must support OpenAI-compatible chat completions and function/tool calling. Asking a question may create a visible synthetic reservation and cold-start that target through normal reconciliation.</p></section><section class="panel"><form id="assistant-config-form"><input type="hidden" name="reservationMinutes" value="${reservationMinutes}"><input type="hidden" name="keepaliveMinutes" value="${keepaliveMinutes}"><input type="hidden" name="requestTimeoutSeconds" value="${requestTimeoutSeconds}"><label>Target and model${helpTip("The exact deployment NeurOn reserves and calls for assistant requests.")}<br><select name="deployment"><option value="">Disabled</option>${options}</select></label><div class="field-grid" style="margin-top:16px"><div><h2>Reservation duration${helpTip("How long the assistant reservation remains active. This is also the maximum cold-start wait for an individual request.")}</h2><div class="row">${choices("duration", [2, 5, 15, 30, 60], reservationMinutes)}</div></div><div><h2>Keepalive${helpTip("How long idle assistant capacity stays available after its reservation window, reducing repeated cold starts.")}</h2><div class="row">${choices("keepalive", [1, 2, 5, 15], keepaliveMinutes)}</div></div></div><label style="display:block;margin-top:16px">Additional system guidance${helpTip("Trusted local terminology, priorities, or workflow guidance appended to NeurOn's built-in Assistant prompt. Tool validation, authorization, and confirmation rules still apply. Do not enter credentials or private source data.")}<br><textarea name="additionalInstructions" maxlength="8000" rows="5" placeholder="Optional organization-specific guidance">${escapeHtml(config?.additionalInstructions ?? "")}</textarea></label><details style="margin-top:16px"><summary><strong>Advanced</strong></summary><div><h2>Warm-model response timeout${helpTip("Maximum time for an already-ready model to answer. Cold-start waiting uses Reservation duration instead.")}</h2><div class="row" aria-label="Warm-model response timeout">${timeoutChoices}</div></div></details><div class="actions"><button type="submit">Save assistant settings</button></div></form></section><div class="toast" role="status" aria-live="polite" data-assistant-config-toast hidden></div>
+  const audio = config?.audio;
+  const reference = audio?.tts?.voice.mode === "reference" ? audio.tts.voice.reference : undefined;
+  const referenceBytes = reference ? Buffer.from(reference.dataBase64, "base64").length : 0;
+  const packagedVoice = audio?.tts?.voice.mode === "packaged" ? audio.tts.voice.voiceId : "Vivian";
+  const packagedInstructions = audio?.tts?.voice.mode === "packaged" ? audio.tts.voice.instructions ?? "" : "";
+  const voiceOptions = CUSTOM_VOICE_IDS.map((voice) => `<option value="${voice}" ${voice === packagedVoice ? "selected" : ""}>${voice.replaceAll("_", " ")}</option>`).join("");
+  const realtimeVoice = audio?.realtime?.voiceId ?? "NATF2";
+  const realtimeVoiceOptions = PERSONAPLEX_VOICE_IDS.map((voice) => `<option value="${voice}" ${voice === realtimeVoice ? "selected" : ""}>${voice}</option>`).join("");
+  const primaryOptions = deploymentOptions(deploymentValue(config), undefined);
+  const sttOptions = deploymentOptions(deploymentValue(audio?.stt), "speech-to-text");
+  const ttsOptions = deploymentOptions(deploymentValue(audio?.tts), "text-to-speech");
+  const realtimeOptions = deploymentOptions(deploymentValue(audio?.realtime), "realtime-speech");
+  return layout("Assistant", user, `${error ? `<p class="status">${escapeHtml(error)}</p>` : ""}
+  <section class="panel">
+    <h1>Assistant</h1>
+    <p>Choose the existing NeurOn deployments that power chat, dictation, spoken replies, and live voice. Assistant settings are stored here—not on target or model records.</p>
+    <p class="muted">Each enabled capability creates its own visible synthetic reservation through the normal reconciler. A cold request waits up to the reservation duration; the warm timeout applies only after the target is ready.</p>
+  </section>
+  <form id="assistant-config-form" data-existing-reference="${reference ? "true" : "false"}">
+    <input type="hidden" name="reservationMinutes" value="${reservationMinutes}">
+    <input type="hidden" name="keepaliveMinutes" value="${keepaliveMinutes}">
+    <input type="hidden" name="requestTimeoutSeconds" value="${requestTimeoutSeconds}">
+    <section class="panel assistant-config-section">
+      <div class="target-status-head"><div><h2>Chat guidance</h2><p class="muted">The model behind the collapsible assistant throughout NeurOn.</p></div><span class="badge ${config ? "active" : "done"}">${config ? "Enabled" : "Disabled"}</span></div>
+      <p><label>Chat target and model${helpTip("The exact deployment NeurOn reserves and calls. It must support OpenAI-compatible chat completions and tool calling.")}<br><select name="deployment"><option value="">Disabled</option>${primaryOptions}</select></label></p>
+      <p><label>Additional system guidance${helpTip("Trusted local terminology, priorities, or workflow guidance appended to NeurOn's built-in prompt. Confirmation and authorization rules still apply. Never enter credentials.")}<br><textarea name="additionalInstructions" maxlength="8000" rows="5" placeholder="Optional organization-specific guidance">${escapeHtml(config?.additionalInstructions ?? "")}</textarea></label></p>
+    </section>
+    <section class="panel assistant-config-section">
+      <h2>Capacity timing</h2>
+      <div class="field-grid">
+        <div><h3>Startup window${helpTip("How long NeurOn keeps the reservation active and how long a cold assistant request may wait for the target to become ready.")}</h3><div class="row">${choices("duration", [2, 5, 15, 30, 60], reservationMinutes)}</div></div>
+        <div><h3>Keepalive${helpTip("How long idle assistant capacity remains available after demand, reducing repeated cold starts.")}</h3><div class="row">${choices("keepalive", [1, 2, 5, 15], keepaliveMinutes)}</div></div>
+      </div>
+      <details class="subsection-divider"><summary><strong>Advanced warm-model timeout</strong></summary><p class="muted">This begins only after NeurOn observes the selected target as healthy.</p><div class="row" aria-label="Warm-model response timeout">${timeoutChoices}</div></details>
+    </section>
+    <section class="panel assistant-config-section" data-audio-section="stt">
+      <div class="target-status-head"><div><h2>Dictation</h2><p class="muted">Adds a microphone beside Send and transcribes a short recording into the chat box.</p></div><label class="switch-label"><input type="checkbox" name="sttEnabled" ${audio?.stt ? "checked" : ""}> Enabled</label></div>
+      <div data-audio-fields="stt"><p><label>Speech-to-text target and model${helpTip("Models advertising Speech to text are sorted first. NeurOn still validates the exact stored target/model pair at save time.")}<br><select name="sttDeployment"><option value="">Select a deployment</option>${sttOptions}</select></label></p></div>
+    </section>
+    <section class="panel assistant-config-section" data-audio-section="tts">
+      <div class="target-status-head"><div><h2>Spoken replies</h2><p class="muted">Adds a listen button to every user and assistant chat message.</p></div><label class="switch-label"><input type="checkbox" name="ttsEnabled" ${audio?.tts ? "checked" : ""}> Enabled</label></div>
+      <div data-audio-fields="tts">
+        <p><label>Text-to-speech target and model${helpTip("Models advertising Text to speech are sorted first.")}<br><select name="ttsDeployment"><option value="">Select a deployment</option>${ttsOptions}</select></label></p>
+        <fieldset class="target-mode-picker"><legend>Voice source</legend><div class="choice-grid">
+          <label class="option"><input type="radio" name="ttsVoiceMode" value="packaged" ${audio?.tts?.voice.mode !== "reference" ? "checked" : ""}><span><strong>Built-in voice</strong><small>Use one of the versioned CustomVoice speakers included with PreFer.</small></span></label>
+          <label class="option"><input type="radio" name="ttsVoiceMode" value="reference" ${audio?.tts?.voice.mode === "reference" ? "checked" : ""}><span><strong>Clone a reference</strong><small>Store a clean WAV and its exact transcript in the Assistant configuration.</small></span></label>
+        </div></fieldset>
+        <div data-tts-voice="packaged" class="field-grid">
+          <p><label>Voice<br><select name="ttsVoiceId">${voiceOptions}</select></label></p>
+          <p><label>Speaking instructions${helpTip("Optional direction such as tone or pacing. It is sent to CustomVoice as generation instructions.")}<br><input name="ttsInstructions" maxlength="2000" value="${escapeHtml(packagedInstructions)}" placeholder="Warm, concise, conversational"></label></p>
+        </div>
+        <div data-tts-voice="reference">
+          ${reference ? `<p class="status">Stored reference: ${escapeHtml(reference.fileName)} · ${referenceBytes.toLocaleString("en-US")} bytes. Uploading a new WAV replaces it only after a successful save.</p>` : `<p class="muted">Use roughly 3–10 seconds of clean, single-speaker speech. NeurOn accepts RIFF/WAVE up to 5 MiB and stores it privately in the control-plane database.</p>`}
+          <div class="field-grid">
+            <p><label>Reference WAV${helpTip("Clean 24 kHz mono PCM16 WAV is recommended. Other WAV variants supported by audio.cpp may also work.")}<br><input name="ttsReferenceFile" type="file" accept="audio/wav,.wav"></label></p>
+            <p><label>Exact transcript${helpTip("Enter the words spoken in the reference recording exactly; normal voice cloning requires this text.")}<br><textarea name="ttsReferenceText" maxlength="4000" rows="3">${escapeHtml(reference?.referenceText ?? "")}</textarea></label></p>
+          </div>
+        </div>
+      </div>
+    </section>
+    <section class="panel assistant-config-section" data-audio-section="realtime">
+      <div class="target-status-head"><div><h2>Live voice</h2><p class="muted">Opens a separate full-duplex PersonaPlex conversation inside the Assistant drawer.</p></div><label class="switch-label"><input type="checkbox" name="realtimeEnabled" ${audio?.realtime ? "checked" : ""}> Enabled</label></div>
+      <div data-audio-fields="realtime">
+        <div class="field-grid">
+          <p><label>Real-time target and model${helpTip("Models advertising Real-time speech are sorted first. The browser uses 24 kHz mono PCM16 through NeurOn's private WebSocket adapter.")}<br><select name="realtimeDeployment"><option value="">Select a deployment</option>${realtimeOptions}</select></label></p>
+          <p><label>PersonaPlex voice<br><select name="realtimeVoiceId">${realtimeVoiceOptions}</select></label></p>
+        </div>
+        <p><label>Persona and conversation guidance${helpTip("This is PersonaPlex's input/system prompt for the live session, not a transcript of microphone audio.")}<br><textarea name="realtimeInstructions" maxlength="4000" rows="4" placeholder="You are the NeurOn voice assistant. Be concise and help the user understand and configure their shared model capacity.">${escapeHtml(audio?.realtime?.instructions ?? "")}</textarea></label></p>
+      </div>
+    </section>
+    <div class="profile-save-bar"><span><strong>Review assistant capabilities before saving.</strong><br><small>Changes affect new assistant requests; they never provision capacity directly.</small></span><button type="submit">Save assistant settings</button></div>
+  </form>
+  <div class="toast" role="status" aria-live="polite" data-assistant-config-toast hidden></div>
   <script type="module">
     const form = document.querySelector('#assistant-config-form');
     const toast = document.querySelector('[data-assistant-config-toast]');
     let toastTimer;
-    const showToast = (message, failed = false) => { clearTimeout(toastTimer); toast.textContent = message; toast.classList.toggle('error', failed); toast.hidden = false; toastTimer = setTimeout(() => { toast.hidden = true; }, 3500); };
+    const showToast = (message, failed = false) => { clearTimeout(toastTimer); toast.textContent = message; toast.classList.toggle('error', failed); toast.hidden = false; toastTimer = setTimeout(() => { toast.hidden = true; }, 4000); };
     const select = (kind, button) => { form.querySelectorAll('[data-assistant-' + kind + ']').forEach(candidate => candidate.setAttribute('aria-pressed', String(candidate === button))); const field = kind === 'duration' ? 'reservationMinutes' : kind === 'keepalive' ? 'keepaliveMinutes' : 'requestTimeoutSeconds'; form.elements[field].value = button.dataset['assistant' + kind[0].toUpperCase() + kind.slice(1)]; };
-    form.querySelectorAll('[data-assistant-duration]').forEach(button => button.addEventListener('click', () => select('duration', button)));
-    form.querySelectorAll('[data-assistant-keepalive]').forEach(button => button.addEventListener('click', () => select('keepalive', button)));
-    form.querySelectorAll('[data-assistant-timeout]').forEach(button => button.addEventListener('click', () => select('timeout', button)));
+    for (const kind of ['duration', 'keepalive', 'timeout']) form.querySelectorAll('[data-assistant-' + kind + ']').forEach(button => button.addEventListener('click', () => select(kind, button)));
+    const syncAudioSections = () => {
+      for (const role of ['stt', 'tts', 'realtime']) {
+        const enabled = form.elements[role + 'Enabled'].checked;
+        const fields = form.querySelector('[data-audio-fields="' + role + '"]');
+        fields.hidden = !enabled;
+        fields.querySelectorAll('select, input, textarea').forEach(field => { if (field.name !== role + 'Enabled') field.disabled = !enabled; });
+      }
+      const voiceMode = form.querySelector('[name="ttsVoiceMode"]:checked')?.value || 'packaged';
+      form.querySelectorAll('[data-tts-voice]').forEach(panel => {
+        panel.hidden = panel.dataset.ttsVoice !== voiceMode || !form.elements.ttsEnabled.checked;
+        panel.querySelectorAll('select, input, textarea').forEach(field => { field.disabled = panel.hidden; });
+      });
+    };
+    for (const field of form.querySelectorAll('[name$="Enabled"], [name="ttsVoiceMode"]')) field.addEventListener('change', syncAudioSections);
+    syncAudioSections();
+    const selectedDeployment = name => { const value = form.elements[name].value; if (!value) throw new Error('Select a target and model for every enabled capability.'); return JSON.parse(value); };
+    const fileBase64 = file => new Promise((resolve, reject) => { const reader = new FileReader(); reader.onerror = () => reject(new Error('The reference WAV could not be read.')); reader.onload = () => resolve(String(reader.result).split(',', 2)[1] || ''); reader.readAsDataURL(file); });
     form.addEventListener('submit', async event => {
       event.preventDefault(); const submit = form.querySelector('button[type="submit"]'); submit.disabled = true; submit.textContent = 'Saving…';
       try {
-        const deployment = form.elements.deployment.value ? JSON.parse(form.elements.deployment.value) : { targetId: null, modelId: null }; const { targetId, modelId } = deployment;
-        const response = await fetch('/api/admin/assistant-config', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ targetId, modelId, reservationMinutes: Number(form.elements.reservationMinutes.value), keepaliveMinutes: Number(form.elements.keepaliveMinutes.value), requestTimeoutSeconds: Number(form.elements.requestTimeoutSeconds.value), additionalInstructions: form.elements.additionalInstructions.value }) });
-        if (!response.ok) throw new Error((await response.json()).error || 'Save failed'); showToast('Assistant settings saved.');
+        const deployment = form.elements.deployment.value ? JSON.parse(form.elements.deployment.value) : { targetId: null, modelId: null };
+        if (!deployment.targetId && (form.elements.sttEnabled.checked || form.elements.ttsEnabled.checked || form.elements.realtimeEnabled.checked)) throw new Error('Enable the chat assistant before enabling its audio capabilities.');
+        const audio = {};
+        if (form.elements.sttEnabled.checked) audio.stt = selectedDeployment('sttDeployment');
+        if (form.elements.ttsEnabled.checked) {
+          const binding = selectedDeployment('ttsDeployment');
+          if (form.querySelector('[name="ttsVoiceMode"]:checked').value === 'packaged') {
+            binding.voice = { mode: 'packaged', voiceId: form.elements.ttsVoiceId.value, ...(form.elements.ttsInstructions.value.trim() ? { instructions: form.elements.ttsInstructions.value.trim() } : {}) };
+          } else {
+            const file = form.elements.ttsReferenceFile.files[0]; const referenceText = form.elements.ttsReferenceText.value.trim();
+            if (!referenceText) throw new Error('Enter the exact transcript for the reference voice.');
+            if (file) {
+              if (file.size > ${ASSISTANT_VOICE_REFERENCE_MAX_BYTES}) throw new Error('The reference WAV must be 5 MiB or smaller.');
+              binding.voice = { mode: 'reference', reference: { fileName: file.name, mimeType: 'audio/wav', dataBase64: await fileBase64(file), referenceText } };
+            } else if (form.dataset.existingReference === 'true') binding.voice = { mode: 'reference', keepExisting: true, referenceText };
+            else throw new Error('Upload a WAV reference voice.');
+          }
+          audio.tts = binding;
+        }
+        if (form.elements.realtimeEnabled.checked) audio.realtime = { ...selectedDeployment('realtimeDeployment'), voiceId: form.elements.realtimeVoiceId.value, instructions: form.elements.realtimeInstructions.value.trim(), sampleRate: 24000 };
+        const response = await fetch('/api/admin/assistant-config', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ targetId: deployment.targetId, modelId: deployment.modelId, reservationMinutes: Number(form.elements.reservationMinutes.value), keepaliveMinutes: Number(form.elements.keepaliveMinutes.value), requestTimeoutSeconds: Number(form.elements.requestTimeoutSeconds.value), additionalInstructions: form.elements.additionalInstructions.value, audio }) });
+        const result = await response.json(); if (!response.ok) throw new Error(result.error || 'Save failed');
+        form.dataset.existingReference = String(Boolean(audio.tts?.voice?.mode === 'reference'));
+        showToast('Assistant settings saved.');
       } catch (caught) { showToast(caught instanceof Error ? caught.message : 'Save failed', true); }
       finally { submit.disabled = false; submit.textContent = 'Save assistant settings'; }
     });
@@ -1956,7 +2249,7 @@ function authMethodDeletePanel(method: AuthMethodView): string {
   </form>`;
 }
 
-export function targetAdminPage(user: AuthenticatedUser, targets: TargetView[], providers: ProviderView[], runtimeProfiles: RuntimeProfile[] = [], teams: Team[] = [], users: UserAccount[] = [], error = "", createdTargetId = "", statusPollSeconds = 5): string {
+export function targetAdminPage(user: AuthenticatedUser, targets: TargetView[], providers: ProviderView[], runtimeProfiles: RuntimeProfile[] = [], teams: Team[] = [], users: UserAccount[] = [], error = "", createdTargetId = "", statusPollSeconds = 5, createdNeedsProvisioning = false): string {
   const rows = targets.length
     ? targets.map((target) => targetRow(target, providers, runtimeProfiles, teams, users)).join("")
     : `<p class="muted">No targets configured</p>`;
@@ -1968,7 +2261,7 @@ export function targetAdminPage(user: AuthenticatedUser, targets: TargetView[], 
     <div class="target-status-head"><h1>Targets</h1><div class="inline-actions"><button class="secondary" type="button" data-rediscover-all>Rediscover and benchmark all</button>${addTarget}</div></div>
     <p class="muted" data-rediscover-all-status>Runs targets one at a time. Each target is discovered, briefly benchmarked, and returned through the normal demand controller before the next target begins.</p>
     ${error ? `<p class="status">${escapeHtml(error)}</p>` : ""}
-    ${createdTargetId ? `<div class="secret-box"><span>Target <code>${escapeHtml(createdTargetId)}</code> was created.</span><button type="button" data-provision-target="${escapeHtml(createdTargetId)}">Provision target</button></div>` : ""}
+    ${createdTargetId ? `<div class="secret-box"><span>Target <code>${escapeHtml(createdTargetId)}</code> was created.${createdNeedsProvisioning ? " Review the resolved plan, then explicitly provision it." : " NeurOn will use the capacity you connected."}</span>${createdNeedsProvisioning ? `<button type="button" data-provision-target="${escapeHtml(createdTargetId)}">Provision target</button>` : ""}</div>` : ""}
     <div class="summary-list">${rows}</div>
   </section>
   ${modal}
@@ -2013,36 +2306,63 @@ function targetCreateModal(providers: ProviderView[], runtimeProfiles: RuntimePr
     <div class="modal-dialog">
     <div class="target-status-head"><h2>Add target</h2><button class="secondary" type="button" data-close-modal>Close</button></div>
     <form method="post" action="/admin/targets">
+      <fieldset class="target-mode-picker"><legend>How should this target be created?</legend><div class="choice-grid">
+        <label class="option"><input type="radio" name="connectionMode" value="existing" checked><span><strong>Connect existing</strong><small>Point NeurOn at capacity that already exists. Discovery fills in the runtime models.</small></span></label>
+        <label class="option"><input type="radio" name="connectionMode" value="provision"><span><strong>Provision new</strong><small>Choose an immutable PreFer release, hardware, and runtime configuration, then confirm provider creation separately.</small></span></label>
+      </div></fieldset>
       <p><label>Provider<br>${targetProviderSelect(providers)}</label></p>
-      <p><label>Profile<br>${runtimeProfileSelect(runtimeProfiles)}</label></p>
-      <p><label>Variant<br><select name="runtimeProfileVariantId"></select></label></p>
+      <p><label>Runtime<br>${runtimeProfileSelect(runtimeProfiles)}</label></p>
+      <p data-runtime-variant-field><label>Configuration<br><select name="runtimeProfileVariantId"></select></label></p>
       <p id="target-runtime-profile-note" class="muted"></p>
+      <section class="target-provisioning-panel" data-connection-fields="provision" hidden>
+        <h3>PreFer release catalog</h3>
+        <p class="muted">The selected catalog row is resolved into the target and provisioning job. Later catalog changes cannot silently alter this target.</p>
+        <div class="field-grid">
+          <p><label>PreFer commit SHA${helpTip("Use the full 40-character immutable commit shown on a PreFer release. NeurOn derives the published seven-character image tag from it after loading that exact source catalog.")}<br><input name="runtimeCatalogRevision" type="text" minlength="40" maxlength="40" pattern="[0-9A-Fa-f]{40}" placeholder="full 40-character PreFer commit SHA"></label></p>
+          <p><button class="secondary" type="button" data-load-runtime-catalog>Load hardware and configurations</button></p>
+        </div>
+        <p class="muted" data-runtime-catalog-status>No release loaded.</p>
+        <div class="field-grid">
+          <p><label>Hardware or instance<br><select data-runtime-hardware disabled><option value="">Load a release first</option></select></label></p>
+          <p><label>Runtime configuration<br><select name="runtimeDeploymentId" disabled><option value="">Choose hardware first</option></select></label></p>
+        </div>
+        <div class="target-status-card" data-runtime-deployment-summary hidden></div>
+        <div data-runpod-provisioning-options hidden>
+          <h3>RunPod options</h3>
+          <div class="field-grid">
+            <p><label>Cloud<br><select name="runpodCloudType"><option value="SECURE">Secure Cloud</option><option value="COMMUNITY">Community Cloud</option></select></label></p>
+            <p><label>Persistent model volume (GB)<br><input name="runpodVolumeGb" type="number" min="20" value="100"></label></p>
+            <p><label>Container disk (GB)<br><input name="runpodContainerDiskGb" type="number" min="20" value="50"></label></p>
+          </div>
+          <p><label><input name="runpodInterruptible" type="checkbox"> Use interruptible capacity</label>${helpTip("Interruptible Pods can be cheaper but may be stopped by RunPod. Leave this off for predictable shared capacity.")}</p>
+        </div>
+      </section>
       <div class="field-grid">
         <p><label>ID<br><input name="id" type="text" placeholder="target-id" required></label></p>
         <p><label>Display name<br><input name="displayName" type="text" placeholder="Target name"></label></p>
       </div>
       ${targetAudienceEditor(teams, users)}
-      <div id="runpod-target-fields">
+      <div id="runpod-target-fields" data-connection-fields="existing">
         <p><label>RunPod Pod ID<br><input name="runpodPodId" type="text" placeholder="pod-id"></label></p>
         <p><label>RunPod runtime port<br><input name="runpodRuntimePort" type="number" min="1" placeholder="8080"></label></p>
       </div>
-      <div id="aws-target-fields">
+      <div id="aws-target-fields" data-connection-fields="existing">
         <p><label>AWS cluster<br><input name="awsCluster" type="text" placeholder="llm-cluster"></label></p>
         <p><label>AWS service<br><input name="awsService" type="text" placeholder="llama-cpp-gpu-pool"></label></p>
         <p><label>AWS ASG name<br><input name="awsAsgName" type="text" placeholder="llm-gpu-pool-asg"></label></p>
       </div>
-      <div id="aws-ec2-target-fields">
+      <div id="aws-ec2-target-fields" data-connection-fields="existing">
         <p><label>AWS EC2 instance ID<br><input name="awsInstanceId" type="text" placeholder="i-1234567890abcdef0"></label></p>
         ${ec2InstanceDiscoveryControls()}
         <p><label>Runtime port<br><input name="awsRuntimePort" type="number" min="1" max="65535" placeholder="8080"></label></p>
         <p class="muted">NeurOn starts, stops, and inspects this pre-created instance. Runtime URLs default to <code>http://&lt;private-ip&gt;:8080/v1</code> and <code>/health</code>.</p>
       </div>
-      <div id="docker-target-fields">
+      <div id="docker-target-fields" data-connection-fields="existing">
         <p><label>Docker container name<br><input name="dockerContainerName" type="text" placeholder="prefer"></label></p>
         <p><label>Model volume<br><input name="dockerModelVolume" type="text" placeholder="prefer-model-cache"></label></p>
         <p class="muted">The profile supplies the container path.</p>
       </div>
-      <div id="neuron-target-fields">
+      <div id="neuron-target-fields" data-connection-fields="existing">
         <p><label>Remote NeurOn target ID<br><input name="neuronTargetId" type="text" placeholder="gpu-pool-west"></label></p>
         <p class="muted">Later we can pull these from the remote NeurOn API once that provider is wired.</p>
       </div>
@@ -2062,7 +2382,7 @@ function targetCreateModal(providers: ProviderView[], runtimeProfiles: RuntimePr
         <p><label><input name="litellmSyncDisabled" type="checkbox"> Disable discovered-model synchronization to LiteLLM</label></p>
         <p class="muted">Leave models empty to rely on runtime discovery.</p>
       </details>
-      <div class="actions"><button type="submit">Add target</button></div>
+      <div class="actions"><button type="submit" data-target-create-submit>Add target</button></div>
     </form>
     </div>
   </div>`;
@@ -2156,12 +2476,20 @@ function targetAdminScript(providers: ProviderView[], runtimeProfiles: RuntimePr
       if (!button) return;
       event.preventDefault();
       const targetId = button.dataset.provisionTarget;
+      if (!window.confirm('Provision ' + targetId + '? This creates provider capacity from the reviewed immutable plan and may incur cost.')) return;
       button.disabled = true;
       const previous = button.textContent;
       button.textContent = 'Provisioning...';
-      const response = await fetch('/api/admin/targets/' + encodeURIComponent(targetId) + '/provision', { method: 'POST' });
-      button.textContent = response.ok ? 'Provisioned' : 'Provision failed';
-      await refreshTargetStatus();
+      try {
+        const response = await fetch('/api/admin/targets/' + encodeURIComponent(targetId) + '/provision', { method: 'POST' });
+        const result = await response.json().catch(() => ({}));
+        button.textContent = response.ok ? 'Provisioned' : 'Provision failed';
+        if (!response.ok) window.alert(result.error || 'Provider provisioning failed without a detailed response.');
+        await refreshTargetStatus();
+      } catch {
+        button.textContent = 'Provision failed';
+        window.alert('NeurOn could not reach the provisioning endpoint. No success was recorded.');
+      }
       setTimeout(() => { button.disabled = false; button.textContent = previous; }, 1400);
     });
     document.addEventListener('click', async (event) => {
@@ -2195,6 +2523,7 @@ function targetAdminScript(providers: ProviderView[], runtimeProfiles: RuntimePr
       group.querySelectorAll('[data-tab-panel]').forEach(panel => { panel.hidden = panel.dataset.tabPanel !== tab.dataset.tab; });
     });
     const providers = ${safeJson(Object.fromEntries(providers.map((provider) => [provider.id, provider.type])))};
+    const providerDetails = ${safeJson(Object.fromEntries(providers.map((provider) => [provider.id, { type: provider.type, provisioning: provider.provisioning?.enabled === true }]))) };
     const runtimeProfiles = ${safeJson(Object.fromEntries(runtimeProfiles.map((profile) => [profile.id, profile])))};
     const escapeText = (value) => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' }[char]));
     ${ec2InstanceDiscoveryScript()}
@@ -2209,6 +2538,20 @@ function targetAdminScript(providers: ProviderView[], runtimeProfiles: RuntimePr
     const awsEc2 = document.querySelector('#aws-ec2-target-fields');
     const docker = document.querySelector('#docker-target-fields');
     const neuron = document.querySelector('#neuron-target-fields');
+    const createForm = document.querySelector('#target-modal form');
+    const connectionModes = [...(createForm?.querySelectorAll('input[name="connectionMode"]') ?? [])];
+    const provisionPanel = createForm?.querySelector('[data-connection-fields="provision"]');
+    const runpodProvisioningOptions = createForm?.querySelector('[data-runpod-provisioning-options]');
+    const variantField = createForm?.querySelector('[data-runtime-variant-field]');
+    const createSubmit = createForm?.querySelector('[data-target-create-submit]');
+    const catalogRevision = createForm?.elements.runtimeCatalogRevision;
+    const catalogHardware = createForm?.querySelector('[data-runtime-hardware]');
+    const catalogDeployment = createForm?.elements.runtimeDeploymentId;
+    const catalogStatus = createForm?.querySelector('[data-runtime-catalog-status]');
+    const catalogSummary = createForm?.querySelector('[data-runtime-deployment-summary]');
+    const loadCatalog = createForm?.querySelector('[data-load-runtime-catalog]');
+    let catalogOptions = new Map();
+    const connectionMode = () => createForm?.querySelector('input[name="connectionMode"]:checked')?.value ?? 'existing';
     const selectedProfile = () => runtimeProfile ? runtimeProfiles[runtimeProfile.value] : undefined;
     const selectedVariant = () => {
       const profile = selectedProfile();
@@ -2234,16 +2577,53 @@ function targetAdminScript(providers: ProviderView[], runtimeProfiles: RuntimePr
       const profile = selectedProfile();
       const variants = profile?.variants ?? [];
       runtimeProfileVariant.innerHTML = variants.map(variant => '<option value="' + escapeText(variant.id) + '">' + escapeText(variant.name) + '</option>').join('');
-      runtimeProfileVariant.closest('p').hidden = variants.length === 0;
+      (variantField ?? runtimeProfileVariant.closest('p')).hidden = variants.length === 0 || connectionMode() === 'provision';
+    };
+    const resetCatalog = (message = 'No release loaded.') => {
+      catalogOptions = new Map();
+      if (catalogHardware) { catalogHardware.innerHTML = '<option value="">Load a release first</option>'; catalogHardware.disabled = true; }
+      if (catalogDeployment) { catalogDeployment.innerHTML = '<option value="">Choose hardware first</option>'; catalogDeployment.disabled = true; }
+      if (catalogStatus) catalogStatus.textContent = message;
+      if (catalogSummary) { catalogSummary.hidden = true; catalogSummary.replaceChildren(); }
+    };
+    const syncCatalogConfigurations = () => {
+      if (!catalogDeployment || !catalogHardware) return;
+      const options = [...catalogOptions.values()].filter(option => option.hardwareLabel === catalogHardware.value);
+      catalogDeployment.replaceChildren(new Option('Choose a runtime configuration', ''), ...options.map(option => {
+        const cost = option.advertisedHourlyUsd == null ? '' : ' · $' + (option.advertisedHourlyUsd * (option.gpuCount || 1)).toFixed(2) + '/hr';
+        return new Option(option.configurationLabel + ' · ' + option.modelCount + ' model' + (option.modelCount === 1 ? '' : 's') + cost, option.id);
+      }));
+      catalogDeployment.disabled = options.length === 0;
+      if (options.length === 1) catalogDeployment.value = options[0].id;
+      renderCatalogSelection();
+    };
+    const renderCatalogSelection = () => {
+      if (!catalogSummary || !catalogDeployment) return;
+      const option = catalogOptions.get(catalogDeployment.value);
+      if (!option) { catalogSummary.hidden = true; catalogSummary.replaceChildren(); return; }
+      const title = document.createElement('strong'); title.textContent = option.hardwareLabel + ' · ' + option.configurationLabel;
+      const models = document.createElement('div'); models.className = 'muted'; models.textContent = option.modelCount + ' model' + (option.modelCount === 1 ? '' : 's') + (option.capabilities.length ? ' · ' + option.capabilities.join(', ') : '');
+      const cost = document.createElement('div'); cost.className = 'muted'; cost.textContent = option.advertisedHourlyUsd == null ? 'Catalog cost unavailable' : '$' + (option.advertisedHourlyUsd * (option.gpuCount || 1)).toFixed(2) + '/hr catalog estimate';
+      catalogSummary.replaceChildren(title, models, cost); catalogSummary.hidden = false;
     };
     const sync = () => {
       if (!provider) return;
       const type = providers[provider.value];
-      runpod.hidden = type !== 'runpod';
-      aws.hidden = type !== 'aws-ecs' && type !== 'aws-ecs-asg';
-      awsEc2.hidden = type !== 'aws-ec2';
-      docker.hidden = type !== 'docker';
-      neuron.hidden = type !== 'neuron';
+      const provisioning = connectionMode() === 'provision';
+      runpod.hidden = provisioning || type !== 'runpod';
+      aws.hidden = provisioning || (type !== 'aws-ecs' && type !== 'aws-ecs-asg');
+      awsEc2.hidden = provisioning || type !== 'aws-ec2';
+      docker.hidden = provisioning || type !== 'docker';
+      neuron.hidden = provisioning || type !== 'neuron';
+      if (provisionPanel) provisionPanel.hidden = !provisioning;
+      if (runpodProvisioningOptions) runpodProvisioningOptions.hidden = !provisioning || type !== 'runpod';
+      const detail = providerDetails[provider.value];
+      const profileSupportsCatalog = Boolean(selectedProfile()?.catalog);
+      if (loadCatalog) loadCatalog.disabled = !provisioning || !detail?.provisioning || !['runpod', 'aws-ec2'].includes(type) || !profileSupportsCatalog;
+      if (createSubmit) createSubmit.textContent = provisioning ? 'Create provisioning draft' : 'Add target';
+      if (catalogStatus && provisioning && !detail?.provisioning) catalogStatus.textContent = 'This provider does not allow resource provisioning.';
+      else if (catalogStatus && provisioning && !['runpod', 'aws-ec2'].includes(type)) catalogStatus.textContent = 'Catalog provisioning currently supports RunPod and AWS EC2.';
+      else if (catalogStatus && provisioning && !profileSupportsCatalog) catalogStatus.textContent = 'Choose a runtime with a release catalog.';
       const profile = effectiveProfile();
       const variant = selectedVariant();
       const port = profile?.port ?? 8080;
@@ -2252,10 +2632,32 @@ function targetAdminScript(providers: ProviderView[], runtimeProfiles: RuntimePr
       const modelVolume = profileVolumes[0];
       runtimeNote.textContent = profile ? [profile.type, profile.image, variant ? 'variant ' + variant.name : '', 'port ' + port, modelVolume ? 'volume ' + modelVolume[1] + ' -> ' + modelVolume[0] : '', discovery ? 'discovery on' : 'discovery off'].filter(Boolean).join(' | ') : '';
       if (dockerModelVolumeInput && !dockerModelVolumeInput.dataset.touched) dockerModelVolumeInput.value = modelVolume?.[1] ?? '';
+      syncVariants();
     };
-    provider?.addEventListener('change', sync);
-    runtimeProfile?.addEventListener('change', () => { syncVariants(); sync(); });
+    provider?.addEventListener('change', () => { resetCatalog(); sync(); });
+    runtimeProfile?.addEventListener('change', () => { resetCatalog(); syncVariants(); sync(); });
     runtimeProfileVariant?.addEventListener('change', sync);
+    connectionModes.forEach(input => input.addEventListener('change', () => { resetCatalog(); sync(); }));
+    catalogHardware?.addEventListener('change', syncCatalogConfigurations);
+    catalogDeployment?.addEventListener('change', renderCatalogSelection);
+    loadCatalog?.addEventListener('click', async () => {
+      const revision = catalogRevision?.value.trim();
+      if (!revision || !provider?.value || !runtimeProfile?.value) { resetCatalog('Enter a PreFer commit SHA first.'); return; }
+      loadCatalog.disabled = true; catalogStatus.textContent = 'Loading the immutable PreFer catalog…';
+      try {
+        const query = new URLSearchParams({ profileId: runtimeProfile.value, providerId: provider.value, revision });
+        const response = await fetch('/api/admin/runtime-catalog?' + query);
+        const body = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(body.error || 'Runtime catalog could not be loaded');
+        catalogOptions = new Map((body.options ?? []).map(option => [option.id, option]));
+        const hardware = [...new Set((body.options ?? []).map(option => option.hardwareLabel))];
+        catalogHardware.replaceChildren(new Option('Choose hardware or instance', ''), ...hardware.map(label => new Option(label, label)));
+        catalogHardware.disabled = hardware.length === 0;
+        if (hardware.length === 1) { catalogHardware.value = hardware[0]; syncCatalogConfigurations(); }
+        catalogStatus.textContent = body.options?.length ? 'Loaded ' + body.options.length + ' compatible deployment configurations from ' + body.revision + '.' : 'This release has no deployment configurations for the selected provider.';
+      } catch (error) { resetCatalog(error instanceof Error ? error.message : 'Runtime catalog could not be loaded'); }
+      finally { sync(); }
+    });
     syncVariants();
     sync();
     document.querySelectorAll('form[data-target-edit-form]').forEach(form => {
@@ -2613,7 +3015,7 @@ function declarativeTargetEnv(target: CapacityTarget): string {
   return lines.join("\n");
 }
 
-export function providerAdminPage(user: AuthenticatedUser, providers: ProviderView[], targets: TargetView[] = [], runtimeProfiles: RuntimeProfile[] = [], error = ""): string {
+export function providerAdminPage(user: AuthenticatedUser, providers: ProviderView[], targets: TargetView[] = [], _runtimeProfiles: RuntimeProfile[] = [], error = ""): string {
   const rows = providers.length
     ? providers.map((provider) => providerRow(provider, targets)).join("")
     : `<p class="muted">No providers configured</p>`;
@@ -2632,16 +3034,12 @@ export function providerAdminPage(user: AuthenticatedUser, providers: ProviderVi
         <p><label>Display name<br><input name="displayName" type="text" placeholder="RunPod Main"></label></p>
       </div>
       <p><label><input name="provisioningEnabled" type="checkbox"> Allow this provider to provision resources</label></p>
-      <div id="aws-ec2-provider-fields">
-        <p><label>Instance Name-tag pattern<br><input name="awsEc2InstanceNamePattern" type="text" placeholder="${DEFAULT_AWS_EC2_INSTANCE_NAME_PATTERN}"></label></p>
-        <p class="muted">Defaults to <code>${DEFAULT_AWS_EC2_INSTANCE_NAME_PATTERN}</code>. Find instances limits discovery to this wildcard pattern. Start/stop authorization remains enforced by IAM.</p>
-      </div>
+      <div id="aws-ec2-provider-fields">${awsEc2ProviderFields()}</div>
       <p id="provider-type-note" class="muted"></p>
       <div class="actions"><button type="submit">Add provider</button></div>
     </form>
     </div>
   </div>
-  ${createTargetFromProviderModal(providers, runtimeProfiles)}
   <script type="module">
     document.addEventListener('click', async (event) => {
       const button = event.target.closest('[data-copy]');
@@ -2678,7 +3076,7 @@ export function providerAdminPage(user: AuthenticatedUser, providers: ProviderVi
     const notes = {
       runpod: 'RunPod account access will come from the runtime environment or a future credentials record.',
       neuron: 'External NeurOn providers will need a NeurOn API key once credentials are modeled.',
-      'aws-ec2': 'AWS uses the NeurOn runtime role to start, stop, and inspect a pre-created EC2 instance.',
+      'aws-ec2': 'AWS can connect to an existing instance or launch a catalog-selected PreFer deployment from a provider-owned launch template.',
       'aws-ecs-asg': 'AWS uses the NeurOn runtime role for ordinary lifecycle operations.',
       docker: 'Docker providers use the local Docker daemon available to NeurOn.',
       'docker-compose': 'Docker Compose providers use target-level project and service settings.'
@@ -2698,8 +3096,6 @@ export function providerAdminPage(user: AuthenticatedUser, providers: ProviderVi
       providerType?.addEventListener('change', syncProviderEdit);
       syncProviderEdit();
     });
-    const targetProviders = ${safeJson(Object.fromEntries(providers.map((provider) => [provider.id, provider.type])))};
-    const runtimeProfiles = ${safeJson(Object.fromEntries(runtimeProfiles.map((profile) => [profile.id, profile])))};
     const escapeText = (value) => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' }[char]));
     document.addEventListener('click', async (event) => {
       const button = event.target.closest('[data-discover-provider-resources]');
@@ -2730,66 +3126,6 @@ export function providerAdminPage(user: AuthenticatedUser, providers: ProviderVi
         button.disabled = false;
       }
     });
-    ${ec2InstanceDiscoveryScript()}
-    const targetProvider = document.querySelector('#provider-target-modal select[name="providerId"]');
-    const runtimeProfile = document.querySelector('#provider-target-modal select[name="runtimeProfileId"]');
-    const runtimeProfileVariant = document.querySelector('#provider-target-modal select[name="runtimeProfileVariantId"]');
-    const runpodTarget = document.querySelector('#provider-target-modal [data-provider-fields="runpod"]');
-    const dockerTarget = document.querySelector('#provider-target-modal [data-provider-fields="docker"]');
-    const awsTarget = document.querySelector('#provider-target-modal [data-provider-fields="aws"]');
-    const awsEc2Target = document.querySelector('#provider-target-modal [data-provider-fields="aws-ec2"]');
-    const neuronTarget = document.querySelector('#provider-target-modal [data-provider-fields="neuron"]');
-    const runtimeNote = document.querySelector('#runtime-profile-note');
-    const dockerModelVolumeInput = document.querySelector('#provider-target-modal input[name="dockerModelVolume"]');
-    dockerModelVolumeInput?.addEventListener('input', () => { dockerModelVolumeInput.dataset.touched = 'true'; });
-    const selectedTargetProfile = () => runtimeProfiles[runtimeProfile.value];
-    const selectedTargetVariant = () => {
-      const profile = selectedTargetProfile();
-      return profile?.variants?.find(variant => variant.id === runtimeProfileVariant?.value);
-    };
-    const effectiveTargetProfile = () => {
-      const profile = selectedTargetProfile();
-      const variant = selectedTargetVariant();
-      if (!profile || !variant) return profile;
-      return {
-        ...profile,
-        image: variant.image ?? profile.image,
-        port: variant.port ?? profile.port,
-        health: variant.health ?? profile.health,
-        api: variant.api ?? profile.api,
-        volumes: variant.volumes ?? profile.volumes,
-        env: { ...(profile.env ?? {}), ...(variant.env ?? {}) },
-        discovery: variant.discovery ?? profile.discovery
-      };
-    };
-    const syncTargetVariants = () => {
-      if (!runtimeProfileVariant) return;
-      const profile = selectedTargetProfile();
-      const variants = profile?.variants ?? [];
-      runtimeProfileVariant.innerHTML = variants.map(variant => '<option value="' + escapeText(variant.id) + '">' + escapeText(variant.name) + '</option>').join('');
-      runtimeProfileVariant.closest('p').hidden = variants.length === 0;
-    };
-    const syncTargetCreate = () => {
-      const targetType = targetProviders[targetProvider.value] ?? '';
-      runpodTarget.hidden = targetType !== 'runpod';
-      dockerTarget.hidden = targetType !== 'docker';
-      awsTarget.hidden = targetType !== 'aws-ecs' && targetType !== 'aws-ecs-asg';
-      awsEc2Target.hidden = targetType !== 'aws-ec2';
-      neuronTarget.hidden = targetType !== 'neuron';
-      const profile = effectiveTargetProfile();
-      const variant = selectedTargetVariant();
-      const port = profile?.port ?? 8080;
-      const discovery = profile ? profile.discovery ?? true : false;
-      const profileVolumes = Object.entries(profile?.volumes ?? {});
-      const modelVolume = profileVolumes[0];
-      runtimeNote.textContent = profile ? [profile.type, profile.image, variant ? 'variant ' + variant.name : '', 'port ' + port, modelVolume ? 'volume ' + modelVolume[1] + ' -> ' + modelVolume[0] : '', discovery ? 'discovery on' : 'discovery off'].filter(Boolean).join(' | ') : '';
-      if (dockerModelVolumeInput && !dockerModelVolumeInput.dataset.touched) dockerModelVolumeInput.value = modelVolume?.[1] ?? '';
-    };
-    targetProvider?.addEventListener('change', syncTargetCreate);
-    runtimeProfile?.addEventListener('change', () => { syncTargetVariants(); syncTargetCreate(); });
-    runtimeProfileVariant?.addEventListener('change', syncTargetCreate);
-    syncTargetVariants();
-    syncTargetCreate();
   </script>`);
 }
 
@@ -2808,8 +3144,30 @@ function providerRow(provider: ProviderView, targets: TargetView[]): string {
   return `<details class="drilldown"><summary><div><strong>${escapeHtml(provider.displayName)}</strong><div class="muted"><code>${escapeHtml(provider.id)}</code> | ${escapeHtml(provider.type)} | ${providerTargets.length} targets</div></div><span class="badge ${provider.source === "persisted" ? "active" : "done"}">${escapeHtml(provider.source)}</span></summary><div class="drilldown-body" data-tabs><div class="tabbar"><button type="button" data-tab="view" aria-selected="true">View</button><button type="button" data-tab="targets" aria-selected="false">Targets</button><button type="button" data-tab="json" aria-selected="false">JSON</button><button type="button" data-tab="env" aria-selected="false">ENV</button><button type="button" data-tab="edit" aria-selected="false">Edit</button><button type="button" data-tab="delete" aria-selected="false">Delete</button></div><section class="tab-panel" data-tab-panel="view">${viewConfig}</section><section class="tab-panel" data-tab-panel="targets" hidden>${providerTargetsPanel(provider, providerTargets)}</section><section class="tab-panel" data-tab-panel="json" hidden><div class="inline-actions"><button type="button" data-copy="${escapeHtml(declarative)}">Copy JSON</button></div><pre>${escapeHtml(declarative)}</pre></section><section class="tab-panel" data-tab-panel="env" hidden><div class="inline-actions"><button type="button" data-copy="${escapeHtml(env)}">Copy ENV</button></div><pre>${escapeHtml(env)}</pre></section><section class="tab-panel" data-tab-panel="edit" hidden><p class="muted">${provider.editable ? "This provider is stored in the database." : "This provider is loaded from declarative config."}</p>${editAction}</section><section class="tab-panel" data-tab-panel="delete" hidden>${deleteAction}</section></div></details>`;
 }
 
+function awsEc2ProviderFields(provider?: ProviderView): string {
+  const config = provider?.config?.awsEc2;
+  const deploymentEnvironment = config?.deploymentEnvironment ? JSON.stringify(config.deploymentEnvironment, null, 2) : "";
+  return `<p><label>Instance Name-tag pattern<br><input name="awsEc2InstanceNamePattern" type="text" value="${escapeHtml(config?.instanceNamePattern ?? "")}" placeholder="${DEFAULT_AWS_EC2_INSTANCE_NAME_PATTERN}"></label></p>
+    <p class="muted">Defaults to <code>${DEFAULT_AWS_EC2_INSTANCE_NAME_PATTERN}</code>. Find instances uses this wildcard; IAM separately controls lifecycle access.</p>
+    <fieldset>
+      <legend>Provisioning launch template ${helpTip("NeurOn launches exactly one instance from this template and only replaces the marked PreFer deployment environment block in its user data.")}</legend>
+      <div class="field-grid">
+        <p><label>Launch template ID<br><input name="awsEc2LaunchTemplateId" type="text" value="${escapeHtml(config?.launchTemplateId ?? "")}" placeholder="lt-0123456789abcdef0"></label></p>
+        <p><label>Launch template name<br><input name="awsEc2LaunchTemplateName" type="text" value="${escapeHtml(config?.launchTemplateName ?? "")}" placeholder="prefer-gpu"></label></p>
+      </div>
+      <p class="muted">Set an ID or a name, never both. Existing-target connections do not require either.</p>
+      <p><label>Template version<br><input name="awsEc2LaunchTemplateVersion" type="text" value="${escapeHtml(config?.launchTemplateVersion ?? "$Default")}" placeholder="$Default"></label></p>
+      <div class="field-grid">
+        <p><label>Managed block begins<br><input name="awsEc2UserDataBeginMarker" type="text" value="${escapeHtml(config?.userDataBeginMarker ?? DEFAULT_AWS_EC2_USER_DATA_BEGIN_MARKER)}"></label></p>
+        <p><label>Managed block ends<br><input name="awsEc2UserDataEndMarker" type="text" value="${escapeHtml(config?.userDataEndMarker ?? DEFAULT_AWS_EC2_USER_DATA_END_MARKER)}"></label></p>
+      </div>
+      <p class="muted">The selected template version must contain each marker exactly once. NeurOn refuses to launch when the boot contract is missing or ambiguous.</p>
+      <p><label>Additional non-secret deployment environment (JSON)<br><textarea name="awsEc2DeploymentEnvironmentJson" rows="5" placeholder='{"S3_BUCKET_NAME":"prefer-model-cache"}'>${escapeHtml(deploymentEnvironment)}</textarea></label></p>
+      <p class="muted">The runtime catalog supplies the image and preset/configuration. Keep credentials in the instance role or another secret store; secret-bearing keys are rejected here.</p>
+    </fieldset>`;
+}
+
 function providerEditPanel(provider: ProviderView): string {
-  const instanceNamePattern = provider.config?.awsEc2?.instanceNamePattern ?? "";
   return `<form method="post" action="/admin/providers/${escapeHtml(provider.id)}/update" data-provider-edit-form>
     <p><label>Type<br>${providerTypeSelect(provider.type)}</label></p>
     <div class="field-grid">
@@ -2817,10 +3175,7 @@ function providerEditPanel(provider: ProviderView): string {
       <p><label>Display name<br><input name="displayName" type="text" value="${escapeHtml(provider.displayName)}"></label></p>
     </div>
     <p><label><input name="provisioningEnabled" type="checkbox" ${provider.provisioning?.enabled ? "checked" : ""}> Allow this provider to provision resources</label></p>
-    <div data-provider-config-fields="aws-ec2" ${provider.type === "aws-ec2" ? "" : "hidden"}>
-      <p><label>Instance Name-tag pattern<br><input name="awsEc2InstanceNamePattern" type="text" value="${escapeHtml(instanceNamePattern)}" placeholder="${DEFAULT_AWS_EC2_INSTANCE_NAME_PATTERN}"></label></p>
-      <p class="muted">Defaults to <code>${DEFAULT_AWS_EC2_INSTANCE_NAME_PATTERN}</code>. Used by Find EC2 instances; IAM separately controls which instances may be started or stopped.</p>
-    </div>
+    <div data-provider-config-fields="aws-ec2" ${provider.type === "aws-ec2" ? "" : "hidden"}>${awsEc2ProviderFields(provider)}</div>
     <div class="actions"><button type="submit">Save provider</button></div>
   </form>`;
 }
@@ -2839,69 +3194,12 @@ function targetsForProvider(provider: ProviderView, targets: TargetView[]): Targ
 
 function providerTargetsPanel(provider: ProviderView, targets: TargetView[]): string {
   const list = targets.length === 0 ? `<p class="muted">No targets use this provider.</p>` : `<div class="summary-list">${targets.map(providerTargetRow).join("")}</div>`;
-  return `<div class="target-status-head"><h3>Targets</h3><button type="button" data-open-modal="provider-target-modal" data-provider-id="${escapeHtml(provider.id)}">Create target</button></div>${list}`;
+  return `<div class="target-status-head"><h3>Targets</h3><a class="button" href="/admin/targets">Add target</a></div>${list}`;
 }
 
 function providerTargetRow(target: TargetView): string {
   const modelHint = target.modelIds.length > 0 ? `${target.modelIds.length} configured models` : "Discovery";
   return `<div class="target-status-card"><div class="target-status-head"><div><strong>${escapeHtml(target.displayName)}</strong><div class="target-status-meta"><span class="pill off">${escapeHtml(target.provider)}</span><span class="muted"><code>${escapeHtml(target.id)}</code></span><span class="muted">${escapeHtml(modelHint)}</span></div></div><span class="badge ${target.source === "persisted" ? "active" : "done"}">${escapeHtml(target.source)}</span></div></div>`;
-}
-
-function createTargetFromProviderModal(providers: ProviderView[], runtimeProfiles: RuntimeProfile[]): string {
-  return `<div id="provider-target-modal" class="modal" hidden>
-    <div class="modal-dialog">
-      <div class="target-status-head"><h2>Create target</h2><button class="secondary" type="button" data-close-modal>Close</button></div>
-      <form method="post" action="/admin/targets">
-        <p><label>Provider<br>${targetProviderSelect(providers)}</label></p>
-        <p><label>Profile<br>${runtimeProfileSelect(runtimeProfiles)}</label></p>
-        <p><label>Variant<br><select name="runtimeProfileVariantId"></select></label></p>
-        <p id="runtime-profile-note" class="muted"></p>
-        <div class="field-grid">
-          <p><label>ID<br><input name="id" type="text" placeholder="target-id" required></label></p>
-          <p><label>Display name<br><input name="displayName" type="text" placeholder="Target name"></label></p>
-        </div>
-        <div data-provider-fields="runpod">
-          <p><label>RunPod Pod ID<br><input name="runpodPodId" type="text" placeholder="leave empty to provision a new Pod"></label></p>
-          <p><label>RunPod runtime port<br><input name="runpodRuntimePort" type="number" min="1" placeholder="8080"></label></p>
-        </div>
-        <div data-provider-fields="docker">
-          <p><label>Docker container name<br><input name="dockerContainerName" type="text" placeholder="prefer"></label></p>
-          <p><label>Model volume<br><input name="dockerModelVolume" type="text" placeholder="prefer-model-cache"></label></p>
-          <p class="muted">The profile supplies the container path.</p>
-        </div>
-        <div data-provider-fields="aws">
-          <p><label>AWS cluster<br><input name="awsCluster" type="text" placeholder="llm-cluster"></label></p>
-          <p><label>AWS service<br><input name="awsService" type="text" placeholder="llama-cpp-gpu-pool"></label></p>
-          <p><label>AWS ASG name<br><input name="awsAsgName" type="text" placeholder="llm-gpu-pool-asg"></label></p>
-        </div>
-        <div data-provider-fields="aws-ec2">
-          <p><label>AWS EC2 instance ID<br><input name="awsInstanceId" type="text" placeholder="i-1234567890abcdef0"></label></p>
-          ${ec2InstanceDiscoveryControls()}
-          <p><label>Runtime port<br><input name="awsRuntimePort" type="number" min="1" max="65535" placeholder="8080"></label></p>
-          <p class="muted">Runtime URLs default from the instance private address; explicit URL overrides still win.</p>
-        </div>
-        <div data-provider-fields="neuron">
-          <p><label>Remote NeurOn target ID<br><input name="neuronTargetId" type="text" placeholder="gpu-pool-west"></label></p>
-          <p class="muted">Later we can populate this from the remote NeurOn API.</p>
-        </div>
-        <details>
-          <summary>Overrides</summary>
-          <p><label>API URL override<br><input name="apiUrl" type="text" placeholder="http://runtime.internal:8080/v1"></label></p>
-          <p><label>Health URL override<br><input name="healthUrl" type="text" placeholder="http://runtime.internal:8080/health"></label></p>
-          <p><label>Hourly cost override (USD)<br><input name="estimatedHourlyCostUsd" type="number" min="0" step="0.000001" placeholder="leave empty for provider discovery"></label></p>
-          <p><label>Configured model IDs<br><input name="modelIds" type="text" placeholder="qwen-3.6,gemma-4"></label></p>
-          <p><label>LiteLLM model route prefixes<br><input name="trafficModelPrefixes" type="text" placeholder="defaults to &lt;target-id&gt;/"></label></p>
-          <p class="muted">Comma-separated prefixes link matching LiteLLM model names and traffic to this target. When omitted, NeurOn uses <code>&lt;target-id&gt;/</code>.</p>
-          <p><label>LiteLLM credential name override<br><input name="litellmCredentialName" type="text" placeholder="neuron/&lt;target-id&gt;"></label></p>
-          <p><label>Runtime API key environment variable<br><input name="litellmApiKeyEnv" type="text" placeholder="PREFER_TARGET_API_KEY"></label></p>
-          <p class="muted">NeurOn reads this environment variable only while synchronizing the target credential.</p>
-          <p><label><input name="litellmSyncDisabled" type="checkbox"> Disable discovered-model synchronization to LiteLLM</label></p>
-          <p class="muted">Leave models empty to use runtime discovery.</p>
-        </details>
-        <div class="actions"><button type="submit">Create target</button></div>
-      </form>
-    </div>
-  </div>`;
 }
 
 function runtimeProfileSelect(runtimeProfiles: RuntimeProfile[], selected = ""): string {

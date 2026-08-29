@@ -1,7 +1,7 @@
 import crypto from "node:crypto";
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
-import type { AppConfig, AuthMethod, CapacityProviderDefinition, CapacityTarget, ReservationProfileSelection, RuntimeProfile } from "../domain/types.js";
+import type { AppConfig, AuthMethod, CapacityProviderDefinition, CapacityTarget, ReservationProfileSelection, RuntimeDeploymentPlan, RuntimeProfile } from "../domain/types.js";
 import type { CapacityProvider } from "../domain/interfaces.js";
 import { IdentityAuthProvider, SESSION_MAX_AGE_SECONDS } from "../auth/IdentityAuthProvider.js";
 import { OidcAuthService, type OidcLoginState } from "../auth/OidcAuthService.js";
@@ -16,6 +16,7 @@ import type { UsageAnalyticsService } from "../services/UsageAnalyticsService.js
 import type { ProfileAdvisorService } from "../services/ProfileAdvisorService.js";
 import type { IdentityService } from "../services/IdentityService.js";
 import type { MaintenanceControl } from "../services/MaintenanceControl.js";
+import type { RuntimeCatalogService } from "../services/RuntimeCatalogService.js";
 import { ProviderService } from "../services/ProviderService.js";
 import { ReservationService } from "../services/ReservationService.js";
 import { ReservationProfileService } from "../services/ReservationProfileService.js";
@@ -50,7 +51,8 @@ export function registerUiRoutes(
   modelFavorites: ModelFavoriteService,
   usageAnalytics: UsageAnalyticsService,
   identityService: IdentityService,
-  maintenanceControl: MaintenanceControl
+  maintenanceControl: MaintenanceControl,
+  runtimeCatalogs: RuntimeCatalogService
 ) {
   const localLoginAttempts = new Map<string, { failures: number; resetAt: number }>();
   const recordLocalLoginFailure = (attemptKey: string, now: number) => {
@@ -695,6 +697,23 @@ export function registerUiRoutes(
       return reply.code(400).send({ error: message });
     }
   });
+  app.get("/api/admin/runtime-catalog", async (request, reply) => {
+    try {
+      const query = z.object({
+        profileId: z.string().min(1),
+        providerId: z.string().min(1),
+        revision: z.string().min(7).max(40)
+      }).parse(request.query);
+      const profile = config.runtimeProfiles.find((candidate) => candidate.id === query.profileId);
+      if (!profile?.catalog) throw new Error("Choose a runtime that publishes a provisioning catalog");
+      const provider = await providerFromForm(query.providerId, providerService);
+      if (!provider.provisioning?.enabled) throw new Error(`Provider ${provider.displayName} does not allow resource provisioning`);
+      const options = await runtimeCatalogs.list(profile, query.revision, provider.type);
+      return { profile: { id: profile.id, name: profile.name, engine: profile.catalog.engine }, revision: query.revision.toLowerCase(), options };
+    } catch (error) {
+      return reply.code(400).send({ error: error instanceof Error ? error.message : "Could not load the runtime catalog" });
+    }
+  });
   app.post("/admin/providers", async (request, reply) => {
     try {
       const body = providerFormSchema.parse(request.body ?? {});
@@ -751,28 +770,44 @@ export function registerUiRoutes(
     }
   });
   app.get("/admin/targets", async (request, reply) => {
-    const query = z.object({ error: z.string().optional(), created: z.string().optional() }).parse(request.query);
+    const query = z.object({ error: z.string().optional(), created: z.string().optional(), provision: z.enum(["true"]).optional() }).parse(request.query);
     const [targets, providers, teams, users] = await Promise.all([
       targetService.list(),
       providerService.list(),
       identityService.listTeams(),
       identityService.listUsers()
     ]);
-    return reply.type("text/html").send(targetAdminPage(requireUser(request), targets, providers, config.runtimeProfiles, teams, users, query.error, query.created, config.adminStatusPollSeconds));
+    return reply.type("text/html").send(targetAdminPage(requireUser(request), targets, providers, config.runtimeProfiles, teams, users, query.error, query.created, config.adminStatusPollSeconds, query.provision === "true"));
   });
   app.post("/admin/targets", async (request, reply) => {
     try {
       const body = targetFormSchema.parse(request.body ?? {});
       await validateTargetAudienceSelection(body, identityService);
       const provider = await providerFromForm(body.providerId, providerService);
-      const target = await targetService.create(targetFromForm(body, provider, config));
-      await targetProvisioningService.createDraft({
-        providerId: target.providerId ?? target.provider,
-        providerType: target.provider,
-        runtimeProfileId: body.runtimeProfileId,
-        target
-      });
-      return reply.redirect(`/admin/targets?created=${encodeURIComponent(target.id)}`);
+      const runtimeProfile = config.runtimeProfiles.find((candidate) => candidate.id === body.runtimeProfileId);
+      let runtimeDeployment: RuntimeDeploymentPlan | undefined;
+      if (body.connectionMode === "provision") {
+        if (!provider.provisioning?.enabled) throw new Error(`Provider ${provider.displayName} does not allow resource provisioning`);
+        if (!runtimeProfile?.catalog) throw new Error("Provision new requires a catalog-backed runtime");
+        if (!body.runtimeCatalogRevision || !body.runtimeDeploymentId) throw new Error("Load a PreFer release and choose a deployment configuration");
+        runtimeDeployment = await runtimeCatalogs.resolve(runtimeProfile, body.runtimeCatalogRevision, provider.type, body.runtimeDeploymentId);
+      }
+      const target = await targetService.create(targetFromForm(body, provider, config, runtimeDeployment));
+      if (runtimeDeployment) {
+        try {
+          await targetProvisioningService.createDraft({
+            providerId: target.providerId ?? target.provider,
+            providerType: target.provider,
+            runtimeProfileId: body.runtimeProfileId,
+            target
+          });
+        } catch (error) {
+          try { await targetService.delete(target.id); }
+          catch { throw new Error(`Could not create provisioning draft for ${target.id}; its target record also could not be removed safely`); }
+          throw error;
+        }
+      }
+      return reply.redirect(`/admin/targets?created=${encodeURIComponent(target.id)}${runtimeDeployment ? "&provision=true" : ""}`);
     } catch (error) {
       const message = error instanceof Error ? error.message : "Could not create target";
       return reply.redirect(`/admin/targets?error=${encodeURIComponent(message)}`);
@@ -784,7 +819,24 @@ export function registerUiRoutes(
       const body = targetFormSchema.parse(request.body ?? {});
       await validateTargetAudienceSelection(body, identityService);
       const provider = await providerFromForm(body.providerId, providerService);
-      await targetService.update(id, targetFromForm(body, provider, config));
+      const existing = (await targetService.list()).find((candidate) => candidate.id === id);
+      const retainedPlan = existing?.runtimeDeployment?.providerType === provider.type ? existing.runtimeDeployment : undefined;
+      const update = targetFromForm(body, provider, config, retainedPlan);
+      if (existing && retainedPlan) {
+        update.modelIds = body.modelIds === undefined ? [...existing.modelIds] : listField(body.modelIds);
+        const configuredModels = existing.models ?? retainedPlan.models;
+        update.models = configuredModels.filter((model) => update.modelIds.includes(model.id));
+        if (provider.type === "runpod") {
+          update.runpod = {
+            ...(existing.runpod ?? {}),
+            ...(update.runpod ?? {}),
+            ...(existing.runpod?.create ? { create: existing.runpod.create } : {})
+          };
+        }
+        if (provider.type === "aws-ec2") update.aws = { ...(existing.aws ?? {}), ...(update.aws ?? {}) };
+        if (body.estimatedHourlyCostUsd === undefined && existing.costEstimate) update.costEstimate = existing.costEstimate;
+      }
+      await targetService.update(id, update);
       return reply.redirect("/admin/targets");
     } catch (error) {
       const message = error instanceof Error ? error.message : "Could not update target";
@@ -863,13 +915,49 @@ const providerFormSchema = z.object({
   displayName: z.string().optional(),
   type: z.string().min(1),
   provisioningEnabled: z.string().optional(),
-  awsEc2InstanceNamePattern: z.string().optional()
+  awsEc2InstanceNamePattern: z.string().optional(),
+  awsEc2LaunchTemplateId: z.string().optional(),
+  awsEc2LaunchTemplateName: z.string().optional(),
+  awsEc2LaunchTemplateVersion: z.string().optional(),
+  awsEc2UserDataBeginMarker: z.string().optional(),
+  awsEc2UserDataEndMarker: z.string().optional(),
+  awsEc2DeploymentEnvironmentJson: z.string().optional()
 });
 
 function providerConfigFromForm(body: z.infer<typeof providerFormSchema>): CapacityProviderDefinition["config"] {
   if (body.type !== "aws-ec2") return undefined;
   const instanceNamePattern = body.awsEc2InstanceNamePattern?.trim();
-  return instanceNamePattern ? { awsEc2: { instanceNamePattern } } : undefined;
+  const launchTemplateId = body.awsEc2LaunchTemplateId?.trim();
+  const launchTemplateName = body.awsEc2LaunchTemplateName?.trim();
+  if (launchTemplateId && launchTemplateName) throw new Error("Choose an EC2 launch template ID or name, not both");
+  if (body.provisioningEnabled === "on" && !launchTemplateId && !launchTemplateName) throw new Error("Provisioning-enabled AWS EC2 providers require a launch template ID or name");
+  const launchTemplateVersion = body.awsEc2LaunchTemplateVersion?.trim();
+  const userDataBeginMarker = body.awsEc2UserDataBeginMarker?.trim();
+  const userDataEndMarker = body.awsEc2UserDataEndMarker?.trim();
+  if ((userDataBeginMarker && !userDataEndMarker) || (!userDataBeginMarker && userDataEndMarker)) throw new Error("Both EC2 user-data markers are required when either is customized");
+  if (userDataBeginMarker && userDataBeginMarker === userDataEndMarker) throw new Error("EC2 user-data markers must be distinct");
+  if ([userDataBeginMarker, userDataEndMarker].some((value) => value && (value.length > 200 || /[\r\n\0]/u.test(value)))) {
+    throw new Error("EC2 user-data markers must be one line and at most 200 characters");
+  }
+  let deploymentEnvironment: Record<string, string> | undefined;
+  if (body.awsEc2DeploymentEnvironmentJson?.trim()) {
+    deploymentEnvironment = z.record(z.string()).parse(JSON.parse(body.awsEc2DeploymentEnvironmentJson));
+    for (const [key, value] of Object.entries(deploymentEnvironment)) {
+      if (!/^[A-Z_][A-Z0-9_]*$/u.test(key)) throw new Error(`Invalid EC2 deployment environment key: ${key}`);
+      if (secretBearingEnvironmentKey(key)) throw new Error(`Do not store secret-bearing value ${key} in provider configuration`);
+      if (value.length > 4_000 || /[\r\n\0]/u.test(value)) throw new Error(`EC2 deployment environment value ${key} must be one line and at most 4,000 characters`);
+    }
+  }
+  const awsEc2 = {
+    ...(instanceNamePattern ? { instanceNamePattern } : {}),
+    ...(launchTemplateId ? { launchTemplateId } : {}),
+    ...(launchTemplateName ? { launchTemplateName } : {}),
+    ...(launchTemplateVersion ? { launchTemplateVersion } : {}),
+    ...(userDataBeginMarker ? { userDataBeginMarker } : {}),
+    ...(userDataEndMarker ? { userDataEndMarker } : {}),
+    ...(deploymentEnvironment ? { deploymentEnvironment } : {})
+  };
+  return Object.keys(awsEc2).length > 0 ? { awsEc2 } : undefined;
 }
 
 const authMethodFormSchema = z.object({
@@ -903,6 +991,7 @@ const targetFormSchema = z.object({
   id: z.string().min(1),
   displayName: z.string().optional(),
   providerId: z.string().min(1),
+  connectionMode: z.enum(["existing", "provision"]).default("existing"),
   modelIds: z.string().optional(),
   trafficModelPrefixes: z.string().optional(),
   aliasPriority: optionalPositiveInteger,
@@ -914,10 +1003,16 @@ const targetFormSchema = z.object({
   litellmSyncDisabled: z.string().optional(),
   runtimeProfileId: z.string().optional(),
   runtimeProfileVariantId: z.string().optional(),
+  runtimeCatalogRevision: z.string().optional(),
+  runtimeDeploymentId: z.string().optional(),
   healthUrl: z.string().optional(),
   apiUrl: z.string().optional(),
   runpodPodId: z.string().optional(),
   runpodRuntimePort: optionalNumber,
+  runpodVolumeGb: optionalPositiveInteger,
+  runpodContainerDiskGb: optionalPositiveInteger,
+  runpodCloudType: z.enum(["SECURE", "COMMUNITY"]).optional(),
+  runpodInterruptible: z.string().optional(),
   awsCluster: z.string().optional(),
   awsService: z.string().optional(),
   awsAsgName: z.string().optional(),
@@ -948,14 +1043,18 @@ async function validateTargetAudienceSelection(body: z.infer<typeof targetFormSc
   }
 }
 
-function targetFromForm(body: z.infer<typeof targetFormSchema>, provider: CapacityProviderDefinition, config?: AppConfig): CapacityTarget {
+function targetFromForm(body: z.infer<typeof targetFormSchema>, provider: CapacityProviderDefinition, config?: AppConfig, runtimeDeployment?: RuntimeDeploymentPlan): CapacityTarget {
   const profile = effectiveRuntimeProfile(config?.runtimeProfiles, body.runtimeProfileId, body.runtimeProfileVariantId);
   const target: Record<string, unknown> = {};
   target.id = body.id;
   target.displayName = body.displayName || body.id;
   target.provider = provider.type;
   target.providerId = provider.id;
-  target.modelIds = listField(body.modelIds);
+  target.modelIds = runtimeDeployment ? runtimeDeployment.models.map((model) => model.id) : listField(body.modelIds);
+  if (runtimeDeployment) {
+    target.runtimeDeployment = runtimeDeployment;
+    target.models = runtimeDeployment.models;
+  }
   const trafficModelPrefixes = listField(body.trafficModelPrefixes);
   if (trafficModelPrefixes.length > 0) target.trafficModelPrefixes = trafficModelPrefixes;
   if (body.aliasPriority !== undefined) target.aliasPriority = body.aliasPriority;
@@ -981,6 +1080,9 @@ function targetFromForm(body: z.infer<typeof targetFormSchema>, provider: Capaci
   if (body.healthUrl) target.healthUrl = body.healthUrl;
   if (body.apiUrl) target.apiUrl = body.apiUrl;
   if (body.estimatedHourlyCostUsd !== undefined) target.costEstimate = { hourlyUsd: body.estimatedHourlyCostUsd };
+  else if (runtimeDeployment?.hardware?.advertisedHourlyUsd !== undefined) {
+    target.costEstimate = { hourlyUsd: runtimeDeployment.hardware.advertisedHourlyUsd * (runtimeDeployment.hardware.gpuCount ?? 1) };
+  }
   if (provider.type === "runpod" && (body.runpodPodId || body.runpodRuntimePort)) {
     const create = runpodCreateFromProfile(profile);
     target.runpod = {
@@ -997,6 +1099,13 @@ function targetFromForm(body: z.infer<typeof targetFormSchema>, provider: Capaci
       ...(create ? { create } : {})
     };
   }
+  if (provider.type === "runpod" && runtimeDeployment) {
+    target.runpod = {
+      ...(body.runpodPodId?.trim() ? { podId: body.runpodPodId.trim() } : {}),
+      runtimePort: runtimeDeployment.port,
+      create: runpodCreateFromDeployment(body, runtimeDeployment)
+    };
+  }
   if ((provider.type === "aws-ecs" || provider.type === "aws-ecs-asg") && body.awsCluster && body.awsService && body.awsAsgName) {
     target.aws = {
       ...(typeof target.aws === "object" && target.aws !== null && !Array.isArray(target.aws) ? target.aws : {}),
@@ -1007,13 +1116,13 @@ function targetFromForm(body: z.infer<typeof targetFormSchema>, provider: Capaci
   }
   if (provider.type === "aws-ec2") {
     const instanceId = body.awsInstanceId?.trim();
-    if (!instanceId) throw new Error("AWS EC2 instance ID is required");
+    if (!instanceId && !runtimeDeployment) throw new Error("AWS EC2 instance ID is required when connecting existing capacity");
     target.aws = {
-      instanceId,
-      runtimePort: body.awsRuntimePort ?? profilePort(profile),
+      ...(instanceId ? { instanceId } : {}),
+      runtimePort: body.awsRuntimePort ?? runtimeDeployment?.port ?? profilePort(profile),
       runtimeProtocol: "http",
-      healthPath: profileHealth(profile),
-      apiPath: profileApi(profile)
+      healthPath: runtimeDeployment?.healthPath ?? profileHealth(profile),
+      apiPath: runtimeDeployment?.apiPath ?? profileApi(profile)
     };
   }
   if (provider.type === "docker" && body.dockerContainerName) {
@@ -1086,6 +1195,26 @@ function profileDiscovery(profile: RuntimeProfile | undefined): boolean {
 function runpodCreateFromProfile(profile: RuntimeProfile | undefined): Record<string, unknown> | undefined {
   if (!profile?.image || profile.type !== "docker") return undefined;
   return { imageName: profile.image };
+}
+
+function runpodCreateFromDeployment(body: z.infer<typeof targetFormSchema>, plan: RuntimeDeploymentPlan): Record<string, unknown> {
+  const gpuTypeId = plan.hardware?.providerGpuTypeId;
+  if (!gpuTypeId) throw new Error(`Runtime deployment ${plan.deploymentId} does not declare a RunPod GPU type`);
+  return {
+    name: (body.displayName || body.id).trim(),
+    computeType: "GPU",
+    cloudType: body.runpodCloudType ?? "SECURE",
+    imageName: plan.image,
+    gpuTypeIds: [gpuTypeId],
+    gpuTypePriority: "availability",
+    gpuCount: plan.hardware?.gpuCount ?? 1,
+    interruptible: body.runpodInterruptible === "on",
+    containerDiskInGb: body.runpodContainerDiskGb ?? 50,
+    volumeInGb: body.runpodVolumeGb ?? 100,
+    volumeMountPath: "/models",
+    ports: [`${plan.port}/http`],
+    env: plan.environment
+  };
 }
 
 function listField(value: string | string[] | undefined): string[] {
@@ -1287,4 +1416,8 @@ function updateSafetySummary(config: AppConfig, catalog: ModelCatalog) {
     protectedTargets,
     totalTargets: targets.length
   };
+}
+
+function secretBearingEnvironmentKey(key: string): boolean {
+  return /TOKEN|SECRET|PASSWORD|PRIVATE|CREDENTIAL|(?:^|_)(?:API_|ACCESS_)?KEY(?:_|$)/u.test(key);
 }

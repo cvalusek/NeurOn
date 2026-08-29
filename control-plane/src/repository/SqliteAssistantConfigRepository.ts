@@ -3,6 +3,7 @@ import { mkdirSync } from "node:fs";
 import path from "node:path";
 import type { AssistantConfigRepository } from "../domain/interfaces.js";
 import type { AssistantConfig } from "../domain/types.js";
+import { parseAssistantAudioConfig } from "../services/assistantAudioConfig.js";
 import { assistantConfigFromLegacyTarget, cloneAssistantConfig, withoutLegacyAssistant } from "./assistantConfigUtils.js";
 
 interface AssistantRow {
@@ -13,6 +14,7 @@ interface AssistantRow {
   keepalive_minutes: number;
   request_timeout_seconds: number;
   additional_instructions: string | null;
+  audio_config: string | null;
   updated_at: string;
 }
 
@@ -32,10 +34,10 @@ export class SqliteAssistantConfigRepository implements AssistantConfigRepositor
   }
 
   async save(input: Omit<AssistantConfig, "id" | "updatedAt"> & { updatedAt?: Date }): Promise<AssistantConfig> {
-    const config: AssistantConfig = { ...input, id: "default", updatedAt: input.updatedAt ?? new Date() };
+    const config: AssistantConfig = { ...input, audio: parseAssistantAudioConfig(input.audio), id: "default", updatedAt: input.updatedAt ?? new Date() };
     this.db.prepare(`
-      insert into assistant_config (id, target_id, model_id, reservation_minutes, keepalive_minutes, request_timeout_seconds, additional_instructions, updated_at)
-      values ('default', ?, ?, ?, ?, ?, ?, ?)
+      insert into assistant_config (id, target_id, model_id, reservation_minutes, keepalive_minutes, request_timeout_seconds, additional_instructions, audio_config, updated_at)
+      values ('default', ?, ?, ?, ?, ?, ?, ?, ?)
       on conflict(id) do update set
         target_id=excluded.target_id,
         model_id=excluded.model_id,
@@ -43,8 +45,9 @@ export class SqliteAssistantConfigRepository implements AssistantConfigRepositor
         keepalive_minutes=excluded.keepalive_minutes,
         request_timeout_seconds=excluded.request_timeout_seconds,
         additional_instructions=excluded.additional_instructions,
+        audio_config=excluded.audio_config,
         updated_at=excluded.updated_at
-    `).run(config.targetId, config.modelId, config.reservationMinutes, config.keepaliveMinutes, config.requestTimeoutSeconds, config.additionalInstructions ?? null, config.updatedAt.toISOString());
+    `).run(config.targetId, config.modelId, config.reservationMinutes, config.keepaliveMinutes, config.requestTimeoutSeconds, config.additionalInstructions ?? null, config.audio ? JSON.stringify(config.audio) : null, config.updatedAt.toISOString());
     return cloneAssistantConfig(config);
   }
 
@@ -65,11 +68,13 @@ export class SqliteAssistantConfigRepository implements AssistantConfigRepositor
           keepalive_minutes integer not null check (keepalive_minutes between 1 and 60),
           request_timeout_seconds integer not null check (request_timeout_seconds between 1 and 600),
           additional_instructions text,
+          audio_config text,
           updated_at text not null
         );
       `);
       const assistantColumns = new Set((this.db.prepare("pragma table_info(assistant_config)").all() as Array<{ name: string }>).map((column) => column.name));
       if (!assistantColumns.has("additional_instructions")) this.db.exec("alter table assistant_config add column additional_instructions text");
+      if (!assistantColumns.has("audio_config")) this.db.exec("alter table assistant_config add column audio_config text");
       const targetTable = this.db.prepare("select 1 from sqlite_master where type='table' and name='capacity_targets'").get();
       if (!targetTable) return;
       const rows = this.db.prepare("select id, target_json from capacity_targets order by id").all() as Array<{ id: string; target_json: string }>;
@@ -104,6 +109,7 @@ function fromRow(row: AssistantRow): AssistantConfig {
     keepaliveMinutes: row.keepalive_minutes,
     requestTimeoutSeconds: row.request_timeout_seconds,
     additionalInstructions: row.additional_instructions ?? undefined,
+    audio: parseAssistantAudioConfig(row.audio_config ? JSON.parse(row.audio_config) : undefined),
     updatedAt: new Date(row.updated_at)
   };
 }

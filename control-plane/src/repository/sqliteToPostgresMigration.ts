@@ -6,6 +6,7 @@ import pg from "pg";
 import { migratePostgresSchema, POSTGRES_DATA_TABLES, POSTGRES_SCHEMA_VERSION, readPostgresSchemaState, validatePostgresSchema } from "./postgresSchema.js";
 import { parseReservationTargetSelections } from "../domain/reservationSelections.js";
 import { parseModelSelectionCatalog } from "../config/modelSelectionConfig.js";
+import { parseAssistantAudioConfig } from "../services/assistantAudioConfig.js";
 import { assistantConfigFromLegacyTarget, withoutLegacyAssistant } from "./assistantConfigUtils.js";
 
 export const SQLITE_SOURCE_SCHEMA_VERSION = 4;
@@ -106,7 +107,7 @@ const sqliteAdditiveExpectedColumns: Record<string, string[]> = {
   identity_audit_events: ["id", "actor_user_id", "action", "subject_type", "subject_id", "details", "created_at"]
 };
 const sqliteAdditiveOptionalColumns: Record<string, string[]> = {
-  assistant_config: ["additional_instructions"],
+  assistant_config: ["additional_instructions", "audio_config"],
   model_favorites: ["user_id"]
 };
 
@@ -166,7 +167,8 @@ const sqliteNullableColumns = new Set([
   "registration_invitations.initial_role_id",
   "registration_invitations.created_by_user_id",
   "registration_invitations.revoked_at",
-  "identity_audit_events.actor_user_id"
+  "identity_audit_events.actor_user_id",
+  "assistant_config.audio_config"
 ]);
 const sqliteOptionalColumns: Record<string, string[]> = {
   reservations: ["target_selections", "user_id"],
@@ -437,10 +439,15 @@ function synthesizeLegacyUsers(...families: Array<Array<Record<string, unknown>>
 
 function sqliteAssistantConfigRow(row: Record<string, unknown>): Record<string, unknown> {
   const additionalInstructions = nullableText(row.additional_instructions);
+  const rawAudio = nullableJsonObject(row.audio_config);
+  let audio: ReturnType<typeof parseAssistantAudioConfig>;
+  try { audio = parseAssistantAudioConfig(rawAudio ?? undefined); }
+  catch { throw new Error("SQLite source contains incompatible Assistant audio configuration"); }
   return {
     id: text(row.id), targetId: text(row.target_id), modelId: text(row.model_id),
     reservationMinutes: number(row.reservation_minutes), keepaliveMinutes: number(row.keepalive_minutes),
-    requestTimeoutSeconds: number(row.request_timeout_seconds), ...(additionalInstructions === null ? {} : { additionalInstructions }), updatedAt: iso(row.updated_at)
+    requestTimeoutSeconds: number(row.request_timeout_seconds), ...(additionalInstructions === null ? {} : { additionalInstructions }),
+    ...(audio ? { audio } : {}), updatedAt: iso(row.updated_at)
   };
 }
 
@@ -684,8 +691,8 @@ async function importDataset(client: pg.PoolClient, dataset: MigrationDataset): 
   }
   for (const row of dataset.assistantConfig) {
     await client.query(
-      "insert into assistant_config (id, target_id, model_id, reservation_minutes, keepalive_minutes, request_timeout_seconds, additional_instructions, updated_at) values ($1,$2,$3,$4,$5,$6,$7,$8)",
-      [row.id, row.targetId, row.modelId, row.reservationMinutes, row.keepaliveMinutes, row.requestTimeoutSeconds, row.additionalInstructions ?? null, row.updatedAt]
+      "insert into assistant_config (id, target_id, model_id, reservation_minutes, keepalive_minutes, request_timeout_seconds, additional_instructions, audio_config, updated_at) values ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9)",
+      [row.id, row.targetId, row.modelId, row.reservationMinutes, row.keepaliveMinutes, row.requestTimeoutSeconds, row.additionalInstructions ?? null, row.audio ? JSON.stringify(row.audio) : null, row.updatedAt]
     );
   }
 }
@@ -853,6 +860,9 @@ function validateDatasetSemantics(dataset: MigrationDataset): void {
     }
     if (row.additionalInstructions != null && (typeof row.additionalInstructions !== "string" || row.additionalInstructions.length > 8_000)) {
       throw new Error("SQLite source contains incompatible Assistant instructions");
+    }
+    if (row.audio != null && (!row.audio || typeof row.audio !== "object" || Array.isArray(row.audio))) {
+      throw new Error("SQLite source contains incompatible Assistant audio configuration");
     }
   }
   if (dataset.reservations.some((row) => !reservationStatuses.has(String(row.status)))) {

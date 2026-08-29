@@ -1,62 +1,122 @@
 ---
 type: Reference
 title: Provisioning
-description: Explicit resource creation, provider gates, and provisioning jobs.
-tags: [provisioning, providers, targets]
-timestamp: 2026-06-29T00:00:00Z
+description: Explicit target creation from pinned runtime plans and provider-owned infrastructure.
+tags: [provisioning, providers, targets, prefer, aws, runpod]
+timestamp: 2026-08-29T00:00:00Z
 ---
 
 # Provisioning
 
-Provisioning means creating a missing provider resource from explicit admin
-intent. It is separate from lifecycle reconciliation.
+Provisioning creates one missing provider resource from explicit administrator
+intent. It is separate from reconciliation: reservations start and stop a known
+binding; they do not silently create a Pod, instance, container, network, or
+other infrastructure.
 
-The reconciler starts and stops known resources. It does not create containers,
-Pods, EC2 instances, services, or other infrastructure as a side effect of a
-reservation, except through the explicit activate-or-reprovision policy below.
+Provider records include `provisioning.enabled`, which defaults to false. A
+catalog-backed target is created in two stages:
 
-Provider records include `provisioning.enabled`. The default is disabled. An
-admin must enable resource creation on a provider before `provisionTarget` can
-run.
+1. **Create provisioning draft** persists the exact runtime plan and a durable
+   draft job without contacting the provider.
+2. **Provision target** is a separate admin action that invokes the provider,
+   persists the returned resource binding, and records the created resource in
+   the job.
 
-Provider-scoped target creation records a persisted target provisioning job.
-Jobs store the provider, provider type, runtime profile, target draft, status,
-and created resources reported by the provider. This gives the control plane a
-place to resume, inspect, or abort multi-step flows as provider adapters grow.
+Existing-capacity targets do not receive accidental provisioning jobs. A target
+with an unresolved or incompatible catalog, disabled provider permission, or
+missing provider-owned setup fails before resource creation.
 
-After a target is provisioned, NeurOn records the provider-observed status. If
-the target has discovery enabled and no configured models, NeurOn starts a
-background bootstrap discovery pass. That pass starts the target, waits for
-health, reads `/v1/models`, and records discovered models. It stops capacity
-that it started only when no reservation or traffic demand exists at operation
-release; it never stops a target that another owner still needs.
+## Pinned Runtime Plan
 
-Provisioning should remain provider-specific:
+The runtime selection uses a full source commit and a schema-validated release
+inventory. NeurOn resolves engine, provider-compatible hardware, configuration,
+commit-tagged image, environment, port and paths, and models before creating the
+draft. The resolved plan is durable and is retained when the target is edited;
+an edit never silently upgrades it to another release. See [PreFer](prefer.md).
 
-- Docker can create a named container from an image.
-- RunPod can create a Pod from a create request body.
-- AWS ECS/ASG currently assumes resources already exist.
-- Future EC2 provisioning can create or start instances from a PreFer AMI.
+## RunPod
+
+For RunPod, the resolved catalog supplies image, GPU type/count, environment,
+runtime port, paths, and models. The target-creation screen adds only
+provider-owned choices:
+
+- Secure or Community Cloud;
+- persistent model volume size;
+- container disk size; and
+- interruptible capacity.
+
+The API key remains an environment-backed provider credential. The draft does
+not contact RunPod. Explicit provisioning sends one create-Pod request and
+persists the returned Pod ID. Editing a provisioned target retains that Pod ID
+and the immutable runtime plan.
+
+## AWS EC2 Launch Template
+
+EC2 provisioning deliberately reuses infrastructure owned by the operator. The
+provider must select exactly one Launch Template ID or name and may pin a
+version; the default is `$Default`. The template owns AMI, subnet, security
+groups, instance profile, storage, and the boot process. NeurOn does not create
+or modify any of those resources.
+
+The Launch Template user data must be text and contain exactly one ordered
+managed block:
+
+```text
+# BEGIN NEURON MANAGED PREFER DEPLOYMENT
+# values in this block are replaced by NeurOn
+# END NEURON MANAGED PREFER DEPLOYMENT
+```
+
+Custom begin/end markers may be configured together on the provider. NeurOn
+refuses missing, duplicate, reversed, binary, or ambiguous blocks. It preserves
+every line outside the block and replaces only the block with a private atomic
+write of `/opt/prefer/deployment.env`. The file contains the catalog environment
+plus `AWS_REGION` and the exact `PREFER_IMAGE`. The Launch Template boot logic is
+responsible for consuming that file; NeurOn does not insert restart or service
+manager commands.
+
+Provider-level deployment environment values are optional, nonsecret, one-line
+defaults. Never store tokens, passwords, credentials, or private material there;
+use the Launch Template's instance role or deployment secret mechanism. Catalog
+values override provider defaults, while NeurOn owns the final `AWS_REGION` and
+`PREFER_IMAGE` values.
+
+NeurOn runs exactly one instance from the chosen template/version, overrides
+only the catalog instance type and managed user data, applies the target display
+name as the instance Name tag, and persists the one returned instance ID. It
+refuses zero or multiple returned IDs.
+
+Minimum additional control-plane permissions are:
+
+- `ec2:DescribeLaunchTemplateVersions`
+- `ec2:RunInstances`
+
+The selected template may also require narrowly scoped `iam:PassRole` and
+resource permissions. Lifecycle permissions remain `ec2:DescribeInstances`,
+`ec2:StartInstances`, and `ec2:StopInstances`. Scope creation using the
+operator's template, IAM, subnet/security-group, and tag policy; NeurOn does not
+yet terminate or clean up an EC2 instance through the provisioning job.
+
+## Other Providers
+
+- Docker can explicitly create a named container when the target includes an
+  image and the provider permits it.
+- AWS ECS/ASG and Docker Compose continue to bind existing infrastructure.
+- Upstream NeurOn holds reservations and does not provision upstream resources.
+
+## Discovery After Provisioning
+
+After successful creation, NeurOn records provider status and can run normal
+runtime discovery. Discovery confirms the models actually advertised by the
+activated target and stores the result. It does not rewrite the pinned runtime
+plan, and it releases only capacity started by its own operation when no
+reservation or traffic demand remains.
 
 ## Activate Or Reprovision
 
-The provider-neutral activation boundary can replace an unavailable binding,
-but only when every gate is true:
-
-1. activation threw the typed `RecoverableTargetUnavailableError`;
-2. the target sets `activationPolicy.reprovisionOnRecoverableUnavailable=true`;
-3. the provider record sets `provisioning.enabled=true`;
-4. the adapter implements `reprovisionTarget`; and
-5. NeurOn can durably persist the returned target binding before retrying
-   activation.
-
-Config-only targets must first be copied to persisted storage. This preflight
-happens before the adapter may create a replacement, avoiding an orphan whose
-new identity would disappear on restart. Generic errors, authentication
-failures, rate limits, and unknown exceptions are never treated as recoverable
-availability conditions.
-
-The boundary is covered entirely with fake/mock providers. RunPod replacement
-is intentionally deferred until its live resource/cleanup contract is known;
-the existing adapter continues to start, stop, inspect, and explicitly create
-Pods without guessing at replacement behavior.
+Replacement is a different, narrower policy. NeurOn may call
+`reprovisionTarget` only when a typed recoverable availability failure occurs,
+the target opts in, the provider allows creation, the adapter implements the
+contract, and the new binding can be stored before activation retries. RunPod
+and EC2 explicit provisioning do not imply automatic replacement. Generic
+provider, authentication, rate-limit, or unknown errors never enter that path.

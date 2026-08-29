@@ -45,6 +45,42 @@ const targetSchema = z.object({
   litellmDisplayPrefix: z.string().optional(),
   aliasPriority: z.number().int().positive().optional(),
   modelsMax: z.number().int().positive().optional(),
+  runtimeDeployment: z.object({
+    pluginId: z.string().min(1),
+    pluginVersion: z.string().min(1),
+    profileId: z.string().min(1),
+    engine: z.string().min(1),
+    catalogSchemaVersion: z.string().min(1),
+    catalogFingerprint: z.string().min(1),
+    deploymentId: z.string().min(1),
+    providerType: z.string().min(1),
+    image: z.string().min(1),
+    port: z.number().int().positive(),
+    healthPath: z.string().min(1),
+    apiPath: z.string().min(1),
+    environment: z.record(z.string()),
+    hardware: z.object({
+      providerSku: z.string().optional(),
+      providerGpuTypeId: z.string().optional(),
+      gpuCount: z.number().int().positive().optional(),
+      gpuName: z.string().optional(),
+      vramGbEach: z.number().positive().optional(),
+      vcpu: z.number().int().positive().optional(),
+      advertisedHourlyUsd: z.number().nonnegative().optional()
+    }).optional(),
+    models: z.array(z.object({
+      id: z.string().min(1),
+      displayName: z.string().optional(),
+      modelFamily: z.string().optional(),
+      aliases: z.array(z.string()).optional(),
+      tags: z.array(z.object({ label: z.string(), title: z.string().optional() })).optional(),
+      technicalCapabilities: z.array(z.object({ label: z.string(), title: z.string().optional() })).optional(),
+      description: z.string().optional(),
+      backendModelIds: z.array(z.string()).optional(),
+      contextWindowTokens: z.number().int().positive().optional(),
+      contextLabel: z.string().optional()
+    }))
+  }).optional(),
   audience: z.discriminatedUnion("scope", [
     z.object({ scope: z.literal("global") }),
     z.object({ scope: z.literal("teams"), teamIds: z.array(z.string().min(1)).min(1) }),
@@ -139,7 +175,7 @@ const targetSchema = z.object({
     .optional()
 }).superRefine((target, context) => {
   if (target.provider === "aws-ec2" || (!target.provider && target.aws?.instanceId)) {
-    if (!target.aws?.instanceId) {
+    if (!target.aws?.instanceId && !target.runtimeDeployment) {
       context.addIssue({ code: z.ZodIssueCode.custom, path: ["aws", "instanceId"], message: "AWS EC2 instanceId is required" });
     }
     return;
@@ -161,6 +197,31 @@ const targetSchema = z.object({
   }
 });
 
+const providerDeploymentEnvironmentSchema = z.record(z.string()).superRefine((environment, context) => {
+  for (const [key, value] of Object.entries(environment)) {
+    if (!/^[A-Z_][A-Z0-9_]*$/u.test(key)) context.addIssue({ code: z.ZodIssueCode.custom, path: [key], message: "Deployment environment keys must use uppercase shell-variable syntax" });
+    if (secretBearingEnvironmentKey(key)) context.addIssue({ code: z.ZodIssueCode.custom, path: [key], message: "Secret-bearing deployment environment keys are not allowed" });
+    if (value.length > 4_000 || /[\r\n]/u.test(value) || value.includes("\0")) context.addIssue({ code: z.ZodIssueCode.custom, path: [key], message: "Deployment environment values must be one line and at most 4,000 characters" });
+  }
+});
+
+const awsEc2ProviderConfigSchema = z.object({
+  instanceNamePattern: z.string().optional(),
+  launchTemplateId: z.string().optional(),
+  launchTemplateName: z.string().optional(),
+  launchTemplateVersion: z.string().optional(),
+  userDataBeginMarker: z.string().optional(),
+  userDataEndMarker: z.string().optional(),
+  deploymentEnvironment: providerDeploymentEnvironmentSchema.optional()
+}).superRefine((config, context) => {
+  if (config.launchTemplateId && config.launchTemplateName) context.addIssue({ code: z.ZodIssueCode.custom, path: ["launchTemplateId"], message: "Choose a launch template ID or name, not both" });
+  if (Boolean(config.userDataBeginMarker) !== Boolean(config.userDataEndMarker)) context.addIssue({ code: z.ZodIssueCode.custom, path: ["userDataBeginMarker"], message: "Both user-data markers are required when either is customized" });
+  if (config.userDataBeginMarker && config.userDataBeginMarker === config.userDataEndMarker) context.addIssue({ code: z.ZodIssueCode.custom, path: ["userDataEndMarker"], message: "User-data markers must be distinct" });
+  for (const [field, value] of [["userDataBeginMarker", config.userDataBeginMarker], ["userDataEndMarker", config.userDataEndMarker]] as const) {
+    if (value && (value.length > 200 || /[\r\n\0]/u.test(value))) context.addIssue({ code: z.ZodIssueCode.custom, path: [field], message: "User-data markers must be one line and at most 200 characters" });
+  }
+});
+
 const providerSchema = z.object({
   id: z.string().min(1),
   displayName: z.string().min(1).optional(),
@@ -168,11 +229,7 @@ const providerSchema = z.object({
   provisioning: z.object({ enabled: z.boolean().optional() }).optional(),
   config: z
     .object({
-      awsEc2: z
-        .object({
-          instanceNamePattern: z.string().optional()
-        })
-        .optional(),
+      awsEc2: awsEc2ProviderConfigSchema.optional(),
       runpod: z
         .object({
           apiKey: z.string().optional(),
@@ -194,6 +251,10 @@ const providerSchema = z.object({
     .catchall(z.unknown())
     .optional(),
   credentialId: z.string().optional()
+}).superRefine((provider, context) => {
+  if (provider.type === "aws-ec2" && provider.provisioning?.enabled && !provider.config?.awsEc2?.launchTemplateId && !provider.config?.awsEc2?.launchTemplateName) {
+    context.addIssue({ code: z.ZodIssueCode.custom, path: ["config", "awsEc2"], message: "Provisioning-enabled AWS EC2 providers require a launch template ID or name" });
+  }
 });
 
 const runtimeProfileVariantSchema = z.object({
@@ -213,6 +274,7 @@ const runtimeProfileSchema = z
   .object({
     id: z.string().min(1),
     name: z.string().min(1),
+    description: z.string().optional(),
     type: z.string().min(1).default("docker"),
     image: z.string().optional(),
     port: z.number().int().positive().optional(),
@@ -221,11 +283,20 @@ const runtimeProfileSchema = z
     volumes: z.record(z.string()).optional(),
     env: z.record(z.string()).optional(),
     discovery: z.boolean().optional(),
-    variants: z.array(runtimeProfileVariantSchema).optional()
+    variants: z.array(runtimeProfileVariantSchema).optional(),
+    catalog: z.object({
+      pluginId: z.string().min(1),
+      engine: z.string().min(1),
+      schemaVersion: z.string().min(1),
+      repository: z.string().min(1),
+      inventoryPath: z.string().min(1),
+      imageRepository: z.string().min(1)
+    }).optional()
   })
   .transform((profile): RuntimeProfile => ({
     id: profile.id,
     name: profile.name,
+    description: profile.description,
     type: profile.type,
     image: profile.image,
     port: profile.port,
@@ -234,7 +305,8 @@ const runtimeProfileSchema = z
     volumes: profile.volumes,
     env: profile.env,
     discovery: profile.discovery,
-    variants: profile.variants
+    variants: profile.variants,
+    catalog: profile.catalog
   }));
 
 export async function loadConfig(): Promise<{ config: AppConfig; models: ModelDefinition[] }> {
@@ -397,10 +469,19 @@ function builtInRuntimeProfiles(): RuntimeProfile[] {
   return [
     {
       id: "prefer",
-      name: "PreFer",
+      name: "PreFer llama.cpp",
+      description: "OpenAI-compatible text and vision model hosting from a pinned PreFer release catalog.",
       type: "docker",
       image: "ghcr.io/cvalusek/prefer:latest",
       volumes: { "/models": "prefer-model-cache" },
+      catalog: {
+        pluginId: "prefer",
+        engine: "llama.cpp",
+        schemaVersion: "prefer.deployment-inventory.v1",
+        repository: "cvalusek/PreFer",
+        inventoryPath: "docker/llama-cpp/deployment-inventory.generated.json",
+        imageRepository: "ghcr.io/cvalusek/prefer"
+      },
       variants: [
         {
           id: "standard",
@@ -432,6 +513,26 @@ function builtInRuntimeProfiles(): RuntimeProfile[] {
           env: { LLAMA_ARG_MODELS_PRESET: "/presets/smol.ini" }
         }
       ]
+    },
+    {
+      id: "prefer-audio",
+      name: "PreFer audio.cpp",
+      description: "Speech recognition, speech generation, and real-time voice runtimes from a pinned PreFer release catalog.",
+      type: "docker",
+      image: "ghcr.io/cvalusek/prefer:audio-cuda12",
+      port: 8080,
+      health: "/health",
+      api: "/v1",
+      volumes: { "/models": "prefer-audio-model-cache", "/voices": "prefer-audio-voices" },
+      discovery: true,
+      catalog: {
+        pluginId: "prefer",
+        engine: "audio.cpp",
+        schemaVersion: "prefer.audio-deployment-inventory.v1",
+        repository: "cvalusek/PreFer",
+        inventoryPath: "docker/audio-cpp/deployment-inventory.generated.json",
+        imageRepository: "ghcr.io/cvalusek/prefer"
+      }
     }
   ];
 }
@@ -541,7 +642,13 @@ function loadProviderConfigFromEnv(prefix: string, type: string): Record<string,
   if (type === "aws-ec2") {
     return compactObject({
       awsEc2: compactObject({
-        instanceNamePattern: env(`${prefix}_AWS_EC2_INSTANCE_NAME_PATTERN`)
+        instanceNamePattern: env(`${prefix}_AWS_EC2_INSTANCE_NAME_PATTERN`),
+        launchTemplateId: env(`${prefix}_AWS_EC2_LAUNCH_TEMPLATE_ID`),
+        launchTemplateName: env(`${prefix}_AWS_EC2_LAUNCH_TEMPLATE_NAME`),
+        launchTemplateVersion: env(`${prefix}_AWS_EC2_LAUNCH_TEMPLATE_VERSION`),
+        userDataBeginMarker: env(`${prefix}_AWS_EC2_USER_DATA_BEGIN_MARKER`),
+        userDataEndMarker: env(`${prefix}_AWS_EC2_USER_DATA_END_MARKER`),
+        deploymentEnvironment: loadProviderDeploymentEnvironmentFromEnv(prefix)
       })
     });
   }
@@ -566,6 +673,16 @@ function loadProviderConfigFromEnv(prefix: string, type: string): Record<string,
     });
   }
   return undefined;
+}
+
+function loadProviderDeploymentEnvironmentFromEnv(prefix: string): Record<string, string> | undefined {
+  const keys = listEnv(`${prefix}_AWS_EC2_DEPLOYMENT_ENV_KEYS`);
+  if (keys.length === 0) return undefined;
+  return Object.fromEntries(keys.map((key) => [key, env(`${prefix}_AWS_EC2_DEPLOYMENT_ENV_${envKey(key)}`) ?? ""]));
+}
+
+function secretBearingEnvironmentKey(key: string): boolean {
+  return /TOKEN|SECRET|PASSWORD|PRIVATE|CREDENTIAL|(?:^|_)(?:API_|ACCESS_)?KEY(?:_|$)/u.test(key);
 }
 
 async function loadCapacityTargets(

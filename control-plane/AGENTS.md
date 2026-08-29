@@ -65,6 +65,10 @@ configuration or in the external runtime project.
   ASG name.
 - Model choices are owned by NeurOn target configuration. Do not infer the
   production catalog from external preset files.
+- Catalog-backed provisioning must use a full immutable source commit and store
+  the resolved plugin, catalog fingerprint, deployment, image, environment,
+  hardware, and model plan before creating capacity. Never provision from a
+  moving tag or silently re-resolve an existing target against a newer catalog.
 - Reservation profiles may contain multiple target/model selections. Preserve
   the per-target mapping when storing a reservation; aggregate target/model
   arrays remain a compatibility surface for legacy records and clients.
@@ -114,6 +118,11 @@ configuration or in the external runtime project.
   inside target or model data. Asking for guidance may create a visible
   synthetic system reservation through the normal reconciler; do not add a
   separate environment-configured advisor endpoint.
+- Dictation, spoken replies, and real-time voice use independently selected
+  target/model deployments in that same assistant configuration. Reference
+  WAV bytes are private durable data and must never be logged or returned by
+  admin read APIs. Real-time browser audio uses the bounded NeurOn WebSocket
+  relay and the ordinary synthetic-reservation/reconciler path.
 
 ## Reconciler Rules
 
