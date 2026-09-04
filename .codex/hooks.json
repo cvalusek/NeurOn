@@ -1,0 +1,38 @@
+{
+  "description": "NeurOn lifecycle-hook gate (plan 004 §4). Installed by sync.ps1/sync.sh, which substitutes the real install path into the command strings. Sync handlers ONLY (never async — async UserPromptSubmit cannot block). Timeouts: 300/10/60 s. The gate waits at most min(NEURON_WAIT_TIMEOUT_SECONDS, 290) s so it always emits an explicit decision before the 300 s hook timeout.",
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node <INSTALL>\\neuron-codex.js hook UserPromptSubmit",
+            "timeout": 300
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node <INSTALL>\\neuron-codex.js hook PostToolUse",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node <INSTALL>\\neuron-codex.js hook SessionStart",
+            "timeout": 60
+          }
+        ]
+      }
+    ]
+  }
+}

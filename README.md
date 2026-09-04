@@ -15,18 +15,34 @@ and exposes context, technical flags, measured speed, intelligence, scored
 strengths, quality retention, cost, popularity, favorites, and LiteLLM aliases
 behind each choice.
 
-![NeurOn model selection with requirements and Good/Fast/Cheap ranking](control-plane/docs/images/model-selection.png)
+```text
+control-plane/        Fastify/TypeScript app, examples, and product docs
+hassleoff/            Separately deployable dead-man watchdog
+.opencode/            OpenCode agent plugin (reservation gate) + harness docs
+.codex/               Codex CLI hook gate (0.151.0) + 0.93.0 wrapper fallback
+.pi/                  pi coding agent extension
+shared/neuron-core/   Shared reservation/keepalive core for the harnesses
+.github/workflows/    Control-plane build workflow
+```
 
 ## How it works
 
-1. An operator connects existing or explicitly provisionable runtime capacity
-   as a target.
-2. A user saves a profile containing one or more target-and-model selections.
-3. The user reserves that profile for a duration and chooses a traffic
-   keepalive window.
-4. The reconciler aggregates everybody's demand, starts each required target,
-   keeps it available while it is still needed, and stops it only after demand
-   is gone.
+## Developer harnesses
+
+Three coding-agent integrations live in this repo. Each reserves NeurOn
+capacity for the model its session runs and shares
+[shared/neuron-core](shared/neuron-core/) for reservation, keepalive, and
+extend logic:
+
+- [OpenCode plugin](.opencode/README.md) — reservation gate for the
+  OpenCode agent; plugin docs under `.opencode/docs/`.
+- [Codex CLI](.codex/README.md) — installed as Codex 0.151.0 lifecycle
+  hooks (first-prompt gate, keepalive, extend via MCP tool); the 0.93.0
+  launcher wrapper is retained as a documented fallback.
+- [pi extension](.pi/README.md) — the same reservation gate for the pi
+  coding agent.
+
+## Optional HassleOff
 
 Several users and reservations can safely overlap on the same target. A single
 profile can also reserve multiple target/model combinations for workflows that

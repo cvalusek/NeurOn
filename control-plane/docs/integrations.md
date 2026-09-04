@@ -82,6 +82,7 @@ chargeback metadata, not a provider invoice.
 Good read-only smoke tests:
 
 ```bash
+curl -H "Authorization: Bearer sk-neuron-..." http://localhost:8090/api/me
 curl -H "Authorization: Bearer sk-neuron-..." http://localhost:8090/api/models
 curl -H "Authorization: Bearer sk-neuron-..." http://localhost:8090/api/status
 ```
@@ -145,6 +146,14 @@ These assistant tools reuse NeurOn services and validation but are distinct
 from the external MCP transport. MCP remains appropriate for API-key clients;
 the browser assistant needs session identity, current-screen context, and
 explicit confirmation semantics.
+
+`GET /api/me` returns the authenticated user (`{username, isAdmin}`) for the
+presented credentials. The Codex/OpenCode/pi reservation adapters call it once
+per process (memoized; `NEURON_USERNAME` pins it without a network call) and
+use it to scope reservation adoption: the server-side reservation APIs
+(extend/done/status) are owner-scoped, so an adapter must only adopt
+reservations owned by its own user or every keepalive tick would fail with 404
+against a foreign lease.
 
 ## OpenCode Plugin
 

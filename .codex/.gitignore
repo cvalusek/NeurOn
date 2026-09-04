@@ -1,0 +1,2 @@
+# esbuild bundle of src/neuron-codex.js + shared/neuron-core (npm-style build)
+dist/

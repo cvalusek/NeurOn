@@ -1,0 +1,11 @@
+{
+  "name": "neuron-core",
+  "version": "0.1.0",
+  "description": "Shared NeurOn reservation client + policy (harness-agnostic).",
+  "type": "module",
+  "private": true,
+  "main": "./index.js",
+  "exports": {
+    ".": "./index.js"
+  }
+}

@@ -523,6 +523,32 @@ describe("API authentication context", () => {
     }
   });
 
+  it("reports the authenticated user from /api/me (plugin adoption scoping)", async () => {
+    process.env.USE_FAKE_PROVIDER = "true";
+    const { app } = await buildApp({ ...config, adminUsers: ["actual"] }, models);
+
+    const admin = await app.inject({
+      method: "GET",
+      url: "/api/me",
+      headers: { authorization: `Basic ${Buffer.from("actual:local-test-secret").toString("base64")}` }
+    });
+    expect(admin.statusCode).toBe(200);
+    expect(admin.json()).toEqual({ username: "actual", isAdmin: true });
+
+    const member = await app.inject({
+      method: "GET",
+      url: "/api/me",
+      headers: { authorization: `Basic ${Buffer.from("other:local-test-secret").toString("base64")}` }
+    });
+    expect(member.statusCode).toBe(200);
+    expect(member.json()).toEqual({ username: "other", isAdmin: false });
+
+    const unauthenticated = await app.inject({ method: "GET", url: "/api/me" });
+    expect(unauthenticated.statusCode).toBe(401);
+
+    await app.close();
+  });
+
   it("uses the authenticated username instead of POST body username", async () => {
     process.env.USE_FAKE_PROVIDER = "true";
     const { app } = await buildApp(config, models);

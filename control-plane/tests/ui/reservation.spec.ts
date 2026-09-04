@@ -504,7 +504,8 @@ test("creates, edits, and deletes providers from the admin UI", async ({ page })
   await provider.locator("summary").click();
 
   await provider.getByRole("button", { name: "Targets" }).click();
-  await expect(provider.locator('[data-tab-panel="targets"]')).toContainText("Create target");
+  await expect(provider.locator('[data-tab-panel="targets"]')).toContainText("Add target");
+  await expect(provider.locator('[data-tab-panel="targets"] a', { hasText: "Add target" })).toHaveAttribute("href", "/admin/targets");
 
   await provider.getByRole("button", { name: "Edit" }).click();
   const editPanel = provider.locator('[data-tab-panel="edit"]');
@@ -554,6 +555,7 @@ test("creates, edits, and deletes targets from the admin UI", async ({ page }) =
   const modal = page.locator("#target-modal");
   await expect(modal).toBeVisible();
   await modal.locator('select[name="providerId"]').selectOption("docker-local");
+  await modal.locator('select[name="runtimeProfileId"]').selectOption("prefer");
   await expect(modal.locator("#docker-target-fields")).toBeVisible();
   await expect(modal.locator("#target-runtime-profile-note")).toContainText("volume prefer-model-cache -> /models");
   await expect(modal.locator('input[name="dockerModelVolume"]')).toHaveValue("prefer-model-cache");
@@ -604,34 +606,39 @@ test("creates, edits, and deletes targets from the admin UI", async ({ page }) =
   await expect(page.locator("details.drilldown", { hasText: "Docker Qwen Updated" })).toHaveCount(0);
 });
 
-test("creates a target from a provider detail panel and provisions the created target", async ({ page }) => {
+test("creates a target from a provider detail panel using Docker connect-existing", async ({ page }) => {
   await signIn(page, "provider-target-admin");
-  await createDockerProvider(page, { allowProvisioning: true });
+  await createDockerProvider(page);
 
   const provider = page.locator("details.drilldown", { hasText: "Docker Local" });
   await provider.locator("summary").click();
   await provider.getByRole("button", { name: "Targets" }).click();
-  await provider.getByRole("button", { name: "Create target" }).click();
+  const addTarget = provider.getByRole("link", { name: "Add target" });
+  await expect(addTarget).toHaveAttribute("href", "/admin/targets");
+  await addTarget.click();
+  await expect(page).toHaveURL(`${baseUrl}/admin/targets`);
+  await page.getByRole("button", { name: "Add target" }).click();
 
-  const modal = page.locator("#provider-target-modal");
+  const modal = page.locator("#target-modal");
   await expect(modal).toBeVisible();
   await expect(modal.locator('select[name="providerId"]')).toHaveValue("docker-local");
-  await expect(modal.locator('[data-provider-fields="docker"]')).toBeVisible();
+  await modal.locator('select[name="runtimeProfileId"]').selectOption("prefer");
+  await expect(modal.locator('[data-connection-fields="existing"]#docker-target-fields')).toBeVisible();
+  await expect(modal.locator('input[name="dockerModelVolume"]')).toHaveValue("prefer-model-cache");
   await modal.locator('input[name="id"]').fill("provider-panel-target");
   await modal.locator('input[name="displayName"]').fill("Provider Panel Target");
   await modal.locator('input[name="dockerContainerName"]').fill("provider-panel-target");
-  await modal.locator('select[name="runtimeProfileVariantId"]').selectOption("smol");
-  await modal.getByRole("button", { name: "Create target" }).click();
+  await modal.getByRole("button", { name: "Add target" }).click();
 
   await expect(page).toHaveURL(/\/admin\/targets\?created=provider-panel-target$/);
   await expect(page.locator(".secret-box")).toContainText("provider-panel-target");
+  await expect(page.locator(".secret-box")).toContainText("NeurOn will use the capacity you connected");
+  await expect(page.locator(".secret-box").getByRole("button", { name: "Provision target" })).toHaveCount(0);
   const target = page.locator("details.drilldown", { hasText: "Provider Panel Target" });
   await target.locator(":scope > summary").click();
   await target.getByRole("button", { name: "JSON" }).click();
-  await expect(target.locator('[data-tab-panel="json"]')).toContainText("LLAMA_ARG_MODELS_PRESET");
-  await expect(target.locator('[data-tab-panel="json"]')).toContainText("/presets/smol.ini");
-  await page.locator(".secret-box").getByRole("button", { name: "Provision target" }).click();
-  await expect(page.locator(".secret-box").getByRole("button")).toContainText("Provisioned");
+  await expect(target.locator('[data-tab-panel="json"]')).toContainText("provider-panel-target");
+  await expect(target.locator('[data-tab-panel="json"]')).toContainText("prefer-model-cache");
 });
 
 async function signIn(page: Page, username: string) {
