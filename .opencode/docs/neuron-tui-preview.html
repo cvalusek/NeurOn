@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>NeurOn TUI panel — preview</title>
+<style>
+  :root {
+    --term-bg: #16181d;
+    --term-panel: #1c1f26;
+    --text: #d4d4d8;
+    --text-muted: #6e7681;
+    --border: #4a5364;
+    --ok: #3fb950;
+    --warn: #d29922;
+    --bad: #f85149;
+    --accent: #79c0ff;
+    --page-bg: #0d0f13;
+    --page-card: #14171d;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 32px;
+    background: var(--page-bg); color: var(--text);
+    font-family: "Segoe UI", system-ui, sans-serif;
+  }
+  h1 { font-size: 20px; font-weight: 600; margin: 0 0 4px; }
+  h2 { font-size: 15px; font-weight: 600; color: var(--text-muted); margin: 36px 0 12px; text-transform: uppercase; letter-spacing: .06em; }
+  .subtitle { color: var(--text-muted); font-size: 13px; margin: 0 0 8px; }
+  .mono { font-family: "Cascadia Mono", "JetBrains Mono", Consolas, "Courier New", monospace; }
+
+  /* Terminal window mock */
+  .terminal {
+    background: var(--term-bg);
+    border-radius: 10px;
+    overflow: hidden;
+    box-shadow: 0 12px 40px rgba(0,0,0,.5);
+    border: 1px solid #262b34;
+  }
+  .titlebar {
+    display: flex; align-items: center; gap: 8px;
+    padding: 10px 14px; background: #10131a; border-bottom: 1px solid #262b34;
+  }
+  .dot { width: 12px; height: 12px; border-radius: 50%; }
+  .dot.r { background: #f85149; } .dot.y { background: #d29922; } .dot.g { background: #3fb950; }
+  .titlebar .title { color: var(--text-muted); font-size: 12px; margin-left: 8px; font-family: Consolas, monospace; }
+
+  .screen { display: flex; min-height: 430px; }
+  .mainwin { flex: 1; padding: 18px 20px; font-size: 13px; line-height: 1.55; }
+  .msg .who { color: var(--accent); font-weight: 600; }
+  .msg .who.agent { color: var(--ok); }
+  .msg .body { color: #b6bcc8; white-space: pre-wrap; }
+  .tool { color: var(--text-muted); }
+  .prompt-row {
+    margin-top: 26px; border: 1px solid var(--border); border-radius: 6px;
+    padding: 9px 12px; color: var(--text-muted); font-size: 13px;
+    display: flex; justify-content: space-between;
+  }
+  .prompt-row .caret { color: var(--text); }
+
+  /* Right sidebar */
+  .sidebar {
+    width: 340px; flex-shrink: 0;
+    border-left: 1px solid #262b34;
+    background: #14171c;
+    padding: 12px 12px 16px;
+    display: flex; flex-direction: column; gap: 10px;
+  }
+  .panel {
+    border: 1px solid var(--border); border-radius: 2px;
+    padding: 7px 9px;
+    font-family: "Cascadia Mono", "JetBrains Mono", Consolas, monospace;
+    font-size: 12.5px; line-height: 1.5;
+  }
+  .panel-header { display: flex; justify-content: space-between; align-items: center; cursor: pointer; user-select: none; }
+  .panel-header .h-left { font-weight: 700; color: var(--text); }
+  .row { display: flex; justify-content: space-between; gap: 12px; }
+  .row .lbl { color: var(--text-muted); }
+  .row .val { color: var(--text); text-align: right; }
+  .ok { color: var(--ok); } .warn { color: var(--warn); } .bad { color: var(--bad); }
+  .accent { color: var(--accent); } .muted { color: var(--text-muted); }
+  .fill { color: #262b34; }
+  .note-inline { font-size: 11px; color: var(--text-muted); padding-left: 2px; }
+
+  /* Variant cards */
+  .variants { display: flex; flex-wrap: wrap; gap: 14px; }
+  .vcard { background: var(--page-card); border: 1px solid #262b34; border-radius: 8px; padding: 14px; width: 360px; }
+  .vcard .vlabel { font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: .05em; margin-bottom: 8px; }
+  .vcard .panel { width: 100%; }
+  .wide { width: 734px; max-width: 100%; }
+
+  .footer-note { margin-top: 28px; font-size: 12.5px; color: var(--text-muted); line-height: 1.6; }
+  .footer-note code { font-family: Consolas, monospace; background: #1d212a; padding: 1px 5px; border-radius: 4px; color: #b6bcc8; }
+</style>
+</head>
+<body>
+
+<h1>NeurOn TUI reservation panel — visual preview</h1>
+<p class="subtitle mono">neuron-tui · right sidebar of the main session window · below the Token Usage panel · click the header to collapse/expand</p>
+
+<h2>In the terminal (expanded)</h2>
+<div class="terminal">
+  <div class="titlebar">
+    <div class="dot r"></div><div class="dot y"></div><div class="dot g"></div>
+    <div class="title">opencode — D:\work\project</div>
+  </div>
+  <div class="screen">
+    <div class="mainwin mono">
+      <div class="msg"><span class="who">user</span><div class="body">investigate the nightly build failure</div></div>
+      <div class="msg" style="margin-top:14px"><span class="who agent">opencode</span><div class="body">I'll start by looking at the latest pipeline run and the
+build logs.
+
+<span class="tool">  ▸ bash  Get-ChildItem artifacts -Recurse | Select -First 20</span>
+Found 3 failed stages. The failing stage is <span class="accent">unit-tests</span>;
+pulling the log now…</div></div>
+      <div class="prompt-row"><span><span class="caret">▮</span>  ask opencode…</span><span class="muted">litellm/gemma-4</span></div>
+    </div>
+
+    <div class="sidebar">
+      <!-- Token Usage (token-meter, collapsed — as the user already sees) -->
+      <div class="panel">
+        <div class="panel-header">
+          <span class="h-left">▼ Token Usage</span>
+          <span class="muted">$0.42 · 63%</span>
+        </div>
+      </div>
+
+      <!-- NeurOn panel, EXPANDED -->
+      <div class="panel">
+        <div class="panel-header">
+          <span class="h-left">▼ NeurOn</span>
+          <span></span>
+        </div>
+        <div style="margin-top:2px">
+          <div class="row"><span class="lbl">model</span><span class="val">Small - Qwen 9B (litellm/g6.xlarge.qwen-9b/unsloth/Qwen3.5-9B-GGUF:Q4_K_XL)</span></div>
+          <div class="row"><span class="lbl">target state</span><span class="val ok">healthy</span></div>
+          <div class="row"><span class="lbl">reservation</span><span class="val">r_a1b2c3</span></div>
+          <div class="row"><span class="lbl">expires</span><span class="val accent">2:32:05 PM · 11:32 left</span></div>
+          <div class="row"><span class="lbl">keepalive</span><span class="val">2 min</span></div>
+          <div class="row"><span class="lbl">rate</span><span class="val">$0.80 /hr</span></div>
+          <div class="row"><span class="lbl">cost</span><span class="val">$0.46 left · $0.54 total</span></div>
+          <div class="row"><span class="lbl">target</span><span class="val">aws-ecs · users: 1</span></div>
+          <div class="row"><span class="lbl">session</span><span class="val">ses_abc123 busy</span></div>
+          <div class="row"><span class="lbl">api</span><span class="val ok">ok · refreshed 2s ago</span></div>
+        </div>
+      </div>
+
+      <div class="note-inline mono">sidebar continues below (context, todos, files…)</div>
+    </div>
+  </div>
+</div>
+
+<h2>Collapsed variants (default state — one line)</h2>
+<div class="variants">
+
+  <div class="vcard">
+    <div class="vlabel">healthy · reservation held</div>
+    <div class="panel"><div class="panel-header"><span class="h-left">▶ NeurOn</span><span class="ok">● healthy · 11:32 left</span></div></div>
+  </div>
+
+  <div class="vcard">
+    <div class="vlabel">healthy · no reservation (target on, nothing held)</div>
+    <div class="panel"><div class="panel-header"><span class="h-left">▶ NeurOn</span><span class="ok">● healthy · no reservation</span></div></div>
+  </div>
+
+  <div class="vcard">
+    <div class="vlabel">starting / stopping (target warming up)</div>
+    <div class="panel"><div class="panel-header"><span class="h-left">▶ NeurOn</span><span class="warn">● starting · no reservation</span></div></div>
+  </div>
+
+  <div class="vcard">
+    <div class="vlabel">stopped / cold (cold-start toast will appear)</div>
+    <div class="panel"><div class="panel-header"><span class="h-left">▶ NeurOn</span><span class="bad">● stopped · no reservation</span></div></div>
+  </div>
+
+  <div class="vcard">
+    <div class="vlabel">non-NeurOn session model</div>
+    <div class="panel"><div class="panel-header"><span class="h-left">▶ NeurOn</span><span class="muted">○ not managed</span></div></div>
+  </div>
+
+  <div class="vcard">
+    <div class="vlabel">control plane unreachable</div>
+    <div class="panel"><div class="panel-header"><span class="h-left">▶ NeurOn</span><span class="warn">! unreachable</span></div></div>
+  </div>
+
+  <div class="vcard">
+    <div class="vlabel">API back down after data was shown (stale marker)</div>
+    <div class="panel"><div class="panel-header"><span class="h-left">▶ NeurOn</span><span class="warn">! unreachable (stale)</span></div></div>
+  </div>
+
+  <div class="vcard">
+    <div class="vlabel">subagent session — panel hidden entirely</div>
+    <div class="panel"><div class="panel-header"><span class="h-left muted">—</span><span class="muted">not rendered (parentID gate)</span></div></div>
+  </div>
+
+</div>
+
+<h2>Expanded variants (detail rows)</h2>
+<div class="variants">
+
+  <div class="vcard">
+    <div class="vlabel">reservation expiring soon — &lt; 2 min left</div>
+    <div class="panel">
+      <div class="panel-header"><span class="h-left">▼ NeurOn</span><span></span></div>
+      <div style="margin-top:2px">
+        <div class="row"><span class="lbl">model</span><span class="val">Small - Qwen 9B (litellm/gemma-4)</span></div>
+        <div class="row"><span class="lbl">target state</span><span class="val ok">healthy</span></div>
+        <div class="row"><span class="lbl">reservation</span><span class="val">r_a1b2c3</span></div>
+        <div class="row"><span class="lbl">expires</span><span class="val warn">2:20:31 PM · 1:45 left</span></div>
+        <div class="row"><span class="lbl">keepalive</span><span class="val">2 min</span></div>
+        <div class="row"><span class="lbl">rate</span><span class="val">$0.80 /hr</span></div>
+        <div class="row"><span class="lbl">cost</span><span class="val">$0.46 left · $0.54 total</span></div>
+        <div class="row"><span class="lbl">api</span><span class="val ok">ok · refreshed 1s ago</span></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="vcard">
+    <div class="vlabel">reservation expiring — &lt; 30 s left</div>
+    <div class="panel">
+      <div class="panel-header"><span class="h-left">▼ NeurOn</span><span></span></div>
+      <div style="margin-top:2px">
+        <div class="row"><span class="lbl">model</span><span class="val">Small - Qwen 9B (litellm/gemma-4)</span></div>
+        <div class="row"><span class="lbl">target state</span><span class="val ok">healthy</span></div>
+        <div class="row"><span class="lbl">reservation</span><span class="val">r_a1b2c3</span></div>
+        <div class="row"><span class="lbl">expires</span><span class="val bad">2:19:58 PM · 0:22 left</span></div>
+        <div class="row"><span class="lbl">keepalive</span><span class="val">2 min</span></div>
+        <div class="row"><span class="lbl">rate</span><span class="val">$0.80 /hr</span></div>
+        <div class="row"><span class="lbl">cost</span><span class="val">$0.46 left · $0.54 total</span></div>
+        <div class="row"><span class="lbl">api</span><span class="val ok">ok · refreshed 0s ago</span></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="vcard">
+    <div class="vlabel">API down — last known data kept, flagged stale</div>
+    <div class="panel">
+      <div class="panel-header"><span class="h-left">▼ NeurOn</span><span></span></div>
+      <div style="margin-top:2px">
+        <div class="row"><span class="lbl">model</span><span class="val">Small - Qwen 9B (litellm/gemma-4)</span></div>
+        <div class="row"><span class="lbl">target state</span><span class="val ok">healthy</span></div>
+        <div class="row"><span class="lbl">reservation</span><span class="val">r_a1b2c3</span></div>
+        <div class="row"><span class="lbl">expires</span><span class="val accent">2:25:12 PM · 5:01 left</span></div>
+        <div class="row"><span class="lbl">rate</span><span class="val">$0.80 /hr</span></div>
+        <div class="row"><span class="lbl">cost</span><span class="val">$0.46 left · $0.54 total</span></div>
+        <div class="row"><span class="lbl">target</span><span class="val">aws-ecs · users: 1</span></div>
+        <div class="row"><span class="lbl">session</span><span class="val">ses_abc123 idle</span></div>
+        <div class="row"><span class="lbl">api</span><span class="val bad">unreachable · stale</span></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="vcard">
+    <div class="vlabel">neuron model, target info not yet fetched</div>
+    <div class="panel">
+      <div class="panel-header"><span class="h-left">▼ NeurOn</span><span></span></div>
+      <div style="margin-top:2px">
+        <div class="row"><span class="lbl">model</span><span class="val">litellm/gemma-4</span></div>
+        <div class="row"><span class="lbl">target state</span><span class="val">unknown</span></div>
+        <div class="row"><span class="lbl">reservation</span><span class="val">none</span></div>
+        <div class="row"><span class="lbl">session</span><span class="val">ses_abc123 idle</span></div>
+        <div class="row"><span class="lbl">api</span><span class="val ok">ok</span></div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<div class="footer-note">
+  Colors follow the active TUI theme (success / warning / error / accent tokens) — the values above are the default dark palette.<br>
+  Refresh: <code>GET /api/status</code> every 2.5 s + on <code>session.status</code> / <code>session.idle</code> / <code>message.updated</code> / <code>session.created</code> / <code>tui.session.select</code> · countdown recomputed each render from <code>expiresAt</code>.<br>
+  Interaction: click the <b>▶ / ▼ NeurOn</b> header row to toggle. One panel per session — each session shows its own model, target and reservation.<br>
+  Filter: only session models whose provider passes <code>NEURON_ALLOWED_PROVIDERS</code> (same env var as the server plugin) are shown as NeurOn-managed; all others render the muted <code>○ not managed</code> line.
+</div>
+
+</body>
+</html>

@@ -1,2 +1,5 @@
 node_modules
 bun.lock
+
+# esbuild bundle of src/opencode-adapter.js + shared/neuron-core (npm run build)
+plugins/neuron.js

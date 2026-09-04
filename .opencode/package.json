@@ -11,11 +11,18 @@
   "files": [
     "LICENSE",
     "README.md",
-    "plugins/neuron.js"
+    "plugins/neuron.js",
+    "plugins/neuron-tui.tsx",
+    "plugins/neuron-tui/logic.js",
+    "commands"
   ],
   "scripts": {
-    "build": "node --check plugins/neuron.js",
+    "build": "npx --yes esbuild src/opencode-adapter.js --bundle --format=esm --platform=node --outfile=plugins/neuron.js && node --check plugins/neuron.js && node --check plugins/neuron-tui/logic.js",
     "pack:check": "npm pack --dry-run",
-    "test": "node --test test/*.test.js"
+    "test": "node --test test/*.test.js",
+    "check:tui": "npx --yes esbuild plugins/neuron-tui.tsx --loader:.tsx=tsx --format=esm --outfile=node_modules/.cache/neuron-tui-check.js"
+  },
+  "dependencies": {
+    "@opencode-ai/plugin": "1.18.25"
   }
 }

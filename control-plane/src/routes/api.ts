@@ -198,6 +198,22 @@ export function registerApiRoutes(
     catch(error){return sendError(reply,error);}
   });
   app.get(
+    "/api/me",
+    {
+      schema: {
+        tags: ["auth"],
+        summary: "Get the authenticated user",
+        security: authSecurity(),
+        response: { 200: { type: "object", properties: { username: { type: "string" }, isAdmin: { type: "boolean" } }, required: ["username", "isAdmin"] } }
+      }
+    },
+    async (request) => {
+      const user = requireUser(request);
+      return { username: user.username, isAdmin: user.isAdmin };
+    }
+  );
+
+  app.get(
     "/api/models",
     {
       schema: {
